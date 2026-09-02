@@ -111,6 +111,25 @@ func TestRetryableCarriesRetryAfter(t *testing.T) {
 	}
 }
 
+func TestResponseTooLargeRecoveryDependsOnPagination(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		pageReducible bool
+		wantCode      Code
+		wantHint      string
+	}{
+		{name: "exact read", wantCode: CodeInternal, wantHint: "do not retry unchanged"},
+		{name: "paged read", pageReducible: true, wantCode: CodeUsage, wantHint: "--limit"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := ResponseTooLarge("issues.search", test.pageReducible, 1024)
+			if err.Code != test.wantCode || err.Reason != "RESPONSE_TOO_LARGE" || !contains(err.Message, "1024-byte") || !contains(err.Hint, test.wantHint) {
+				t.Fatalf("error = %+v", err)
+			}
+		})
+	}
+}
+
 func TestTranslateContextErrors(t *testing.T) {
 	tests := []struct {
 		name       string

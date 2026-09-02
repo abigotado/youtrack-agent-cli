@@ -328,7 +328,7 @@ func (s *Service) InspectSchema(ctx context.Context, name, projectID string, top
 	if err := verifyClientAccount(ctx, client, selected); err != nil {
 		return nil, false, selected, err
 	}
-	value, err := client.ListProjectFields(ctx, projectID, youtrack.PageOptions{Top: top + 1, Skip: skip})
+	value, err := client.ListProjectFields(ctx, projectID, youtrack.PageOptions{Top: top + 1, Skip: skip, CanReduce: top > 1})
 	if err != nil {
 		return nil, false, selected, err
 	}
@@ -542,7 +542,18 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 	if err != nil {
 		return auth.Credential{}, err
 	}
-	refreshed, err := client.Refresh(ctx, oauth.TokenSet{AccessToken: credential.AccessToken, RefreshToken: credential.RefreshToken, TokenType: credential.TokenType, ExpiresAt: credential.AccessTokenExpiresAt})
+	currentScopes := credential.OAuthScopes
+	if len(currentScopes) == 0 {
+		// v1 credentials predate persisted grants. The old exchange path only
+		// accepted the complete configured scope set, so this is a strict and
+		// deterministic migration default.
+		currentScopes = selected.OAuth.Scopes
+	}
+	refreshed, err := client.Refresh(ctx, oauth.TokenSet{
+		AccessToken: credential.AccessToken, RefreshToken: credential.RefreshToken,
+		TokenType: credential.TokenType, ExpiresAt: credential.AccessTokenExpiresAt,
+		Scopes: append([]string(nil), currentScopes...),
+	})
 	if err != nil {
 		return auth.Credential{}, err
 	}
@@ -550,6 +561,7 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 	credential.RefreshToken = refreshed.RefreshToken
 	credential.TokenType = refreshed.TokenType
 	credential.AccessTokenExpiresAt = refreshed.ExpiresAt
+	credential.OAuthScopes = append([]string(nil), refreshed.Scopes...)
 	if err := auth.ValidateCredentialBinding(credential, selected); err != nil {
 		return auth.Credential{}, err
 	}

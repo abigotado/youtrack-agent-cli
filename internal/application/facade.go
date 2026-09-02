@@ -341,6 +341,9 @@ func TranslateError(err error, name string) error {
 		return err
 	}
 	switch {
+	case errors.Is(err, auth.ErrLogoutIncomplete):
+		return errx.Conflict("LOGOUT_INCOMPLETE", "credential removal succeeded but profile %q metadata could not be removed", name).
+			WithHint("inspect the profile and credential state before retrying logout")
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return errx.Translate(err)
 	case errors.Is(err, profile.ErrProfileRequired):

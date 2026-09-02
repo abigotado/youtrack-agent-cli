@@ -223,8 +223,21 @@ func validateOperation(kind Kind, operation Operation, planID string) error {
 	}
 }
 
+func validateRequiredOperationText(operation Operation) error {
+	switch {
+	case operation.IssueCreate != nil:
+		return validateRequiredText("summary", operation.IssueCreate.Request.Summary, maxSummaryLength)
+	case operation.IssueUpdate != nil && operation.IssueUpdate.Request.Set.Summary != nil:
+		return validateRequiredText("summary", *operation.IssueUpdate.Request.Set.Summary, maxSummaryLength)
+	case operation.CommentAdd != nil:
+		return validateRequiredText("comment text", operation.CommentAdd.Request.Text, maxBodyLength)
+	default:
+		return nil
+	}
+}
+
 func validateIssueCreate(operation IssueCreateOperation, planID string) error {
-	if err := validateText("summary", operation.Request.Summary, 1, maxSummaryLength); err != nil {
+	if err := validateRequiredText("summary", operation.Request.Summary, maxSummaryLength); err != nil {
 		return err
 	}
 	if err := validateText("description", operation.Request.Description, 0, maxBodyLength); err != nil {
@@ -254,7 +267,7 @@ func validateIssueUpdate(operation IssueUpdateOperation) error {
 		return fmt.Errorf("%w: update patch is empty", ErrInvalidPlan)
 	}
 	if patch.Summary != nil {
-		if err := validateText("summary", *patch.Summary, 0, maxSummaryLength); err != nil {
+		if err := validateRequiredText("summary", *patch.Summary, maxSummaryLength); err != nil {
 			return err
 		}
 	}
@@ -276,13 +289,20 @@ func validateCommentAdd(operation CommentAddOperation, planID string) error {
 	if !issueIDPattern.MatchString(operation.Request.IssueID) || operation.Expected.IssueID != operation.Request.IssueID {
 		return fmt.Errorf("%w: comment target is absent, non-canonical, or inconsistent", ErrInvalidPlan)
 	}
-	if err := validateText("comment text", operation.Request.Text, 1, maxBodyLength); err != nil {
-		return err
-	}
 	if err := validateVisibility(operation.Request.Visibility); err != nil {
 		return err
 	}
+	if err := validateText("comment text", operation.Request.Text, 1, maxBodyLength); err != nil {
+		return err
+	}
 	if err := validateMarker(operation.Request.Marker, operation.Request.Text, planID); err != nil {
+		return err
+	}
+	text := operation.Request.Text
+	if operation.Request.Marker == MarkerVisibleFooter {
+		text = stripVisibleFooter(text, planID)
+	}
+	if err := validateRequiredText("comment text", text, maxBodyLength); err != nil {
 		return err
 	}
 	if !isDigest(operation.Expected.IssueStateSHA256) {
@@ -296,15 +316,25 @@ func validateMarker(marker MarkerPolicy, body, planID string) error {
 		return fmt.Errorf("%w: marker policy must be explicit", ErrInvalidPlan)
 	}
 	if marker == MarkerVisibleFooter {
-		index := strings.LastIndex(body, visibleMarkerPrefix)
-		if index < 0 || body[index+len(visibleMarkerPrefix):] != planID {
+		visibleMarker := visibleMarkerPrefix + planID
+		if body != visibleMarker && !strings.HasSuffix(body, "\n\n"+visibleMarker) {
 			return fmt.Errorf("%w: visible marker was not inserted before hashing", ErrInvalidPlan)
 		}
 		if strings.Count(body, visibleMarkerPrefix) != 1 {
 			return fmt.Errorf("%w: visible marker is ambiguous", ErrInvalidPlan)
 		}
+	} else if strings.Contains(body, visibleMarkerPrefix) {
+		return fmt.Errorf("%w: marker-none body contains the reserved visible marker prefix", ErrInvalidPlan)
 	}
 	return nil
+}
+
+func stripVisibleFooter(body, planID string) string {
+	marker := visibleMarkerPrefix + planID
+	if body == marker {
+		return ""
+	}
+	return strings.TrimSuffix(body, "\n\n"+marker)
 }
 
 func authorizedCapability(kind Kind) string {
@@ -384,6 +414,13 @@ func validateText(label, value string, minimum, maximum int) error {
 		return fmt.Errorf("%w: %s is empty, oversized, invalid UTF-8, or contains NUL", ErrInvalidPlan, label)
 	}
 	return nil
+}
+
+func validateRequiredText(label, value string, maximum int) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%w: %s is empty or whitespace-only", ErrInvalidPlan, label)
+	}
+	return validateText(label, value, 1, maximum)
 }
 
 func validateBoundString(label, value string, maximum int) error {

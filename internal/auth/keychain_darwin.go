@@ -419,10 +419,7 @@ func (KeychainStore) Delete(ctx context.Context, profileName string) error {
 		return translateStatus("resolve", status)
 	}
 	defer releaseItem()
-	return runCompatibleKeychainOperation(
-		func() (bool, error) { return itemAccessIsCompatible(item) },
-		func() error { return translateStatus("delete", C.youtrack_delete_item(item)) },
-	)
+	return translateStatus("delete", C.youtrack_delete_item(item))
 }
 
 func saveExactKeychainItem(service, account C.CFStringRef, value C.CFDataRef) error {

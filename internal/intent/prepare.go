@@ -65,6 +65,9 @@ func PrepareWithSource(profile ProfileSnapshot, policy ProjectPolicy, kind Kind,
 	if err != nil {
 		return Plan{}, err
 	}
+	if err := validateRequiredOperationText(operation); err != nil {
+		return Plan{}, err
+	}
 	planID, err := source.NewPlanID()
 	if err != nil {
 		return Plan{}, err

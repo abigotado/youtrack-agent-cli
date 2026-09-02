@@ -83,7 +83,11 @@ func (s *Service) LoginOAuth(ctx context.Context, name string, replace bool, bro
 	if err != nil {
 		return profile.Profile{}, err
 	}
-	credential := auth.Credential{Kind: auth.CredentialOAuth, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, TokenType: tokens.TokenType, AccessTokenExpiresAt: tokens.ExpiresAt}
+	credential := auth.Credential{
+		Kind: auth.CredentialOAuth, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken,
+		TokenType: tokens.TokenType, AccessTokenExpiresAt: tokens.ExpiresAt,
+		OAuthScopes: append([]string(nil), tokens.Scopes...),
+	}
 	client, err := youtrack.New(youtrack.Config{RESTBaseURL: value.RESTBaseURL}, youtrack.Credential{Token: tokens.AccessToken}, youtrack.WithHTTPClient(&http.Client{Transport: s.HTTP}), youtrack.WithLogger(s.Logger))
 	if err != nil {
 		return profile.Profile{}, err

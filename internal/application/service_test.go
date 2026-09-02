@@ -305,6 +305,21 @@ func TestCredentialReplacementConfirmationPrecedesTokenRead(t *testing.T) {
 	}
 }
 
+func TestTranslateErrorClassifiesIncompleteLogout(t *testing.T) {
+	for _, cause := range []error{errors.New("registry unavailable"), context.Canceled, profile.ErrNotFound, profile.ErrCorruptRegistry, auth.ErrInteractionNotAllowed} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			translated := TranslateError(errors.Join(auth.ErrLogoutIncomplete, cause), "work")
+			var typed *errx.Error
+			if !errors.As(translated, &typed) || typed.Code != errx.CodeConflict || typed.Reason != "LOGOUT_INCOMPLETE" {
+				t.Fatalf("translated error = %#v", translated)
+			}
+			if !strings.Contains(typed.Hint, "inspect") {
+				t.Fatalf("hint = %q", typed.Hint)
+			}
+		})
+	}
+}
+
 type emptyCredentials struct{}
 
 func (*emptyCredentials) Exists(context.Context, string) (bool, error) { return false, nil }

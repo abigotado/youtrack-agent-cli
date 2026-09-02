@@ -115,6 +115,7 @@ type Comment struct {
 // PageOptions bounds one collection request. The client never follows or
 // automatically requests another page.
 type PageOptions struct {
-	Top  int
-	Skip int
+	Top       int
+	Skip      int
+	CanReduce bool
 }

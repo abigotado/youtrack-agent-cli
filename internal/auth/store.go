@@ -20,10 +20,14 @@ import (
 )
 
 const (
-	KeychainService          = "youtrack-agent-cli"
-	MaxTokenBytes            = 8192
-	maxStoredCredentialBytes = (MaxTokenBytes * 2) + 4096
-	credentialPayloadPrefix  = "youtrack-agent-cli:credential:v1\x00"
+	KeychainService = "youtrack-agent-cli"
+	MaxTokenBytes   = 8192
+	// encoding/json can expand one permitted token byte to a six-byte \u00XX
+	// escape. Bound the durable payload by the worst case, not raw token size.
+	maxStoredCredentialBytes  = (MaxTokenBytes * 2 * 6) + (32 * 128) + 8192
+	credentialPayloadPrefixV1 = "youtrack-agent-cli:credential:v1\x00"
+	credentialPayloadPrefixV2 = "youtrack-agent-cli:credential:v2\x00"
+	credentialPayloadPrefix   = credentialPayloadPrefixV2
 )
 
 var (
@@ -39,6 +43,7 @@ var (
 	ErrKeychainMigrationUnavailable  = errors.New("keychain migration is unavailable")
 	ErrCredentialBindingMismatch     = errors.New("credential binding does not match profile")
 	ErrProfileChangedDuringLogin     = errors.New("profile changed during login")
+	ErrLogoutIncomplete              = errors.New("logout removed the credential but could not remove profile metadata")
 )
 
 type CredentialKind string
@@ -55,9 +60,11 @@ type Credential struct {
 	RefreshToken         string               `json:"-"`
 	TokenType            string               `json:"-"`
 	AccessTokenExpiresAt time.Time            `json:"-"`
+	OAuthScopes          []string             `json:"-"`
 	ProfileIdentity      string               `json:"-"`
 	Generation           string               `json:"-"`
 	Capabilities         []profile.Capability `json:"-"`
+	legacyOAuthScopes    bool
 }
 
 func (Credential) Format(state fmt.State, _ rune) { _, _ = io.WriteString(state, "<redacted>") }
@@ -69,7 +76,7 @@ func (c Credential) Validate() error {
 		if err := ValidateToken(c.PermanentToken); err != nil {
 			return err
 		}
-		if c.AccessToken != "" || c.RefreshToken != "" || c.TokenType != "" || !c.AccessTokenExpiresAt.IsZero() {
+		if c.AccessToken != "" || c.RefreshToken != "" || c.TokenType != "" || !c.AccessTokenExpiresAt.IsZero() || len(c.OAuthScopes) != 0 {
 			return fmt.Errorf("%w: permanent-token credential contains OAuth fields", ErrInvalidToken)
 		}
 	case CredentialOAuth:
@@ -85,10 +92,18 @@ func (c Credential) Validate() error {
 		if c.PermanentToken != "" {
 			return fmt.Errorf("%w: OAuth credential contains a permanent token", ErrInvalidToken)
 		}
+		if len(c.OAuthScopes) != 0 {
+			if err := profile.ValidateScopes(c.OAuthScopes); err != nil {
+				return fmt.Errorf("%w: OAuth credential scopes are invalid", ErrInvalidToken)
+			}
+		}
 	default:
 		return fmt.Errorf("%w: credential kind is invalid", ErrInvalidToken)
 	}
 	if c.ProfileIdentity == "" && c.Generation == "" && len(c.Capabilities) == 0 {
+		if c.legacyOAuthScopes {
+			return fmt.Errorf("%w: legacy OAuth scope state is not bound", ErrInvalidToken)
+		}
 		return nil
 	}
 	if !validProfileIdentity(c.ProfileIdentity) {
@@ -129,6 +144,14 @@ func BindCredential(c Credential, p profile.Profile) (Credential, error) {
 	if err := c.Validate(); err != nil {
 		return Credential{}, err
 	}
+	if c.Kind == CredentialOAuth {
+		if len(c.OAuthScopes) == 0 {
+			c.OAuthScopes = append([]string(nil), p.OAuth.Scopes...)
+		}
+		if !scopeSubset(c.OAuthScopes, p.OAuth.Scopes) {
+			return Credential{}, ErrCredentialBindingMismatch
+		}
+	}
 	c.ProfileIdentity = profile.CredentialIdentity(p)
 	c.Generation = p.CredentialGeneration
 	c.Capabilities = append([]profile.Capability(nil), p.Capabilities...)
@@ -145,6 +168,14 @@ func ValidateCredentialBinding(c Credential, p profile.Profile) error {
 	if p.CredentialGeneration == "" || c.ProfileIdentity != profile.CredentialIdentity(p) || c.Generation != p.CredentialGeneration || !slices.Equal(c.Capabilities, p.Capabilities) {
 		return ErrCredentialBindingMismatch
 	}
+	if c.Kind == CredentialOAuth {
+		if len(c.OAuthScopes) == 0 && !c.legacyOAuthScopes {
+			return ErrCredentialBindingMismatch
+		}
+		if len(c.OAuthScopes) != 0 && !scopeSubset(c.OAuthScopes, p.OAuth.Scopes) {
+			return ErrCredentialBindingMismatch
+		}
+	}
 	return nil
 }
 
@@ -159,6 +190,7 @@ type credentialPayload struct {
 	RefreshToken         string               `json:"refresh_token,omitempty"`
 	TokenType            string               `json:"token_type,omitempty"`
 	AccessTokenExpiresAt *time.Time           `json:"access_token_expires_at,omitempty"`
+	OAuthScopes          []string             `json:"oauth_scopes,omitempty"`
 }
 
 func encodeCredentialValue(c Credential) ([]byte, error) {
@@ -168,9 +200,22 @@ func encodeCredentialValue(c Credential) ([]byte, error) {
 	if c.ProfileIdentity == "" {
 		return nil, ErrCredentialBindingMismatch
 	}
-	payload := credentialPayload{Version: 1, Kind: c.Kind, ProfileIdentity: c.ProfileIdentity, Generation: c.Generation,
+	if c.Kind == CredentialOAuth && len(c.OAuthScopes) == 0 && !c.legacyOAuthScopes {
+		return nil, ErrCredentialBindingMismatch
+	}
+	payloadVersion := 2
+	payloadPrefix := credentialPayloadPrefixV2
+	if c.Kind == CredentialOAuth && c.legacyOAuthScopes && len(c.OAuthScopes) == 0 {
+		// Preserve a decoded v1 credential byte contract when transaction
+		// compensation must restore it before the service can infer the legacy
+		// grant from its bound profile during an ordinary refresh.
+		payloadVersion = 1
+		payloadPrefix = credentialPayloadPrefixV1
+	}
+	payload := credentialPayload{Version: payloadVersion, Kind: c.Kind, ProfileIdentity: c.ProfileIdentity, Generation: c.Generation,
 		Capabilities: append([]profile.Capability(nil), c.Capabilities...), PermanentToken: c.PermanentToken,
-		AccessToken: c.AccessToken, RefreshToken: c.RefreshToken, TokenType: c.TokenType}
+		AccessToken: c.AccessToken, RefreshToken: c.RefreshToken, TokenType: c.TokenType,
+		OAuthScopes: append([]string(nil), c.OAuthScopes...)}
 	if !c.AccessTokenExpiresAt.IsZero() {
 		expires := c.AccessTokenExpiresAt.UTC()
 		payload.AccessTokenExpiresAt = &expires
@@ -179,7 +224,7 @@ func encodeCredentialValue(c Credential) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode credential payload: %w", err)
 	}
-	value := append([]byte(credentialPayloadPrefix), raw...)
+	value := append([]byte(payloadPrefix), raw...)
 	if len(value) > maxStoredCredentialBytes {
 		return nil, errors.New("stored credential payload exceeds its bound")
 	}
@@ -187,10 +232,23 @@ func encodeCredentialValue(c Credential) ([]byte, error) {
 }
 
 func decodeCredentialValue(value []byte) (Credential, error) {
-	if len(value) == 0 || len(value) > maxStoredCredentialBytes || !bytes.HasPrefix(value, []byte(credentialPayloadPrefix)) {
+	if len(value) == 0 || len(value) > maxStoredCredentialBytes {
 		return Credential{}, errors.New("stored credential payload is invalid")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(value[len(credentialPayloadPrefix):]))
+	prefixVersion := 0
+	payloadOffset := 0
+	switch {
+	case bytes.HasPrefix(value, []byte(credentialPayloadPrefixV1)):
+		prefixVersion = 1
+		payloadOffset = len(credentialPayloadPrefixV1)
+	case bytes.HasPrefix(value, []byte(credentialPayloadPrefixV2)):
+		prefixVersion = 2
+		payloadOffset = len(credentialPayloadPrefixV2)
+	default:
+		return Credential{}, errors.New("stored credential payload is invalid")
+	}
+	payloadBytes := value[payloadOffset:]
+	decoder := json.NewDecoder(bytes.NewReader(payloadBytes))
 	decoder.DisallowUnknownFields()
 	var payload credentialPayload
 	if err := decoder.Decode(&payload); err != nil {
@@ -200,19 +258,49 @@ func decodeCredentialValue(value []byte) (Credential, error) {
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return Credential{}, errors.New("stored credential payload has trailing data")
 	}
-	if payload.Version != 1 {
+	if payload.Version != prefixVersion || (payload.Version != 1 && payload.Version != 2) {
 		return Credential{}, errors.New("stored credential payload version is unsupported")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payloadBytes, &fields); err != nil {
+		return Credential{}, errors.New("stored credential payload is invalid")
+	}
+	_, oauthScopesPresent := fields["oauth_scopes"]
+	if payload.Version == 1 && oauthScopesPresent {
+		return Credential{}, errors.New("stored credential payload is invalid")
 	}
 	credential := Credential{Kind: payload.Kind, ProfileIdentity: payload.ProfileIdentity, Generation: payload.Generation,
 		Capabilities: append([]profile.Capability(nil), payload.Capabilities...), PermanentToken: payload.PermanentToken,
-		AccessToken: payload.AccessToken, RefreshToken: payload.RefreshToken, TokenType: payload.TokenType}
+		AccessToken: payload.AccessToken, RefreshToken: payload.RefreshToken, TokenType: payload.TokenType,
+		OAuthScopes: append([]string(nil), payload.OAuthScopes...)}
+	credential.legacyOAuthScopes = payload.Version == 1 && credential.Kind == CredentialOAuth
 	if payload.AccessTokenExpiresAt != nil {
 		credential.AccessTokenExpiresAt = payload.AccessTokenExpiresAt.UTC()
 	}
 	if err := credential.Validate(); err != nil {
 		return Credential{}, errors.New("stored credential payload is invalid")
 	}
+	if payload.Version == 2 && credential.Kind == CredentialOAuth && (!oauthScopesPresent || len(credential.OAuthScopes) == 0) {
+		return Credential{}, errors.New("stored credential payload is invalid")
+	}
+	if payload.Version == 2 && credential.Kind != CredentialOAuth && oauthScopesPresent {
+		return Credential{}, errors.New("stored credential payload is invalid")
+	}
 	return credential, nil
+}
+
+func scopeSubset(granted, allowed []string) bool {
+	allowedIndex := 0
+	for _, scope := range granted {
+		for allowedIndex < len(allowed) && allowed[allowedIndex] < scope {
+			allowedIndex++
+		}
+		if allowedIndex == len(allowed) || allowed[allowedIndex] != scope {
+			return false
+		}
+		allowedIndex++
+	}
+	return true
 }
 
 func validProfileIdentity(identity string) bool {

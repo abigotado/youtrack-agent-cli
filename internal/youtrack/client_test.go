@@ -265,6 +265,175 @@ func TestCompressedAndDecompressedBodiesAreIndependentlyBounded(t *testing.T) {
 	}
 }
 
+func TestOversizedReadResponseHasRecoverableOperationSpecificContract(t *testing.T) {
+	tests := []struct {
+		name     string
+		gzip     bool
+		paged    bool
+		wantCode errx.Code
+		wantHint string
+	}{
+		{name: "identity exact", wantCode: errx.CodeInternal, wantHint: "do not retry unchanged"},
+		{name: "gzip exact", gzip: true, wantCode: errx.CodeInternal, wantHint: "do not retry unchanged"},
+		{name: "identity paged", paged: true, wantCode: errx.CodeUsage, wantHint: "--limit"},
+		{name: "gzip paged", gzip: true, paged: true, wantCode: errx.CodeUsage, wantHint: "--limit"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				body := bytes.Repeat([]byte("x"), maxResponseBodyBytes+1)
+				if !test.gzip {
+					_, _ = writer.Write(body)
+					return
+				}
+				writer.Header().Set("Content-Encoding", "gzip")
+				zipper := gzip.NewWriter(writer)
+				_, _ = zipper.Write(body)
+				_ = zipper.Close()
+			}))
+			defer server.Close()
+			client := newTestClient(t, server)
+			var err error
+			if test.paged {
+				_, err = client.SearchIssues(t.Context(), "project: APP", PageOptions{Top: 100, CanReduce: true})
+			} else {
+				_, err = client.CurrentUser(t.Context())
+			}
+			var typed *errx.Error
+			if !errors.As(err, &typed) || typed.Code != test.wantCode || typed.Reason != "RESPONSE_TOO_LARGE" {
+				t.Fatalf("error = %#v", err)
+			}
+			if !strings.Contains(typed.Hint, test.wantHint) || typed.RetryAfter != 0 {
+				t.Fatalf("hint=%q retry_after=%s", typed.Hint, typed.RetryAfter)
+			}
+		})
+	}
+}
+
+func TestOversizedMinimumPageIsNotReportedAsReducible(t *testing.T) {
+	tests := []struct {
+		name   string
+		invoke func(context.Context, *Client) error
+	}{
+		{
+			name: "project fields",
+			invoke: func(ctx context.Context, client *Client) error {
+				_, err := client.ListProjectFields(ctx, "APP", PageOptions{Top: 1})
+				return err
+			},
+		},
+		{
+			name: "comments",
+			invoke: func(ctx context.Context, client *Client) error {
+				_, err := client.ListComments(ctx, "APP-1", PageOptions{Top: 1})
+				return err
+			},
+		},
+		{
+			name: "issue search",
+			invoke: func(ctx context.Context, client *Client) error {
+				_, err := client.SearchIssues(ctx, "project: APP", PageOptions{Top: 1})
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				_, _ = writer.Write(bytes.Repeat([]byte("x"), maxResponseBodyBytes+1))
+			}))
+			defer server.Close()
+			err := test.invoke(t.Context(), newTestClient(t, server))
+			var typed *errx.Error
+			if !errors.As(err, &typed) || typed.Code != errx.CodeInternal || typed.Reason != "RESPONSE_TOO_LARGE" {
+				t.Fatalf("error = %#v", err)
+			}
+			if !strings.Contains(typed.Hint, "do not retry unchanged") || strings.Contains(typed.Hint, "--limit") {
+				t.Fatalf("hint = %q", typed.Hint)
+			}
+		})
+	}
+}
+
+func TestRetryAfterIsBoundedBeforeAutomaticRetry(t *testing.T) {
+	now := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	tests := []struct {
+		name         string
+		retryAfter   string
+		deadline     time.Duration
+		wantCalls    int32
+		wantSleeps   []time.Duration
+		wantRetryFor time.Duration
+		wantStop     bool
+	}{
+		{name: "numeric", retryAfter: "2", wantCalls: 2, wantSleeps: []time.Duration{2 * time.Second}},
+		{name: "HTTP date", retryAfter: now.Add(3 * time.Second).Format(http.TimeFormat), wantCalls: 2, wantSleeps: []time.Duration{3 * time.Second}},
+		{name: "numeric cap", retryAfter: "31", wantCalls: 1, wantStop: true},
+		{name: "date cap", retryAfter: now.Add(maxRetryAfterDelay + time.Second).Format(http.TimeFormat), wantCalls: 1, wantStop: true},
+		{name: "numeric overflow", retryAfter: strings.Repeat("9", 100), wantCalls: 1, wantStop: true},
+		{name: "deadline budget", retryAfter: "10", deadline: time.Second, wantCalls: 1, wantRetryFor: 10 * time.Second},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				if calls.Add(1) == 1 || test.wantCalls == 1 {
+					writer.Header().Set("Retry-After", test.retryAfter)
+					writer.WriteHeader(http.StatusTooManyRequests)
+					return
+				}
+				_, _ = io.WriteString(writer, `{"id":"1-2","login":"alice"}`)
+			}))
+			defer server.Close()
+			var sleeps []time.Duration
+			client, err := New(
+				Config{RESTBaseURL: server.URL + "/youtrack/api"},
+				Credential{Token: testToken},
+				WithHTTPClient(server.Client()),
+				WithSleep(func(_ context.Context, delay time.Duration) error {
+					sleeps = append(sleeps, delay)
+					return nil
+				}),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client.now = func() time.Time { return now }
+			ctx := context.Background()
+			if test.deadline > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, test.deadline)
+				defer cancel()
+			}
+			_, readErr := client.CurrentUser(ctx)
+			if test.wantCalls == 2 {
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+			} else {
+				var typed *errx.Error
+				if !errors.As(readErr, &typed) || typed.Reason != "RATE_LIMITED" || typed.RetryAfter != test.wantRetryFor {
+					t.Fatalf("error = %#v", readErr)
+				}
+				if test.wantStop && !strings.Contains(typed.Hint, "stop automatic retries") {
+					t.Fatalf("over-cap hint = %q", typed.Hint)
+				}
+			}
+			if calls.Load() != test.wantCalls {
+				t.Fatalf("calls=%d want=%d", calls.Load(), test.wantCalls)
+			}
+			if len(sleeps) != len(test.wantSleeps) {
+				t.Fatalf("sleeps=%v want=%v", sleeps, test.wantSleeps)
+			}
+			for index := range sleeps {
+				if sleeps[index] != test.wantSleeps[index] {
+					t.Fatalf("sleeps=%v want=%v", sleeps, test.wantSleeps)
+				}
+			}
+		})
+	}
+}
+
 func TestCreateAndUpdateIssueUseTypedPayloads(t *testing.T) {
 	tests := []struct {
 		name     string
