@@ -1,0 +1,22 @@
+# Credentials and request security
+
+Profiles contain non-secret identity and endpoint metadata only. Tokens, OAuth
+codes/verifiers, refresh credentials, signing keys, and authorization headers
+never enter argv, environment, profiles, journals, receipts, JSON, logs, or the
+repository. Use the native OS secret-store API directly; tests inject a fake.
+
+Every network command requires `--profile`. Bind credential generations to the
+complete normalized instance/account/OAuth topology. A mismatch fails before
+client construction. Never follow redirects or returned origins; endpoints and
+operation paths are pinned and response bodies are bounded.
+
+Routine reads use only the official Remote MCP tools
+`get_current_user,search_issues,get_issue,get_issue_comments,get_project,get_issue_fields_schema`.
+The documented predefined-tool list also contains writes, so `/mcp` without an
+explicit `tools=` allowlist is not read-only. Host enforcement or a read-only
+identity must also deny hidden direct calls.
+
+Writes use a separate exact project allowlist, offline canonical plan, trusted
+user-presence receipt, nonce/TTL/hash checks, and one mutation attempt. Never
+retry an ambiguous write. Changes to auth, request construction, logs, errors,
+receipts, or journals require a sentinel-redaction review.

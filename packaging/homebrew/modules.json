@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "modules": [
+    {
+      "path": "github.com/creack/pty",
+      "version": "v1.1.24",
+      "zip_sha256": "754e25253e76a5583b80d57d3add3afe68fc4d9f2a490968a9d1eda8c8fd8815"
+    },
+    {
+      "path": "github.com/inconshreveable/mousetrap",
+      "version": "v1.1.0",
+      "zip_sha256": "526674de624d7db108cfe7653ef110ccdfd97bc85026254224815567928ed243"
+    },
+    {
+      "path": "github.com/spf13/cobra",
+      "version": "v1.10.2",
+      "zip_sha256": "a00aae6fcd631e0fde52c98604452ff70e1b73c3b8a560d68db15aff5e26872d"
+    },
+    {
+      "path": "github.com/spf13/pflag",
+      "version": "v1.0.9",
+      "zip_sha256": "83910188d8735f84a48a80ab78351edac0b569896f2b3a244c696a07da9aa5ed"
+    },
+    {
+      "path": "golang.org/x/sys",
+      "version": "v0.44.0",
+      "zip_sha256": "f1fa1052808e6bd6eb9c5372c053b2370a582532fac5d6a4600e7a6fab190ff3"
+    },
+    {
+      "path": "golang.org/x/term",
+      "version": "v0.43.0",
+      "zip_sha256": "0d12dd77f2c620f236e59421d604f6bcd1f9212a4083a1c0ec13425c67bc6e81"
+    }
+  ]
+}

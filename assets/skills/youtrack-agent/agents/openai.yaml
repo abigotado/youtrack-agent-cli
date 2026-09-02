@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTrack Agent"
+  short_description: "Bounded YouTrack reads and guarded issue mutations"
+  default_prompt: "Use $youtrack-agent with an explicit profile for this YouTrack request."
