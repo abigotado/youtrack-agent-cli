@@ -16,16 +16,18 @@ type fixedIDSource string
 func (s fixedIDSource) NewPlanID() (string, error) { return string(s), nil }
 
 func validBindings() (ProfileSnapshot, ProjectPolicy) {
-	return ProfileSnapshot{
+	profile := ProfileSnapshot{
 		Name: "work", Instance: "https://acme.youtrack.cloud", RESTBaseURL: "https://acme.youtrack.cloud/api", OAuthIssuerURL: "https://hub.example.test",
 		IdentitySHA256: strings.Repeat("a", 64), CredentialGeneration: "generation-1",
 		Account: AccountBinding{ID: "1-2", Login: "alice"},
-	}, ProjectPolicy{
+	}
+	policy := ProjectPolicy{
 		Project: ProjectBinding{ID: "0-1", Key: "APP"}, PolicyRevision: 2,
 		PolicySHA256: strings.Repeat("b", 64), SchemaSHA256: strings.Repeat("c", 64),
 		ExecutorAssurance: "rest-best-effort", AuthorizedCapability: "issue-create",
 		NotificationPolicy: "youtrack-default", ReconciliationStrategy: "bounded-exact-and-marker",
 	}
+	return profile, policy
 }
 
 func TestPrepareDeterministicAndMarkerBound(t *testing.T) {
