@@ -1,16 +1,20 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/auth"
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
+	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/profile"
 )
 
@@ -93,6 +97,33 @@ func TestInspectVerifiesCurrentAccountBeforeEveryTargetRead(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestInspectSchemaMinimumLimitOversizeIsNotReportedAsReducible(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/api/users/me":
+			_, _ = io.WriteString(writer, `{"id":"1-2","login":"alice"}`)
+		case "/api/admin/projects/APP/customFields":
+			if request.URL.Query().Get("$top") != "2" {
+				t.Fatalf("$top = %q", request.URL.Query().Get("$top"))
+			}
+			_, _ = writer.Write(bytes.Repeat([]byte("x"), (5<<20)+1))
+		default:
+			t.Fatalf("unexpected path %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	_, _, _, err := inspectTestService(t, server).InspectSchema(t.Context(), "work", "APP", 1, 0)
+	var typed *errx.Error
+	if !errors.As(err, &typed) || typed.Code != errx.CodeInternal || typed.Reason != "RESPONSE_TOO_LARGE" {
+		t.Fatalf("error = %#v", err)
+	}
+	if !strings.Contains(typed.Hint, "do not retry unchanged") || strings.Contains(typed.Hint, "--limit") {
+		t.Fatalf("hint = %q", typed.Hint)
 	}
 }
 

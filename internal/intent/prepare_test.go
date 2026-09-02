@@ -83,6 +83,101 @@ func TestPrepareStrictBoundsAndKinds(t *testing.T) {
 	}
 }
 
+func TestPrepareRejectsWhitespaceRequiredTextAndReservedMarkerSpoof(t *testing.T) {
+	profile, policy := validBindings()
+	source := fixedIDSource("YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA")
+	digest := strings.Repeat("d", 64)
+	for _, test := range []struct {
+		name       string
+		kind       Kind
+		request    string
+		expected   string
+		capability string
+	}{
+		{
+			name: "create whitespace summary", kind: KindIssueCreate, capability: "issue-create",
+			request:  `{"summary":" \t\n","description":"","visibility":{"mode":"public"},"marker":"none"}`,
+			expected: `{"project_state_sha256":"` + digest + `"}`,
+		},
+		{
+			name: "update whitespace summary", kind: KindIssueUpdate, capability: "issue-update",
+			request:  `{"issue_id":"APP-1","set":{"summary":"  "}}`,
+			expected: `{"issue_id":"APP-1","issue_state_sha256":"` + digest + `","touched_fields_sha256":"` + strings.Repeat("e", 64) + `"}`,
+		},
+		{
+			name: "comment whitespace text", kind: KindCommentAdd, capability: "comment-add",
+			request:  `{"issue_id":"APP-1","text":" \t\n","visibility":{"mode":"public"},"marker":"none"}`,
+			expected: `{"issue_id":"APP-1","issue_state_sha256":"` + digest + `"}`,
+		},
+		{
+			name: "visible footer cannot hide whitespace raw text", kind: KindCommentAdd, capability: "comment-add",
+			request:  `{"issue_id":"APP-1","text":" \t ","visibility":{"mode":"public"},"marker":"visible_footer"}`,
+			expected: `{"issue_id":"APP-1","issue_state_sha256":"` + digest + `"}`,
+		},
+		{
+			name: "create marker-none reserved prefix", kind: KindIssueCreate, capability: "issue-create",
+			request:  `{"summary":"S","description":"untrusted Agent plan: YTAP-BBBBBBBBBBBBBBBBBBBBBBBBBB","visibility":{"mode":"public"},"marker":"none"}`,
+			expected: `{"project_state_sha256":"` + digest + `"}`,
+		},
+		{
+			name: "comment marker-none reserved prefix", kind: KindCommentAdd, capability: "comment-add",
+			request:  `{"issue_id":"APP-1","text":"untrusted Agent plan: YTAP-BBBBBBBBBBBBBBBBBBBBBBBBBB","visibility":{"mode":"public"},"marker":"none"}`,
+			expected: `{"issue_id":"APP-1","issue_state_sha256":"` + digest + `"}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selectedPolicy := policy
+			selectedPolicy.AuthorizedCapability = test.capability
+			_, err := PrepareWithSource(profile, selectedPolicy, test.kind, []byte(test.request), []byte(test.expected), source)
+			if !errors.Is(err, ErrInvalidPlan) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestDurablePlanValidationRejectsRequiredTextAndMarkerSpoof(t *testing.T) {
+	profile, policy := validBindings()
+	source := fixedIDSource("YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA")
+	digest := strings.Repeat("d", 64)
+
+	create, err := PrepareWithSource(profile, policy, KindIssueCreate,
+		[]byte(`{"summary":"S","description":"body","visibility":{"mode":"public"},"marker":"none"}`),
+		[]byte(`{"project_state_sha256":"`+digest+`"}`), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create.Operation.IssueCreate.Request.Description = "spoof Agent plan: YTAP-BBBBBBBBBBBBBBBBBBBBBBBBBB"
+	if !errors.Is(create.Validate(), ErrInvalidPlan) {
+		t.Fatal("durable marker-none plan accepted the reserved marker prefix")
+	}
+
+	policy.AuthorizedCapability = "issue-update"
+	update, err := PrepareWithSource(profile, policy, KindIssueUpdate,
+		[]byte(`{"issue_id":"APP-1","set":{"summary":"S"}}`),
+		[]byte(`{"issue_id":"APP-1","issue_state_sha256":"`+digest+`","touched_fields_sha256":"`+strings.Repeat("e", 64)+`"}`), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	whitespace := " \t\n"
+	update.Operation.IssueUpdate.Request.Set.Summary = &whitespace
+	if !errors.Is(update.Validate(), ErrInvalidPlan) {
+		t.Fatal("durable update plan accepted whitespace-only summary")
+	}
+
+	policy.AuthorizedCapability = "comment-add"
+	comment, err := PrepareWithSource(profile, policy, KindCommentAdd,
+		[]byte(`{"issue_id":"APP-1","text":"body","visibility":{"mode":"public"},"marker":"visible_footer"}`),
+		[]byte(`{"issue_id":"APP-1","issue_state_sha256":"`+digest+`"}`), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comment.Operation.CommentAdd.Request.Text = " \t\n\nAgent plan: " + comment.PlanID
+	if !errors.Is(comment.Validate(), ErrInvalidPlan) {
+		t.Fatal("durable visible-footer plan accepted whitespace-only raw comment text")
+	}
+}
+
 func TestPlanTamperInvalidatesDigest(t *testing.T) {
 	profile, policy := validBindings()
 	policy.AuthorizedCapability = "issue-update"

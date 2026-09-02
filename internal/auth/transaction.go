@@ -11,6 +11,14 @@ import (
 
 const compensationTimeout = 3 * time.Second
 
+type logoutCredentialState uint8
+
+const (
+	logoutCredentialAbsent logoutCredentialState = iota
+	logoutCredentialSnapshotAvailable
+	logoutCredentialSnapshotUnavailable
+)
+
 // ProfileRegistry is the metadata boundary used by login and logout.
 type ProfileRegistry interface {
 	WithProfileLock(ctx context.Context, name string, fn func() error) error
@@ -184,9 +192,19 @@ func Logout(ctx context.Context, store CredentialStore, registry ProfileRegistry
 	}
 	return registry.WithProfileLock(ctx, profileName, func() error {
 		previous, loadErr := store.Load(ctx, profileName)
-		credentialExisted := loadErr == nil
-		if loadErr != nil && !errors.Is(loadErr, ErrNotFound) {
+		credentialState := logoutCredentialSnapshotAvailable
+		switch {
+		case loadErr == nil:
+		case errors.Is(loadErr, ErrNotFound):
+			credentialState = logoutCredentialAbsent
+		case errors.Is(loadErr, context.Canceled), errors.Is(loadErr, context.DeadlineExceeded):
 			return fmt.Errorf("load credential for logout: %w", loadErr)
+		default:
+			// A changed Keychain ACL may make the secret unreadable while exact
+			// noninteractive deletion remains possible. Continue without a
+			// rollback snapshot and report incomplete state if metadata removal
+			// then fails before its commit point.
+			credentialState = logoutCredentialSnapshotUnavailable
 		}
 		if err := store.Delete(ctx, profileName); err != nil {
 			return fmt.Errorf("delete credential: %w", err)
@@ -203,13 +221,20 @@ func Logout(ctx context.Context, store CredentialStore, registry ProfileRegistry
 		}
 		compensationContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), compensationTimeout)
 		defer cancel()
-		if credentialExisted {
+		if credentialState == logoutCredentialSnapshotAvailable {
 			if restoreErr := store.Save(compensationContext, profileName, previous); restoreErr != nil {
 				return errors.Join(
+					ErrLogoutIncomplete,
 					fmt.Errorf("remove profile metadata: %w", registryErr),
 					fmt.Errorf("restore credential after failed logout: %w", restoreErr),
 				)
 			}
+		}
+		if credentialState == logoutCredentialSnapshotUnavailable {
+			return errors.Join(
+				ErrLogoutIncomplete,
+				fmt.Errorf("remove profile metadata: %w", registryErr),
+			)
 		}
 		return fmt.Errorf("remove profile metadata: %w", registryErr)
 	})

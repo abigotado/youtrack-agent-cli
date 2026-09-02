@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,7 @@ type TokenSet struct {
 	RefreshToken string    `json:"-"`
 	TokenType    string    `json:"-"`
 	ExpiresAt    time.Time `json:"-"`
+	Scopes       []string  `json:"-"`
 }
 
 func (TokenSet) Format(state fmt.State, _ rune) { _, _ = io.WriteString(state, "<redacted>") }
@@ -167,7 +169,7 @@ func (client *Client) Exchange(ctx context.Context, code, verifier string) (Toke
 		return TokenSet{}, ErrTokenExchange
 	}
 	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {client.config.RedirectURI}, "client_id": {client.config.ClientID}, "code_verifier": {verifier}}
-	return client.request(ctx, form, "")
+	return client.request(ctx, form, "", client.config.Scopes)
 }
 
 func validVerifier(verifier string) bool {
@@ -176,14 +178,14 @@ func validVerifier(verifier string) bool {
 }
 
 func (client *Client) Refresh(ctx context.Context, current TokenSet) (TokenSet, error) {
-	if current.RefreshToken == "" || len(current.RefreshToken) > 8192 {
+	if current.RefreshToken == "" || len(current.RefreshToken) > 8192 || !validGrantedScopes(current.Scopes, client.config.Scopes) {
 		return TokenSet{}, ErrTokenExchange
 	}
 	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {current.RefreshToken}, "client_id": {client.config.ClientID}}
-	return client.request(ctx, form, current.RefreshToken)
+	return client.request(ctx, form, current.RefreshToken, current.Scopes)
 }
 
-func (client *Client) request(ctx context.Context, form url.Values, previousRefresh string) (TokenSet, error) {
+func (client *Client) request(ctx context.Context, form url.Values, previousRefresh string, allowedScopes []string) (TokenSet, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.config.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return TokenSet{}, ErrTokenExchange
@@ -203,11 +205,11 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 		return TokenSet{}, ErrTokenExchange
 	}
 	var wire struct {
-		AccessToken  string      `json:"access_token"`
-		RefreshToken string      `json:"refresh_token"`
-		TokenType    string      `json:"token_type"`
-		ExpiresIn    json.Number `json:"expires_in"`
-		Scope        string      `json:"scope"`
+		AccessToken  string          `json:"access_token"`
+		RefreshToken string          `json:"refresh_token"`
+		TokenType    string          `json:"token_type"`
+		ExpiresIn    json.Number     `json:"expires_in"`
+		Scope        json.RawMessage `json:"scope"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
@@ -229,10 +231,68 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 	if refresh == "" || len(refresh) > 8192 {
 		return TokenSet{}, ErrTokenExchange
 	}
-	if wire.Scope != "" && wire.Scope != strings.Join(client.config.Scopes, " ") {
+	grantedScopes, err := grantedScopes(wire.Scope, allowedScopes)
+	if err != nil {
 		return TokenSet{}, ErrTokenExchange
 	}
-	return TokenSet{AccessToken: wire.AccessToken, RefreshToken: refresh, TokenType: "Bearer", ExpiresAt: client.now().Add(time.Duration(seconds) * time.Second).UTC()}, nil
+	return TokenSet{AccessToken: wire.AccessToken, RefreshToken: refresh, TokenType: "Bearer", ExpiresAt: client.now().Add(time.Duration(seconds) * time.Second).UTC(), Scopes: grantedScopes}, nil
+}
+
+func grantedScopes(raw json.RawMessage, allowed []string) ([]string, error) {
+	if len(raw) == 0 {
+		return append([]string(nil), allowed...), nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil || value == "" {
+		return nil, ErrTokenExchange
+	}
+	granted := strings.Split(value, " ")
+	for _, scope := range granted {
+		if !validScopeToken(scope) {
+			return nil, ErrTokenExchange
+		}
+	}
+	slices.Sort(granted)
+	if !validGrantedScopes(granted, allowed) {
+		return nil, ErrTokenExchange
+	}
+	return granted, nil
+}
+
+func validScopeToken(scope string) bool {
+	if scope == "" || len(scope) > 128 {
+		return false
+	}
+	for index := 0; index < len(scope); index++ {
+		character := scope[index]
+		if character == 0x21 || character >= 0x23 && character <= 0x5b || character >= 0x5d && character <= 0x7e {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validGrantedScopes(granted, allowed []string) bool {
+	if len(granted) == 0 {
+		return false
+	}
+	allowedIndex := 0
+	previous := ""
+	for _, scope := range granted {
+		if scope == "" || scope <= previous {
+			return false
+		}
+		for allowedIndex < len(allowed) && allowed[allowedIndex] < scope {
+			allowedIndex++
+		}
+		if allowedIndex == len(allowed) || allowed[allowedIndex] != scope {
+			return false
+		}
+		previous = scope
+		allowedIndex++
+	}
+	return true
 }
 
 func validateConfig(config Config) error {
@@ -242,11 +302,11 @@ func validateConfig(config Config) error {
 	if config.ClientID == "" || len(config.ClientID) > 256 || strings.ContainsAny(config.ClientID, "\x00\r\n\t ") {
 		return ErrInvalidConfig
 	}
-	if len(config.Scopes) == 0 {
+	if len(config.Scopes) == 0 || len(config.Scopes) > 32 {
 		return ErrInvalidConfig
 	}
 	for index, scope := range config.Scopes {
-		if scope == "" || strings.ContainsAny(scope, "\x00\r\n\t ") || (index > 0 && scope <= config.Scopes[index-1]) {
+		if !validScopeToken(scope) || (index > 0 && scope <= config.Scopes[index-1]) {
 			return ErrInvalidConfig
 		}
 	}

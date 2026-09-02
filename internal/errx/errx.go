@@ -255,6 +255,28 @@ func PayloadTooLarge(operation string) *Error {
 	}
 }
 
+// ResponseTooLarge reports that a successful read response exceeded the
+// client's fixed safety bound. Paged reads can be retried with a smaller page;
+// exact reads require the operator to reduce the server-side object instead.
+func ResponseTooLarge(operation string, pageReducible bool, limit int64) *Error {
+	action := strings.TrimSpace(operation)
+	if action == "" {
+		action = "read"
+	}
+	code := CodeInternal
+	hint := "report or reduce the selected YouTrack object's size; do not retry unchanged"
+	if pageReducible {
+		code = CodeUsage
+		hint = "lower --limit and retry the bounded read"
+	}
+	return &Error{
+		Code:    code,
+		Reason:  "RESPONSE_TOO_LARGE",
+		Message: fmt.Sprintf("the %s response exceeds the %d-byte safety limit", action, limit),
+		Hint:    hint,
+	}
+}
+
 func upper(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

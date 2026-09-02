@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +74,101 @@ func TestExchangeAndRefreshRotation(t *testing.T) {
 	tokens, err = client.Refresh(t.Context(), tokens)
 	if err != nil || tokens.RefreshToken != "rotated" || !strings.Contains(bodies[1], "grant_type=refresh_token") {
 		t.Fatalf("tokens=%#v err=%v bodies=%v", tokens, err, bodies)
+	}
+}
+
+func TestExchangeTreatsGrantedScopesAsStrictSubset(t *testing.T) {
+	config := testConfig()
+	config.Scopes = []string{"alpha", "beta", "gamma"}
+	tests := []struct {
+		name       string
+		scopeField string
+		want       []string
+		wantErr    bool
+	}{
+		{name: "reordered subset", scopeField: `,"scope":"gamma alpha"`, want: []string{"alpha", "gamma"}},
+		{name: "single subset", scopeField: `,"scope":"beta"`, want: []string{"beta"}},
+		{name: "omitted means requested", want: []string{"alpha", "beta", "gamma"}},
+		{name: "present empty is malformed", scopeField: `,"scope":""`, wantErr: true},
+		{name: "present null is malformed", scopeField: `,"scope":null`, wantErr: true},
+		{name: "double separator is malformed", scopeField: `,"scope":"alpha  beta"`, wantErr: true},
+		{name: "tab separator is malformed", scopeField: `,"scope":"alpha\tbeta"`, wantErr: true},
+		{name: "newline separator is malformed", scopeField: `,"scope":"alpha\nbeta"`, wantErr: true},
+		{name: "leading separator is malformed", scopeField: `,"scope":" alpha"`, wantErr: true},
+		{name: "duplicate is malformed", scopeField: `,"scope":"alpha alpha"`, wantErr: true},
+		{name: "escalated scope", scopeField: `,"scope":"admin"`, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session, err := NewSession(strings.NewReader(strings.Repeat("v", 64)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+				body := `{"access_token":"access","refresh_token":"refresh","token_type":"Bearer","expires_in":3600` + test.scopeField + `}`
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})
+			client, err := NewClient(config, transport)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tokens, err := client.Exchange(t.Context(), "code", session.Verifier)
+			if test.wantErr {
+				if !errors.Is(err, ErrTokenExchange) {
+					t.Fatalf("error = %v", err)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(tokens.Scopes, test.want) {
+				t.Fatalf("scopes=%v err=%v", tokens.Scopes, err)
+			}
+		})
+	}
+}
+
+func TestRefreshPreservesOrNarrowsCurrentGrant(t *testing.T) {
+	config := testConfig()
+	config.Scopes = []string{"alpha", "beta", "gamma"}
+	tests := []struct {
+		name       string
+		scopeField string
+		want       []string
+		wantErr    bool
+	}{
+		{name: "omitted scope preserves current grant", want: []string{"alpha", "gamma"}},
+		{name: "explicit narrowing", scopeField: `,"scope":"gamma"`, want: []string{"gamma"}},
+		{name: "cannot re-expand from current grant", scopeField: `,"scope":"alpha beta gamma"`, wantErr: true},
+		{name: "present empty is malformed", scopeField: `,"scope":""`, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				raw, err := io.ReadAll(request.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(raw), "grant_type=refresh_token") {
+					t.Fatalf("refresh form = %q", raw)
+				}
+				body := `{"access_token":"next","token_type":"Bearer","expires_in":3600` + test.scopeField + `}`
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})
+			client, err := NewClient(config, transport)
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := TokenSet{AccessToken: "old", RefreshToken: "refresh", TokenType: "Bearer", Scopes: []string{"alpha", "gamma"}}
+			tokens, err := client.Refresh(t.Context(), current)
+			if test.wantErr {
+				if !errors.Is(err, ErrTokenExchange) {
+					t.Fatalf("error = %v", err)
+				}
+				return
+			}
+			if err != nil || tokens.RefreshToken != current.RefreshToken || !slices.Equal(tokens.Scopes, test.want) {
+				t.Fatalf("tokens=%#v err=%v", tokens, err)
+			}
+		})
 	}
 }
 

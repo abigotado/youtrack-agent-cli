@@ -80,7 +80,7 @@ func (client *Client) ListProjectFields(ctx context.Context, projectID string, o
 	}
 	var fields []ProjectField
 	err = client.readJSON(ctx, request{
-		path: "/admin/projects/" + url.PathEscape(projectID) + "/customFields", query: query, operation: "project_fields.list",
+		path: "/admin/projects/" + url.PathEscape(projectID) + "/customFields", query: query, operation: "project_fields.list", pageReducible: options.CanReduce,
 	}, &fields)
 	if err != nil {
 		return nil, err
@@ -108,7 +108,7 @@ func (client *Client) ListComments(ctx context.Context, issueID string, options 
 	}
 	var comments []Comment
 	err = client.readJSON(ctx, request{
-		path: "/issues/" + url.PathEscape(issueID) + "/comments", query: query, operation: "comments.list",
+		path: "/issues/" + url.PathEscape(issueID) + "/comments", query: query, operation: "comments.list", pageReducible: options.CanReduce,
 	}, &comments)
 	if err != nil {
 		return nil, err
@@ -136,7 +136,7 @@ func (client *Client) SearchIssues(ctx context.Context, queryText string, option
 	}
 	query.Set("query", queryText)
 	var issues []Issue
-	if err := client.readJSON(ctx, request{path: "/issues", query: query, operation: "issues.search"}, &issues); err != nil {
+	if err := client.readJSON(ctx, request{path: "/issues", query: query, operation: "issues.search", pageReducible: options.CanReduce}, &issues); err != nil {
 		return nil, err
 	}
 	if issues == nil {

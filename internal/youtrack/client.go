@@ -25,6 +25,7 @@ import (
 
 const (
 	maxReadAttempts         = 3
+	maxRetryAfterDelay      = 30 * time.Second
 	maxCompressedBodyBytes  = 4 << 20
 	maxResponseBodyBytes    = 4 << 20
 	maxDrainBodyBytes       = 64 << 10
@@ -130,12 +131,13 @@ func New(config Config, credential Credential, options ...Option) (*Client, erro
 }
 
 type request struct {
-	method    string
-	path      string
-	query     url.Values
-	body      []byte
-	operation string
-	write     bool
+	method        string
+	path          string
+	query         url.Values
+	body          []byte
+	operation     string
+	write         bool
+	pageReducible bool
 }
 
 func (client *Client) readJSON(ctx context.Context, request request, out any) error {
@@ -154,13 +156,17 @@ func (client *Client) readJSON(ctx context.Context, request request, out any) er
 			if attempt == maxReadAttempts {
 				return lastErr
 			}
-			if err := client.sleep(ctx, retryBackoff(attempt)); err != nil {
+			delay := retryBackoff(attempt)
+			if !retryDelayFitsContext(ctx, delay) {
+				return lastErr
+			}
+			if err := client.sleep(ctx, delay); err != nil {
 				return errx.Translate(err)
 			}
 			continue
 		}
 
-		delay, retry, translated := client.handleReadResponse(response, request.operation, out)
+		delay, retry, translated := client.handleReadResponse(response, request, out)
 		if translated == nil {
 			return nil
 		}
@@ -170,6 +176,9 @@ func (client *Client) readJSON(ctx context.Context, request request, out any) er
 		}
 		if delay <= 0 {
 			delay = retryBackoff(attempt)
+		}
+		if !retryDelayFitsContext(ctx, delay) {
+			return translated
 		}
 		client.log.Debug("retrying YouTrack read", "operation", request.operation, "attempt", attempt, "delay", delay)
 		if err := client.sleep(ctx, delay); err != nil {
@@ -229,21 +238,21 @@ func (client *Client) send(ctx context.Context, request request) (*http.Response
 	return client.http.Do(httpRequest)
 }
 
-func (client *Client) handleReadResponse(response *http.Response, operation string, out any) (time.Duration, bool, error) {
+func (client *Client) handleReadResponse(response *http.Response, request request, out any) (time.Duration, bool, error) {
 	if response == nil || response.Body == nil {
 		return 0, true, errx.Retryable("INVALID_RESPONSE", 0, "YouTrack returned no response")
 	}
 	defer closeAndDrain(response.Body)
 
 	if response.StatusCode != http.StatusOK {
-		return client.translateReadStatus(response, operation)
+		return client.translateReadStatus(response, request.operation)
 	}
 	body, tooLarge, err := readResponseBody(response)
 	if err != nil {
 		return 0, false, errx.Internal("could not read the bounded YouTrack response")
 	}
 	if tooLarge {
-		return 0, false, errx.Internal("YouTrack response exceeds the safety limit")
+		return 0, false, errx.ResponseTooLarge(request.operation, request.pageReducible, maxResponseBodyBytes)
 	}
 	if len(bytes.TrimSpace(body)) == 0 || decodeOneJSON(body, out) != nil {
 		return 0, false, invalidReadResponse()
@@ -260,8 +269,16 @@ func (client *Client) translateReadStatus(response *http.Response, operation str
 	case http.StatusNotFound:
 		return 0, false, errx.NotFound(resourceKind(operation), "requested", nil)
 	case http.StatusTooManyRequests:
-		delay := parseRetryAfter(response.Header.Get("Retry-After"), client.now())
-		return delay, true, errx.Retryable("RATE_LIMITED", delay, "YouTrack rate limited the read")
+		delay, autoRetryAllowed := parseRetryAfter(response.Header.Get("Retry-After"), client.now())
+		reportedDelay := delay
+		if !autoRetryAllowed {
+			reportedDelay = 0
+		}
+		rateLimitErr := errx.Retryable("RATE_LIMITED", reportedDelay, "YouTrack rate limited the read")
+		if !autoRetryAllowed {
+			rateLimitErr.WithHint("the server delay exceeds the 30s local cap; stop automatic retries and retry later")
+		}
+		return delay, autoRetryAllowed, rateLimitErr
 	default:
 		if response.StatusCode >= http.StatusInternalServerError {
 			return 0, true, errx.Retryable("SERVER_ERROR", 0, "YouTrack is temporarily unavailable")
@@ -384,20 +401,50 @@ func closeAndDrain(body io.ReadCloser) {
 	_ = body.Close()
 }
 
-func parseRetryAfter(value string, now time.Time) time.Duration {
+func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
 	value = strings.TrimSpace(value)
-	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
-		return time.Duration(seconds) * time.Second
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil {
+		maximumSeconds := uint64(maxRetryAfterDelay / time.Second)
+		if seconds > maximumSeconds {
+			return maxRetryAfterDelay, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	} else if decimalDigits(value) {
+		return maxRetryAfterDelay, false
 	}
 	when, err := http.ParseTime(value)
 	if err != nil || !when.After(now) {
-		return 0
+		return 0, true
 	}
-	return when.Sub(now)
+	delay := when.Sub(now)
+	if delay > maxRetryAfterDelay {
+		return maxRetryAfterDelay, false
+	}
+	return delay, true
+}
+
+func decimalDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func retryBackoff(attempt int) time.Duration {
 	return time.Duration(attempt) * 250 * time.Millisecond
+}
+
+func retryDelayFitsContext(ctx context.Context, delay time.Duration) bool {
+	if delay < 0 {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	return !ok || time.Until(deadline) > delay
 }
 
 func sleepContext(ctx context.Context, delay time.Duration) error {
