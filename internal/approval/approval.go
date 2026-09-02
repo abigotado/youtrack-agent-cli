@@ -223,7 +223,7 @@ func validateUnsignedReceipt(receipt Receipt) error {
 	if receipt.SchemaVersion != ReceiptSchemaVersion || validateCanonicalApprovalID(receipt.ReceiptID, receiptIDPrefix) != nil || validateCanonicalApprovalID(receipt.Nonce, noncePrefix) != nil {
 		return receiptError("RECEIPT_INVALID", "the approval receipt identifiers or schema are invalid")
 	}
-	if !isCanonicalPlanID(receipt.PlanID) || !isCanonicalIdentifier(receipt.AccountID) || !isCanonicalIdentifier(receipt.ProjectID) || !isCanonicalProjectKey(receipt.ProjectKey) {
+	if intent.ValidatePlanID(receipt.PlanID) != nil || !isCanonicalIdentifier(receipt.AccountID) || !isCanonicalIdentifier(receipt.ProjectID) || !isCanonicalProjectKey(receipt.ProjectKey) {
 		return receiptError("RECEIPT_INVALID", "the approval receipt contains a non-canonical plan, account, or project binding")
 	}
 	if _, err := canonicalReceiptTime(receipt.IssuedAt); err != nil {

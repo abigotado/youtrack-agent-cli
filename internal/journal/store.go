@@ -21,7 +21,6 @@ import (
 )
 
 var (
-	planIDPattern    = regexp.MustCompile(`^YTAP-[A-Z2-7]{26}$`)
 	receiptIDPattern = regexp.MustCompile(`^YTAR-[A-Z2-7]{26}$`)
 	noncePattern     = regexp.MustCompile(`^YTAN-[A-Z2-7]{26}$`)
 	remoteIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
@@ -352,7 +351,7 @@ func (s Store) ensureDirectory() error {
 }
 
 func (s Store) recordPath(planID string) (string, error) {
-	if !planIDPattern.MatchString(planID) {
+	if err := intent.ValidatePlanID(planID); err != nil {
 		return "", errx.Usage("plan ID must be a canonical YTAP identifier")
 	}
 	return filepath.Join(s.directory, planID+".json"), nil

@@ -5,6 +5,9 @@ itself is **not passed**. `approval.Unsupported` remains the only production
 adapter, and this document does not enable confirmation, apply, release, or
 Homebrew installation.
 
+The native trust boundary, canonical URL/plan-ID grammar, and exact future IPC
+frame are specified in [Gate 1A native approval boundary](gate1a-native-boundary.md).
+
 ## Authority and limits
 
 Go remains the authority for mutation-plan validation and canonical receipt

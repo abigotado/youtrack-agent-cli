@@ -21,6 +21,34 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
     public let keyGeneration: String
     public let keyFingerprintSHA256: String
 
+    init(
+        receiptID: String, nonce: String, planID: String, planSHA256: String,
+        profileIdentitySHA256: String, accountID: String, projectID: String,
+        projectKey: String, schemaSHA256: String, requestSHA256: String,
+        expectedSHA256: String, issuedAt: String, expiresAt: String,
+        keyGeneration: String, keyFingerprintSHA256: String
+    ) throws {
+        self.receiptID = receiptID
+        self.nonce = nonce
+        self.planID = planID
+        self.planSHA256 = planSHA256
+        self.profileIdentitySHA256 = profileIdentitySHA256
+        self.accountID = accountID
+        self.projectID = projectID
+        self.projectKey = projectKey
+        self.schemaSHA256 = schemaSHA256
+        self.requestSHA256 = requestSHA256
+        self.expectedSHA256 = expectedSHA256
+        self.issuedAt = issuedAt
+        self.expiresAt = expiresAt
+        self.keyGeneration = keyGeneration
+        self.keyFingerprintSHA256 = keyFingerprintSHA256
+        try validate()
+        guard encodedSigningBytes().count <= Self.maximumSigningBytes else {
+            throw ApprovalProtocolError.inputTooLarge(limit: Self.maximumSigningBytes)
+        }
+    }
+
     public init(signingBytes: Data) throws {
         var parser = try StrictJSONObjectParser(data: signingBytes, maximumBytes: Self.maximumSigningBytes)
         var fields = try parser.parse()
@@ -142,12 +170,7 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
     }
 
     private static func isPlanID(_ value: String) -> Bool {
-        let prefix = "YTAP-"
-        guard value.hasPrefix(prefix) else { return false }
-        let encoded = value.dropFirst(prefix.count)
-        return encoded.utf8.count == 26 && encoded.utf8.allSatisfy {
-            ($0 >= 0x41 && $0 <= 0x5A) || ($0 >= 0x32 && $0 <= 0x37)
-        }
+        isCanonicalBase32ID(value, prefix: "YTAP-")
     }
 
     private static func isIdentifier(_ value: String) -> Bool {
@@ -181,7 +204,7 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         return index & 0b11 == 0
     }
 
-    private static func wholeSecondUTCValue(_ value: String) -> Int64? {
+    static func wholeSecondUTCValue(_ value: String) -> Int64? {
         let bytes = Array(value.utf8)
         guard bytes.count == 20,
               bytes[4] == 0x2D, bytes[7] == 0x2D, bytes[10] == 0x54,
@@ -213,7 +236,7 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         let shiftedMonth = month + (month > 2 ? -3 : 9)
         let dayOfYear = (153 * shiftedMonth + 2) / 5 + day - 1
         let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
-        let civilDays = Int64(era * 146_097 + dayOfEra)
+        let civilDays = Int64(era * 146_097 + dayOfEra - 719_468)
         return civilDays * 86_400 + Int64(hour * 3_600 + minute * 60 + second)
     }
 

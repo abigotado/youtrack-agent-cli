@@ -83,7 +83,7 @@ func TestInternalDependencyDAGIsExplicit(t *testing.T) {
 		module + "/internal/cli":         edges("application", "errx", "output"),
 		module + "/internal/endpoint":    {},
 		module + "/internal/errx":        {},
-		module + "/internal/intent":      {},
+		module + "/internal/intent":      edges("endpoint"),
 		module + "/internal/journal":     edges("errx", "intent", "lockfile"),
 		module + "/internal/lockfile":    {},
 		module + "/internal/mutation":    edges("errx", "intent"),
@@ -140,6 +140,17 @@ func TestCLIDoesNotImportNetHTTP(t *testing.T) {
 	for _, imported := range packages[0].Imports {
 		if imported == "net/http" {
 			t.Fatal("internal/cli imports net/http")
+		}
+	}
+}
+
+func TestApprovalProtocolHasNoProductionTransportImports(t *testing.T) {
+	for _, value := range listedPackages(t, "./internal/approval") {
+		for _, imported := range value.Imports {
+			switch imported {
+			case "net", "net/http", "os/exec", "syscall":
+				t.Errorf("approval value protocol imports production transport package %s", imported)
+			}
 		}
 	}
 }

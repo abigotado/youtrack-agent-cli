@@ -22,6 +22,19 @@ they do not prove the signed native approval boundary required by Gate 1A.
 Completion of this slice must not change this report's overall status from
 **NOT PASSED**.
 
+## PR A: native-boundary value contract
+
+The accepted boundary ADR freezes the language-neutral ASCII URL grammar,
+canonical 128-bit plan ID, binary frame header and payload union, CSPRNG
+challenge echo, closed error codes, strict canonical plan parsing, and the Go
+success cross-binding verifier. Shared fixtures cover all three mutation plan
+kinds plus URL, identifier, request, success, and error frames.
+
+This remains value-codec evidence only. There is no production AF_UNIX I/O,
+process launch, peer audit-token validation, native key access, approval UI, or
+application wiring. Consequently PR A does not advance the overall Gate result
+beyond **NOT PASSED**.
+
 ## Required later evidence
 
 ### Connection-bound process identity

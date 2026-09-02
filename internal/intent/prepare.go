@@ -72,8 +72,8 @@ func PrepareWithSource(profile ProfileSnapshot, policy ProjectPolicy, kind Kind,
 	if err != nil {
 		return Plan{}, err
 	}
-	if !planIDPattern.MatchString(planID) {
-		return Plan{}, fmt.Errorf("%w: generated plan ID is not canonical", ErrInvalidPlan)
+	if err := ValidatePlanID(planID); err != nil {
+		return Plan{}, fmt.Errorf("generated plan ID: %w", err)
 	}
 	insertMarker(operation, planID)
 	normalizeOperation(operation)

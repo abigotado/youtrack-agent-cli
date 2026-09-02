@@ -38,13 +38,12 @@ import Testing
     #expect(unsigned.signingSHA256 == expectedSigningSHA256)
     #expect(receipt.receiptSHA256 == expectedReceiptSHA256)
 
-    let displaySnapshot = try ApprovalDisplaySnapshot(bytes: display)
-    #expect(displaySnapshot.inertEscapedBytes() == expectedEscapedDisplay)
-    #expect(try ApprovalDisplaySnapshot.decodeInertEscapedBytes(expectedEscapedDisplay) == display)
+    #expect(InertByteCodec.encode(display) == expectedEscapedDisplay)
+    #expect(try InertByteCodec.decode(expectedEscapedDisplay) == display)
 }
 
 @Test func signingBytesRoundTripMatchesGoOrderAndEscaping() throws {
-    let signing = Data(#"{"schema_version":1,"receipt_id":"YTAR-AAAAAAAAAAAAAAAAAAAAAAAAAA","nonce":"YTAN-BBBBBBBBBBBBBBBBBBBBBBBBBY","plan_id":"YTAP-CCCCCCCCCCCCCCCCCCCCCCCCCC","plan_sha256":"1111111111111111111111111111111111111111111111111111111111111111","profile_identity_sha256":"2222222222222222222222222222222222222222222222222222222222222222","account_id":"1-2","project_id":"0-1","project_key":"APP","schema_sha256":"3333333333333333333333333333333333333333333333333333333333333333","request_sha256":"4444444444444444444444444444444444444444444444444444444444444444","expected_sha256":"5555555555555555555555555555555555555555555555555555555555555555","issued_at":"2026-09-02T15:34:56Z","expires_at":"2026-09-02T15:39:56Z","key_generation":"key-1","key_fingerprint_sha256":"6666666666666666666666666666666666666666666666666666666666666666"}"#.utf8)
+    let signing = Data(#"{"schema_version":1,"receipt_id":"YTAR-AAAAAAAAAAAAAAAAAAAAAAAAAA","nonce":"YTAN-BBBBBBBBBBBBBBBBBBBBBBBBBY","plan_id":"YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA","plan_sha256":"1111111111111111111111111111111111111111111111111111111111111111","profile_identity_sha256":"2222222222222222222222222222222222222222222222222222222222222222","account_id":"1-2","project_id":"0-1","project_key":"APP","schema_sha256":"3333333333333333333333333333333333333333333333333333333333333333","request_sha256":"4444444444444444444444444444444444444444444444444444444444444444","expected_sha256":"5555555555555555555555555555555555555555555555555555555555555555","issued_at":"2026-09-02T15:34:56Z","expires_at":"2026-09-02T15:39:56Z","key_generation":"key-1","key_fingerprint_sha256":"6666666666666666666666666666666666666666666666666666666666666666"}"#.utf8)
 
     let parsed = try UnsignedApprovalReceipt(signingBytes: signing)
     #expect(parsed.encodedSigningBytes() == signing)
@@ -158,13 +157,12 @@ private func sha256Hex(_ data: Data) -> String {
 
 @Test func inertRendererIsCompleteAndReversible() throws {
     let input = Data((0...255).map(UInt8.init))
-    let snapshot = try ApprovalDisplaySnapshot(bytes: input)
-    let rendered = snapshot.inertEscapedBytes()
+    let rendered = InertByteCodec.encode(input)
 
     #expect(rendered.contains("\\x00"))
     #expect(rendered.contains("\\\\"))
     #expect(rendered.contains("~"))
-    #expect(try ApprovalDisplaySnapshot.decodeInertEscapedBytes(rendered) == input)
+    #expect(try InertByteCodec.decode(rendered) == input)
 }
 
 @Test func signingInputEnforcesSizeAndCanonicalSchema() throws {
@@ -354,42 +352,148 @@ private func sha256Hex(_ data: Data) -> String {
     #expect(try P256PublicKeyCodec.fingerprintSHA256(x963: x963) == expectedFingerprint)
 }
 
-@Test func inertRendererRejectsEmptyAndNeverTruncatesAtMaximum() throws {
-    #expect(throws: ApprovalProtocolError.self) {
-        _ = try ApprovalDisplaySnapshot(bytes: Data())
-    }
-
-    let maximum = Data(repeating: 0, count: ApprovalDisplaySnapshot.maximumBytes)
-    let snapshot = try ApprovalDisplaySnapshot(bytes: maximum)
-    let rendered = snapshot.inertEscapedBytes()
-    #expect(rendered.utf8.count == ApprovalDisplaySnapshot.maximumBytes * 4)
-    #expect(try ApprovalDisplaySnapshot.decodeInertEscapedBytes(rendered) == maximum)
+@Test func inertByteCodecNeverTruncatesAtMaximum() throws {
+    let maximum = Data(repeating: 0, count: InertByteCodec.maximumBytes)
+    let rendered = InertByteCodec.encode(maximum)
+    #expect(rendered.utf8.count == InertByteCodec.maximumBytes * 4)
+    #expect(try InertByteCodec.decode(rendered) == maximum)
 
     #expect(throws: ApprovalProtocolError.self) {
-        _ = try ApprovalDisplaySnapshot(bytes: Data(repeating: 0, count: ApprovalDisplaySnapshot.maximumBytes + 1))
-    }
-    #expect(throws: ApprovalProtocolError.self) {
-        _ = try ApprovalDisplaySnapshot.decodeInertEscapedBytes(String(repeating: "A", count: ApprovalDisplaySnapshot.maximumBytes * 4 + 1))
+        _ = try InertByteCodec.decode(String(repeating: "A", count: InertByteCodec.maximumBytes * 4 + 1))
     }
 }
 
-@Test func inertRendererRetainsAnImmutableAllByteSnapshot() throws {
-    var original = Data((0...255).map(UInt8.init))
-    let snapshot = try ApprovalDisplaySnapshot(bytes: original)
+@Test func validatedPlanRetainsAnImmutableSnapshot() throws {
+    var original = try fixture("plan-issue-create.json")
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: original)
     let expected = original
-    original[0] = 0xFF
+    original[0] = 0x20
 
-    #expect(snapshot.bytes == expected)
-    let escaped = snapshot.inertEscapedBytes()
+    #expect(snapshot.exactBytes() == expected)
+    let escaped = ApprovalPlanRenderer.render(snapshot)
     #expect(!escaped.contains("\n"))
     #expect(!escaped.contains("\r"))
-    #expect(try ApprovalDisplaySnapshot.decodeInertEscapedBytes(escaped) == expected)
+    #expect(try InertByteCodec.decode(escaped) == expected)
 
     for malformed in ["", "\\", "\\x0a", "\\q00", "\\x20", "\\x41", "\\x5C", "é"] {
         #expect(throws: ApprovalProtocolError.invalidEscapedBytes) {
-            _ = try ApprovalDisplaySnapshot.decodeInertEscapedBytes(malformed)
+            _ = try InertByteCodec.decode(malformed)
         }
     }
+}
+
+@Test func allGoPlanFixturesValidateAndPreserveFullUInt64() throws {
+    for name in ["plan-issue-create.json", "plan-issue-update.json", "plan-comment-add.json"] {
+        let bytes = try fixture(name)
+        let snapshot = try ValidatedPlanSnapshot(canonicalBytes: bytes)
+        #expect(snapshot.exactBytes() == bytes)
+        #expect(snapshot.sha256 == sha256Hex(bytes))
+    }
+
+    let maximum = replacing(
+        try fixture("plan-issue-create.json"),
+        "\"policy_revision\":1",
+        with: "\"policy_revision\":18446744073709551615"
+    )
+    _ = try ValidatedPlanSnapshot(canonicalBytes: maximum)
+    let overflow = replacing(maximum, "18446744073709551615", with: "18446744073709551616")
+    #expect(throws: ApprovalProtocolError.self) { _ = try ValidatedPlanSnapshot(canonicalBytes: overflow) }
+}
+
+@Test func planIDAndURLCorporaMatchGo() throws {
+    let base = try fixture("plan-issue-create.json")
+    let idCorpus = try #require(JSONSerialization.jsonObject(with: try fixture("plan-id-corpus.json")) as? [String: [String]])
+    for value in idCorpus["valid"] ?? [] {
+        let changed = value == "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA" ? base : replacing(base, "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", with: value)
+        _ = try ValidatedPlanSnapshot(canonicalBytes: changed)
+    }
+    for value in idCorpus["invalid"] ?? [] {
+        #expect(throws: ApprovalProtocolError.self) {
+            _ = try ValidatedPlanSnapshot(canonicalBytes: replacing(base, "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", with: value))
+        }
+    }
+
+    let urlCorpus = try #require(JSONSerialization.jsonObject(with: try fixture("approval-url-corpus.json")) as? [String: [String]])
+    for value in urlCorpus["valid"] ?? [] {
+        var changed = value == "https://acme.youtrack.cloud" ? base : replacing(base, "https://acme.youtrack.cloud/api", with: value + "/api")
+        if value != "https://acme.youtrack.cloud" { changed = replacing(changed, "https://acme.youtrack.cloud", with: value) }
+        _ = try ValidatedPlanSnapshot(canonicalBytes: changed)
+    }
+    for value in urlCorpus["invalid"] ?? [] {
+        var changed = replacing(base, "https://acme.youtrack.cloud/api", with: value + "/api")
+        changed = replacing(changed, "https://acme.youtrack.cloud", with: value)
+        #expect(throws: ApprovalProtocolError.self) { _ = try ValidatedPlanSnapshot(canonicalBytes: changed) }
+    }
+}
+
+@Test func sharedIPCFramesRoundTripAndValidateSuccessUnion() throws {
+    let requestFrame = try decodeHex(try fixtureString("ipc-request.hex"))
+    let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(requestFrame)
+    #expect(ApprovalIPCCodec.encodeRequest(challenge: challenge, snapshot: snapshot) == requestFrame)
+
+    let successFrame = try decodeHex(try fixtureString("ipc-success.hex"))
+    let validationTime = try #require(ISO8601DateFormatter().date(from: "2026-09-02T15:35:00Z"))
+    let response = try ApprovalIPCCodec.decodeAndValidateResponse(
+        successFrame,
+        expectedChallenge: challenge,
+        snapshot: snapshot,
+        now: validationTime
+    )
+    guard case let .success(success) = response else { Issue.record("expected success"); return }
+    let expectedReceipt = try fixture("ipc-success-receipt.json")
+    #expect(success.receipt.encodedReceiptBytes() == expectedReceipt)
+    #expect(ApprovalIPCCodec.encodeSuccess(challenge: challenge, keyIdentity: success.keyIdentity, receipt: success.receipt) == successFrame)
+
+    let errorFrame = try decodeHex(try fixtureString("ipc-error.hex"))
+    #expect(try ApprovalIPCCodec.decodeAndValidateResponse(
+        errorFrame, expectedChallenge: challenge, snapshot: snapshot, now: Date()
+    ) == .failure(.userCanceled))
+}
+
+@Test func receiptFactoryUsesOneKeyHandleOneSignatureAndSelfVerifies() throws {
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: try fixture("plan-comment-add.json"))
+    let signer = TestSigner()
+    let random = TestRandom()
+    let wholeSecond = try #require(ISO8601DateFormatter().date(from: "2026-09-02T15:34:56Z"))
+    let clock = TestClock(value: wholeSecond.addingTimeInterval(0.987))
+
+    let receipt = try ApprovalReceiptFactory.makeReceipt(
+        for: snapshot, signer: signer, random: random, clock: clock
+    )
+    #expect(signer.calls == 1)
+    #expect(random.calls == 2)
+    #expect(receipt.unsigned.issuedAt == "2026-09-02T15:34:56Z")
+    #expect(receipt.unsigned.expiresAt == "2026-09-02T15:36:56Z")
+    #expect(receipt.unsigned.planSHA256 == snapshot.sha256)
+    #expect(receipt.unsigned.keyFingerprintSHA256 == signer.keyIdentity.fingerprintSHA256)
+    _ = try ApprovalReceipt(receiptBytes: receipt.encodedReceiptBytes())
+}
+
+private final class TestSigner: ApprovalSigner {
+    private let key = P256.Signing.PrivateKey()
+    private(set) var calls = 0
+    lazy var keyIdentity: ApprovalSigningKeyIdentity = try! ApprovalSigningKeyIdentity(
+        generation: "test-1",
+        spkiDER: P256PublicKeyCodec.spkiDER(fromX963: key.publicKey.x963Representation)
+    )
+
+    func sign(message: Data) throws -> Data {
+        calls += 1
+        return try key.signature(for: message).derRepresentation
+    }
+}
+
+private final class TestRandom: CryptographicRandomSource {
+    private(set) var calls = 0
+    func randomBytes(count: Int) throws -> Data {
+        calls += 1
+        return Data((0..<count).map { UInt8(($0 + calls) & 0xFF) })
+    }
+}
+
+private struct TestClock: ApprovalClock {
+    let value: Date
+    func now() -> Date { value }
 }
 
 private func replacing(_ data: Data, _ old: String, with new: String) -> Data {

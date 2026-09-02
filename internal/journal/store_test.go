@@ -163,7 +163,7 @@ func largeJournalPlan(t *testing.T) intent.Plan {
 		intent.KindIssueUpdate,
 		request,
 		[]byte(`{"issue_id":"APP-1","issue_state_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","touched_fields_sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}`),
-		fixedID("YTAP-CCCCCCCCCCCCCCCCCCCCCCCCCC"),
+		fixedID("YTAP-AAAQEAYEAUDAOCAJBIFQYDIOB4"),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestGetRejectsMisnamedValidRecord(t *testing.T) {
 	if _, err := store.Create(context.Background(), plan); err != nil {
 		t.Fatal(err)
 	}
-	otherID := "YTAP-BBBBBBBBBBBBBBBBBBBBBBBBBB"
+	otherID := "YTAP-6DQNBQFQUCIIA4DAKBADAIAQAA"
 	raw, err := os.ReadFile(filepath.Join(store.directory, plan.PlanID+".json"))
 	if err != nil {
 		t.Fatal(err)

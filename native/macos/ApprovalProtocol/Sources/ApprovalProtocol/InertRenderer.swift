@@ -1,20 +1,15 @@
 import Foundation
 
-public struct ApprovalDisplaySnapshot: Equatable, Sendable {
-    public static let maximumBytes = 524_288
-
-    // Data is a copy-on-write value. This retained value is the single source
-    // for both the visible representation and the digest used by its caller.
-    public let bytes: Data
-
-    public init(bytes: Data) throws {
-        guard !bytes.isEmpty, bytes.count <= Self.maximumBytes else {
-            throw ApprovalProtocolError.inputTooLarge(limit: Self.maximumBytes)
-        }
-        self.bytes = bytes
+public enum ApprovalPlanRenderer {
+    public static func render(_ snapshot: ValidatedPlanSnapshot) -> String {
+        snapshot.inertEscapedBytes
     }
+}
 
-    public func inertEscapedBytes() -> String {
+enum InertByteCodec {
+    static let maximumBytes = ValidatedPlanSnapshot.maximumBytes
+
+    static func encode(_ bytes: Data) -> String {
         var output = ""
         output.reserveCapacity(bytes.count)
         let hex = Array("0123456789ABCDEF")
@@ -32,7 +27,7 @@ public struct ApprovalDisplaySnapshot: Equatable, Sendable {
         return output
     }
 
-    public static func decodeInertEscapedBytes(_ value: String) throws -> Data {
+    static func decode(_ value: String) throws -> Data {
         guard value.utf8.count <= maximumBytes * 4 else {
             throw ApprovalProtocolError.inputTooLarge(limit: maximumBytes * 4)
         }
@@ -78,7 +73,7 @@ public struct ApprovalDisplaySnapshot: Equatable, Sendable {
         guard !output.isEmpty else {
             throw ApprovalProtocolError.invalidEscapedBytes
         }
-        let canonical = try ApprovalDisplaySnapshot(bytes: output).inertEscapedBytes()
+        let canonical = encode(output)
         guard canonical == value else {
             throw ApprovalProtocolError.invalidEscapedBytes
         }

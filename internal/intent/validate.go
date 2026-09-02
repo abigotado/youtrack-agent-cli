@@ -1,15 +1,29 @@
 package intent
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"io"
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
 )
+
+type canonicalPlan struct {
+	SchemaVersion  int             `json:"schema_version"`
+	PlanID         string          `json:"plan_id"`
+	Kind           Kind            `json:"kind"`
+	Profile        ProfileSnapshot `json:"profile"`
+	Policy         ProjectPolicy   `json:"policy"`
+	Operation      Operation       `json:"operation"`
+	RequestSHA256  string          `json:"request_sha256"`
+	ExpectedSHA256 string          `json:"expected_sha256"`
+}
 
 const (
 	maxIdentityLength    = 256
@@ -22,7 +36,6 @@ const (
 )
 
 var (
-	planIDPattern     = regexp.MustCompile(`^YTAP-[A-Z2-7]{26}$`)
 	namePattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 	identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	projectKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,31}$`)
@@ -47,16 +60,6 @@ func ApprovalDisplayBytes(plan Plan) ([]byte, error) {
 }
 
 func canonicalBytesUnchecked(plan Plan) ([]byte, error) {
-	type canonicalPlan struct {
-		SchemaVersion  int             `json:"schema_version"`
-		PlanID         string          `json:"plan_id"`
-		Kind           Kind            `json:"kind"`
-		Profile        ProfileSnapshot `json:"profile"`
-		Policy         ProjectPolicy   `json:"policy"`
-		Operation      Operation       `json:"operation"`
-		RequestSHA256  string          `json:"request_sha256"`
-		ExpectedSHA256 string          `json:"expected_sha256"`
-	}
 	raw, err := json.Marshal(canonicalPlan{
 		SchemaVersion:  plan.SchemaVersion,
 		PlanID:         plan.PlanID,
@@ -73,6 +76,48 @@ func canonicalBytesUnchecked(plan Plan) ([]byte, error) {
 	return boundCanonicalPlan(raw)
 }
 
+// ParseApprovalSnapshot strictly decodes one canonical plan representation.
+// The caller supplies its protocol-specific byte bound, which is checked
+// before JSON decoding or field allocation. IntentSHA256 is reconstructed from
+// the exact canonical bytes because that self-referential field is omitted.
+func ParseApprovalSnapshot(raw []byte, maximumBytes int) (Plan, error) {
+	if maximumBytes <= 0 {
+		return Plan{}, fmt.Errorf("%w: approval snapshot maximum must be positive", ErrInvalidPlan)
+	}
+	if maximumBytes > MaxCanonicalPlanBytes {
+		maximumBytes = MaxCanonicalPlanBytes
+	}
+	if len(raw) == 0 || len(raw) > maximumBytes {
+		return Plan{}, fmt.Errorf("%w: approval snapshot is empty or exceeds %d bytes", ErrInputTooLarge, maximumBytes)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var wire canonicalPlan
+	if err := decoder.Decode(&wire); err != nil {
+		return Plan{}, fmt.Errorf("%w: decode approval snapshot: %v", ErrInvalidPlan, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return Plan{}, fmt.Errorf("%w: approval snapshot has trailing data", ErrInvalidPlan)
+	}
+	plan := Plan{
+		SchemaVersion: wire.SchemaVersion, PlanID: wire.PlanID, Kind: wire.Kind,
+		Profile: wire.Profile, Policy: wire.Policy, Operation: wire.Operation,
+		RequestSHA256: wire.RequestSHA256, ExpectedSHA256: wire.ExpectedSHA256,
+		IntentSHA256: digest(raw),
+	}
+	if err := plan.Validate(); err != nil {
+		return Plan{}, err
+	}
+	canonical, err := canonicalBytesUnchecked(plan)
+	if err != nil {
+		return Plan{}, err
+	}
+	if !bytes.Equal(canonical, raw) {
+		return Plan{}, fmt.Errorf("%w: approval snapshot is not in canonical field order and encoding", ErrInvalidPlan)
+	}
+	return plan, nil
+}
+
 func boundCanonicalPlan(raw []byte) ([]byte, error) {
 	if len(raw) > MaxCanonicalPlanBytes {
 		return nil, fmt.Errorf("%w: canonical plan exceeds %d bytes", ErrInputTooLarge, MaxCanonicalPlanBytes)
@@ -86,8 +131,8 @@ func (plan Plan) Validate() error {
 	if plan.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("%w: unsupported schema version %d", ErrInvalidPlan, plan.SchemaVersion)
 	}
-	if !planIDPattern.MatchString(plan.PlanID) {
-		return fmt.Errorf("%w: plan ID is not canonical", ErrInvalidPlan)
+	if err := ValidatePlanID(plan.PlanID); err != nil {
+		return err
 	}
 	if err := validateProfile(plan.Profile); err != nil {
 		return err
@@ -128,8 +173,8 @@ func validateProfile(profile ProfileSnapshot) error {
 	if err := validateInstance(profile.Instance); err != nil {
 		return err
 	}
-	if profile.RESTBaseURL != profile.Instance+"/api" {
-		return fmt.Errorf("%w: REST base URL does not derive from the selected instance", ErrInvalidPlan)
+	if err := endpoint.ValidateApprovalRESTBaseURL(profile.Instance, profile.RESTBaseURL); err != nil {
+		return fmt.Errorf("%w: REST base URL does not derive from the selected instance: %v", ErrInvalidPlan, err)
 	}
 	if err := validateInstance(profile.OAuthIssuerURL); err != nil {
 		return fmt.Errorf("%w: OAuth issuer URL is invalid", ErrInvalidPlan)
@@ -150,15 +195,8 @@ func validateProfile(profile ProfileSnapshot) error {
 }
 
 func validateInstance(raw string) error {
-	if raw == "" || len(raw) > 2048 || strings.TrimSpace(raw) != raw {
-		return fmt.Errorf("%w: instance URL is empty, oversized, or non-canonical", ErrInvalidPlan)
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("%w: instance URL must be an absolute credential-free HTTPS URL", ErrInvalidPlan)
-	}
-	if parsed.Hostname() != strings.ToLower(parsed.Hostname()) || parsed.Path == "/" || strings.HasSuffix(parsed.Path, "/") {
-		return fmt.Errorf("%w: instance URL is not canonical", ErrInvalidPlan)
+	if err := endpoint.ValidateApprovalURL(raw); err != nil {
+		return fmt.Errorf("%w: instance URL is outside the approval URL grammar: %v", ErrInvalidPlan, err)
 	}
 	return nil
 }

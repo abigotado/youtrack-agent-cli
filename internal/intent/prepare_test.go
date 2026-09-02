@@ -282,10 +282,10 @@ func TestBoundCanonicalPlanBoundaries(t *testing.T) {
 func escapeHeavyBindings() (ProfileSnapshot, ProjectPolicy) {
 	profile, policy := validBindings()
 	instancePrefix := "https://acme.youtrack.cloud/"
-	profile.Instance = instancePrefix + strings.Repeat("<", 2048-len(instancePrefix))
+	profile.Instance = instancePrefix + strings.Repeat("a", 2048-len(instancePrefix)-len("/api"))
 	profile.RESTBaseURL = profile.Instance + "/api"
 	issuerPrefix := "https://hub.example.test/"
-	profile.OAuthIssuerURL = issuerPrefix + strings.Repeat("<", 2048-len(issuerPrefix))
+	profile.OAuthIssuerURL = issuerPrefix + strings.Repeat("a", 2048-len(issuerPrefix))
 	profile.CredentialGeneration = strings.Repeat("<", maxIdentityLength)
 	profile.Account.Login = strings.Repeat("<", maxLoginLength)
 	return profile, policy

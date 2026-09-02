@@ -141,10 +141,6 @@ func validateCanonicalApprovalID(value, prefix string) error {
 	return nil
 }
 
-func isCanonicalPlanID(value string) bool {
-	return len(value) == len("YTAP-")+idEncodedBytes && value[:len("YTAP-")] == "YTAP-" && isUpperBase32(value[len("YTAP-"):])
-}
-
 func isCanonicalIdentifier(value string) bool {
 	if len(value) == 0 || len(value) > 128 || !isASCIIAlphaNumeric(value[0]) {
 		return false
@@ -175,15 +171,6 @@ func isCanonicalKeyGeneration(value string) bool {
 	}
 	for index := 1; index < len(value); index++ {
 		if !isASCIIAlphaNumeric(value[index]) && value[index] != '.' && value[index] != '_' && value[index] != '-' {
-			return false
-		}
-	}
-	return true
-}
-
-func isUpperBase32(value string) bool {
-	for index := range len(value) {
-		if (value[index] < 'A' || value[index] > 'Z') && (value[index] < '2' || value[index] > '7') {
 			return false
 		}
 	}

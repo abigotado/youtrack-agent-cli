@@ -109,6 +109,23 @@ public struct P256Signature: Equatable, Sendable {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    public static func normalizeLowS(der: Data) throws -> P256Signature {
+        guard der.count <= maximumDERBytes, der.count >= 8 else { throw ApprovalProtocolError.invalidSignature }
+        let bytes = Array(der)
+        guard bytes[0] == 0x30, Int(bytes[1]) == bytes.count - 2 else { throw ApprovalProtocolError.invalidSignature }
+        var offset = 2
+        let r = try parseInteger(bytes, offset: &offset)
+        let s = try parseInteger(bytes, offset: &offset)
+        guard offset == bytes.count, isScalar(r), isScalar(s) else { throw ApprovalProtocolError.invalidSignature }
+        let normalizedS = isLowS(s) ? Array(s) : subtractFromOrder(Array(s))
+        var body = Data()
+        appendInteger(Array(r), into: &body)
+        appendInteger(normalizedS, into: &body)
+        var result = Data([0x30, UInt8(body.count)])
+        result.append(body)
+        return try P256Signature(der: result)
+    }
+
     private static func parseInteger(_ bytes: [UInt8], offset: inout Int) throws -> ArraySlice<UInt8> {
         guard offset + 2 <= bytes.count, bytes[offset] == 0x02 else {
             throw ApprovalProtocolError.invalidSignature
@@ -151,5 +168,31 @@ public struct P256Signature: Equatable, Sendable {
         ]
         guard integer.count == halfOrder.count else { return integer.count < halfOrder.count }
         return integer.elementsEqual(halfOrder) || integer.lexicographicallyPrecedes(halfOrder)
+    }
+
+    private static func subtractFromOrder(_ scalar: [UInt8]) -> [UInt8] {
+        var order: [UInt8] = [
+            0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84,
+            0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51,
+        ]
+        let padded = Array(repeating: UInt8(0), count: 32 - scalar.count) + scalar
+        var borrow = 0
+        for index in stride(from: 31, through: 0, by: -1) {
+            var value = Int(order[index]) - Int(padded[index]) - borrow
+            if value < 0 { value += 256; borrow = 1 } else { borrow = 0 }
+            order[index] = UInt8(value)
+        }
+        while order.count > 1, order.first == 0 { order.removeFirst() }
+        return order
+    }
+
+    private static func appendInteger(_ magnitude: [UInt8], into output: inout Data) {
+        let needsZero = magnitude.first! & 0x80 != 0
+        output.append(0x02)
+        output.append(UInt8(magnitude.count + (needsZero ? 1 : 0)))
+        if needsZero { output.append(0) }
+        output.append(contentsOf: magnitude)
     }
 }
