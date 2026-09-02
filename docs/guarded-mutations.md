@@ -32,7 +32,9 @@ exact bytes returned by `intent.ApprovalDisplayBytes`, stores their SHA-256 as
 `approval.SigningBytes`. The signature therefore covers the displayed-plan
 hash together with receipt ID, nonce, TTL, key identity, account, project,
 schema, request, and expected-state bindings. A cross-language golden vector
-pins the unsigned-receipt encoding.
+pins the unsigned-receipt encoding. The [Gate 1A protocol](gate1a-protocol.md)
+freezes this data-only contract; it does not constitute a trusted helper or a
+passed Gate 1A.
 4. `mutation apply` validates the receipt signature, expiry, nonce, plan/payload
    and schema hashes, current identity, project policy, and preconditions. It
    records `in_flight`, sends at most one mutating request, and performs bounded

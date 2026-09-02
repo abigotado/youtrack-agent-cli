@@ -9,8 +9,12 @@ import (
 )
 
 const (
-	recordVersion  = 1
-	maxRecordBytes = 256 << 10
+	recordVersion = 1
+	// maxRecordBytes covers one maximum canonical plan after indented record
+	// encoding, 16 maximally escaped evidence summaries, record metadata, and a
+	// future 4 KiB signed receipt. Keep the budget tests in sync when any of
+	// those independently bounded fields change.
+	maxRecordBytes = 2 * intent.MaxCanonicalPlanBytes
 )
 
 // State is one durable point in the non-replayable mutation lifecycle.

@@ -14,6 +14,7 @@ import (
 	"github.com/abigotado/youtrack-agent-cli/internal/auth"
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
+	"github.com/abigotado/youtrack-agent-cli/internal/intent"
 	"github.com/abigotado/youtrack-agent-cli/internal/journal"
 	"github.com/abigotado/youtrack-agent-cli/internal/profile"
 	"github.com/abigotado/youtrack-agent-cli/internal/writepolicy"
@@ -135,6 +136,39 @@ func TestPrepareMutationIsOfflineAndExportsExclusivePlan(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("plan mode=%v", info.Mode().Perm())
+	}
+}
+
+func TestPrepareMutationPersistsEscapeHeavyPlanAboveFormerJournalLimit(t *testing.T) {
+	service, credentials, transport := mutationService(t)
+	fieldType := strings.Repeat("<", 128)
+	literal := strings.Repeat("<", 8<<10)
+	fields := `[{"field_id":"1","field_type":"` + fieldType + `","text_value":"` + literal +
+		`"},{"field_id":"2","field_type":"` + fieldType + `","text_value":"` + literal +
+		`"},{"field_id":"3","field_type":"` + fieldType + `","text_value":"` + literal + `"}]`
+	request := []byte(`{"issue_id":"APP-1","set":{"summary":"` + strings.Repeat("<", 1024) +
+		`","description":"` + strings.Repeat("<", 32<<10) + `","custom_fields":` + fields + `}}`)
+	record, err := service.PrepareMutation(context.Background(), PrepareInput{
+		Profile: "work", Kind: intent.KindIssueUpdate, Project: writepolicy.Project{ID: "0-1", Key: "APP"},
+		SchemaSHA256: strings.Repeat("a", 64), RequestJSON: request,
+		ExpectedJSON: []byte(`{"issue_id":"APP-1","issue_state_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","touched_fields_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := intent.CanonicalBytes(record.Plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(canonical) <= 256<<10 {
+		t.Fatalf("canonical plan is %d bytes; regression no longer exercises the former journal limit", len(canonical))
+	}
+	stored, err := service.Journal.Get(context.Background(), record.Plan.PlanID)
+	if err != nil || stored.Plan.IntentSHA256 != record.Plan.IntentSHA256 {
+		t.Fatalf("stored plan=%#v err=%v", stored.Plan, err)
+	}
+	if credentials.calls != 0 || transport.calls != 0 {
+		t.Fatalf("offline prepare touched credentials=%d network=%d", credentials.calls, transport.calls)
 	}
 }
 

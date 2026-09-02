@@ -7,11 +7,9 @@ package approval
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -22,13 +20,19 @@ import (
 const (
 	// ReceiptSchemaVersion is the first durable approval receipt schema.
 	ReceiptSchemaVersion = 1
-	defaultMaximumTTL    = 5 * time.Minute
-	defaultClockSkew     = 30 * time.Second
-)
+	// MaxApprovalDisplayBytes bounds the immutable canonical plan snapshot.
+	MaxApprovalDisplayBytes = intent.MaxCanonicalPlanBytes
+	// MaxReceiptBytes bounds one canonical signed receipt.
+	MaxReceiptBytes = 4 << 10
+	// MaxSigningBytes bounds the canonical unsigned receipt signed by the helper.
+	MaxSigningBytes = 3 << 10
+	// MaxKeyGenerationBytes bounds the non-secret helper-key generation label.
+	MaxKeyGenerationBytes = 64
+	// MaximumReceiptTTL is the longest receipt lifetime accepted by protocol v1.
+	MaximumReceiptTTL = 5 * time.Minute
 
-var (
-	receiptIDPattern = regexp.MustCompile(`^YTAR-[A-Z2-7]{26}$`)
-	noncePattern     = regexp.MustCompile(`^YTAN-[A-Z2-7]{26}$`)
+	defaultMaximumTTL = MaximumReceiptTTL
+	defaultClockSkew  = 30 * time.Second
 )
 
 // Receipt is a non-secret, short-lived signed binding to one exact plan.
@@ -88,6 +92,9 @@ func (v BindingVerifier) Verify(ctx context.Context, plan intent.Plan, receipt R
 	if err != nil {
 		return fmt.Errorf("encode displayed approval plan: %w", err)
 	}
+	if err := ValidateApprovalDisplayBytes(displayed); err != nil {
+		return err
+	}
 	displayedHash := sha256.Sum256(displayed)
 	displayedSHA256 := hex.EncodeToString(displayedHash[:])
 	if err := validateReceipt(receipt); err != nil {
@@ -132,8 +139,8 @@ func (v BindingVerifier) Verify(ctx context.Context, plan intent.Plan, receipt R
 	if err != nil {
 		return err
 	}
-	signature, err := base64.RawURLEncoding.DecodeString(receipt.Signature)
-	if err != nil || len(signature) == 0 {
+	signature, err := DecodeP256DERSignature(receipt.Signature)
+	if err != nil {
 		return receiptError("RECEIPT_SIGNATURE_INVALID", "the approval receipt signature is malformed")
 	}
 	if err := v.Signatures.Verify(ctx, receipt.KeyGeneration, receipt.KeyFingerprintSHA256, message, signature); err != nil {
@@ -146,37 +153,42 @@ func (v BindingVerifier) Verify(ctx context.Context, plan intent.Plan, receipt R
 // displays the canonical plan bytes, stores SHA256(displayed bytes) in
 // PlanSHA256, then signs this unsigned-receipt encoding. Signature is excluded.
 func SigningBytes(receipt Receipt) ([]byte, error) {
-	type unsignedReceipt struct {
-		SchemaVersion         int       `json:"schema_version"`
-		ReceiptID             string    `json:"receipt_id"`
-		Nonce                 string    `json:"nonce"`
-		PlanID                string    `json:"plan_id"`
-		PlanSHA256            string    `json:"plan_sha256"`
-		ProfileIdentitySHA256 string    `json:"profile_identity_sha256"`
-		AccountID             string    `json:"account_id"`
-		ProjectID             string    `json:"project_id"`
-		ProjectKey            string    `json:"project_key"`
-		SchemaSHA256          string    `json:"schema_sha256"`
-		RequestSHA256         string    `json:"request_sha256"`
-		ExpectedSHA256        string    `json:"expected_sha256"`
-		IssuedAt              time.Time `json:"issued_at"`
-		ExpiresAt             time.Time `json:"expires_at"`
-		KeyGeneration         string    `json:"key_generation"`
-		KeyFingerprintSHA256  string    `json:"key_fingerprint_sha256"`
+	if err := validateUnsignedReceipt(receipt); err != nil {
+		return nil, err
 	}
-	raw, err := json.Marshal(unsignedReceipt{
+	issuedAt, err := canonicalReceiptTime(receipt.IssuedAt)
+	if err != nil {
+		return nil, err
+	}
+	expiresAt, err := canonicalReceiptTime(receipt.ExpiresAt)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(unsignedReceiptWire{
 		SchemaVersion: receipt.SchemaVersion, ReceiptID: receipt.ReceiptID, Nonce: receipt.Nonce,
 		PlanID: receipt.PlanID, PlanSHA256: receipt.PlanSHA256,
 		ProfileIdentitySHA256: receipt.ProfileIdentitySHA256, AccountID: receipt.AccountID,
 		ProjectID: receipt.ProjectID, ProjectKey: receipt.ProjectKey, SchemaSHA256: receipt.SchemaSHA256,
 		RequestSHA256: receipt.RequestSHA256, ExpectedSHA256: receipt.ExpectedSHA256,
-		IssuedAt: receipt.IssuedAt.UTC(), ExpiresAt: receipt.ExpiresAt.UTC(),
+		IssuedAt: issuedAt, ExpiresAt: expiresAt,
 		KeyGeneration: receipt.KeyGeneration, KeyFingerprintSHA256: receipt.KeyFingerprintSHA256,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal unsigned approval receipt: %w", err)
 	}
+	if len(raw) > MaxSigningBytes {
+		return nil, receiptError("RECEIPT_INVALID", "the approval signing message exceeds the protocol limit")
+	}
 	return raw, nil
+}
+
+// ValidateApprovalDisplayBytes applies the v1 byte bound before a native
+// helper copies, decodes, or renders an immutable approval snapshot.
+func ValidateApprovalDisplayBytes(canonicalPlan []byte) error {
+	if len(canonicalPlan) == 0 || len(canonicalPlan) > MaxApprovalDisplayBytes {
+		return receiptError("APPROVAL_DISPLAY_INVALID", "the approval display snapshot is empty or exceeds the protocol limit")
+	}
+	return nil
 }
 
 // Unsupported is the mandatory adapter until Gate 1A proves a trusted helper.
@@ -198,10 +210,29 @@ func (Unsupported) Verify(ctx context.Context, plan intent.Plan, receipt Receipt
 }
 
 func validateReceipt(receipt Receipt) error {
-	if receipt.SchemaVersion != ReceiptSchemaVersion || !receiptIDPattern.MatchString(receipt.ReceiptID) || !noncePattern.MatchString(receipt.Nonce) {
+	if err := validateUnsignedReceipt(receipt); err != nil {
+		return err
+	}
+	if _, err := DecodeP256DERSignature(receipt.Signature); err != nil {
+		return receiptError("RECEIPT_SIGNATURE_INVALID", "the approval receipt signature is malformed")
+	}
+	return nil
+}
+
+func validateUnsignedReceipt(receipt Receipt) error {
+	if receipt.SchemaVersion != ReceiptSchemaVersion || validateCanonicalApprovalID(receipt.ReceiptID, receiptIDPrefix) != nil || validateCanonicalApprovalID(receipt.Nonce, noncePrefix) != nil {
 		return receiptError("RECEIPT_INVALID", "the approval receipt identifiers or schema are invalid")
 	}
-	if receipt.IssuedAt.IsZero() || receipt.ExpiresAt.IsZero() || !receipt.ExpiresAt.After(receipt.IssuedAt) {
+	if !isCanonicalPlanID(receipt.PlanID) || !isCanonicalIdentifier(receipt.AccountID) || !isCanonicalIdentifier(receipt.ProjectID) || !isCanonicalProjectKey(receipt.ProjectKey) {
+		return receiptError("RECEIPT_INVALID", "the approval receipt contains a non-canonical plan, account, or project binding")
+	}
+	if _, err := canonicalReceiptTime(receipt.IssuedAt); err != nil {
+		return err
+	}
+	if _, err := canonicalReceiptTime(receipt.ExpiresAt); err != nil {
+		return err
+	}
+	if !receipt.ExpiresAt.After(receipt.IssuedAt) || receipt.ExpiresAt.Sub(receipt.IssuedAt) > MaximumReceiptTTL {
 		return receiptError("RECEIPT_TTL_INVALID", "the approval receipt time window is invalid")
 	}
 	for _, value := range []string{receipt.PlanSHA256, receipt.ProfileIdentitySHA256, receipt.SchemaSHA256, receipt.RequestSHA256, receipt.ExpectedSHA256, receipt.KeyFingerprintSHA256} {
@@ -209,10 +240,25 @@ func validateReceipt(receipt Receipt) error {
 			return receiptError("RECEIPT_INVALID", "the approval receipt contains a non-canonical digest")
 		}
 	}
-	if receipt.PlanID == "" || receipt.AccountID == "" || receipt.ProjectID == "" || receipt.ProjectKey == "" || strings.TrimSpace(receipt.KeyGeneration) == "" || receipt.Signature == "" {
-		return receiptError("RECEIPT_INVALID", "the approval receipt is missing a required binding")
+	if !isCanonicalKeyGeneration(receipt.KeyGeneration) {
+		return receiptError("RECEIPT_INVALID", "the approval receipt key generation is not canonical")
 	}
 	return nil
+}
+
+func canonicalReceiptTime(value time.Time) (string, error) {
+	if value.IsZero() || value.Year() < 1 || value.Year() > 9999 || value.Nanosecond() != 0 {
+		return "", receiptError("RECEIPT_TTL_INVALID", "approval receipt times must use whole seconds")
+	}
+	_, offset := value.Zone()
+	if offset != 0 {
+		return "", receiptError("RECEIPT_TTL_INVALID", "approval receipt times must use UTC")
+	}
+	encoded := value.UTC().Format(time.RFC3339)
+	if len(encoded) != len("2006-01-02T15:04:05Z") {
+		return "", receiptError("RECEIPT_TTL_INVALID", "approval receipt times must use four-digit RFC3339 years")
+	}
+	return encoded, nil
 }
 
 func isSHA256(value string) bool {

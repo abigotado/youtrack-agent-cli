@@ -104,6 +104,73 @@ func TestStoreCASReplayAndCrashSemantics(t *testing.T) {
 	}
 }
 
+func TestStorePersistsPlanAboveFormerRecordLimit(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "journal"))
+	plan := largeJournalPlan(t)
+	canonical, err := intent.CanonicalBytes(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(canonical) <= 256<<10 {
+		t.Fatalf("canonical plan is %d bytes; regression no longer exercises the former journal limit", len(canonical))
+	}
+	record, err := store.Create(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Get(context.Background(), plan.PlanID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Revision != record.Revision || stored.Plan.IntentSHA256 != plan.IntentSHA256 {
+		t.Fatalf("stored record does not match created plan: %#v", stored)
+	}
+	info, err := os.Stat(filepath.Join(store.directory, plan.PlanID+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() <= 256<<10 || info.Size() > maxRecordBytes {
+		t.Fatalf("journal record size = %d, want former limit < size <= %d", info.Size(), maxRecordBytes)
+	}
+}
+
+func TestJournalRecordBudgetCoversBoundedEnvelope(t *testing.T) {
+	// Canonical plan, worst-case escaped evidence, future full receipt, and a
+	// conservative indentation/metadata reserve must fit the durable cap.
+	const (
+		maximumEvidenceBudget = 16 * 6 * 1024
+		futureReceiptBudget   = 4 << 10
+		envelopeBudget        = 128 << 10
+	)
+	required := intent.MaxCanonicalPlanBytes + maximumEvidenceBudget + futureReceiptBudget + envelopeBudget
+	if required >= maxRecordBytes {
+		t.Fatalf("journal budget %d does not cover required bounded envelope %d", maxRecordBytes, required)
+	}
+}
+
+func largeJournalPlan(t *testing.T) intent.Plan {
+	t.Helper()
+	fieldType := strings.Repeat("<", 128)
+	literal := strings.Repeat("<", 8<<10)
+	fields := `[{"field_id":"1","field_type":"` + fieldType + `","text_value":"` + literal +
+		`"},{"field_id":"2","field_type":"` + fieldType + `","text_value":"` + literal +
+		`"},{"field_id":"3","field_type":"` + fieldType + `","text_value":"` + literal + `"}]`
+	request := []byte(`{"issue_id":"APP-1","set":{"summary":"` + strings.Repeat("<", 1024) +
+		`","description":"` + strings.Repeat("<", 32<<10) + `","custom_fields":` + fields + `}}`)
+	plan, err := intent.PrepareWithSource(
+		intent.ProfileSnapshot{Name: "work", Instance: "https://acme.youtrack.cloud", RESTBaseURL: "https://acme.youtrack.cloud/api", OAuthIssuerURL: "https://hub.example.test", IdentitySHA256: strings.Repeat("a", 64), CredentialGeneration: "gen-1", Account: intent.AccountBinding{ID: "1-2", Login: "alice"}},
+		intent.ProjectPolicy{Project: intent.ProjectBinding{ID: "0-1", Key: "APP"}, PolicyRevision: 1, PolicySHA256: strings.Repeat("b", 64), SchemaSHA256: strings.Repeat("c", 64), ExecutorAssurance: "rest-best-effort", AuthorizedCapability: "issue-update", NotificationPolicy: "youtrack-default", ReconciliationStrategy: "bounded-exact-and-marker"},
+		intent.KindIssueUpdate,
+		request,
+		[]byte(`{"issue_id":"APP-1","issue_state_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","touched_fields_sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}`),
+		fixedID("YTAP-CCCCCCCCCCCCCCCCCCCCCCCCCC"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
 func TestStoreDistinguishesPreAndPostRenameFailures(t *testing.T) {
 	plan := journalPlan(t)
 	t.Run("rename failed before commit", func(t *testing.T) {
