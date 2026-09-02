@@ -43,6 +43,7 @@ This packet resolves the conflict conservatively: **an endpoint without an expli
 - [Implementation plan and decision gates](06-implementation-plan.md)
 - [Evidence ledger](07-evidence.md)
 - [Implementation decision and Gate 1A](08-implementation-decision.md)
+- [Gate 1A approval-helper evidence report](09-gate-1a-report.md)
 
 ## Recorded operator direction
 
@@ -60,4 +61,5 @@ Build a dedicated CLI and Agent Skill using the same provider-neutral harness an
 
 A local repository and implementation harness now exist beside this packet. No
 YouTrack app or Agent Skill was installed, no live instance was contacted, no
-credential was accessed, and nothing was published.
+credential was accessed, and the source was published for review without a
+release, Formula, Cask, or installed package.

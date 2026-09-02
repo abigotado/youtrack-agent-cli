@@ -14,12 +14,17 @@ const (
 	MaxRequestBytes = 64 << 10
 	// MaxExpectedBytes bounds one expected-state snapshot before decoding.
 	MaxExpectedBytes = 16 << 10
+	// MaxCanonicalPlanBytes bounds every produced and validated canonical plan.
+	// It covers the accepted request domain after encoding/json HTML escaping
+	// plus independently bounded profile, policy, and expected-state metadata.
+	MaxCanonicalPlanBytes = 512 << 10
 )
 
 var (
 	// ErrInvalidPlan means a plan or one of its bindings is malformed.
 	ErrInvalidPlan = errors.New("invalid mutation plan")
-	// ErrInputTooLarge means a bounded JSON input exceeded its contract limit.
+	// ErrInputTooLarge means bounded input or its canonical plan exceeded a
+	// contract limit.
 	ErrInputTooLarge = errors.New("mutation input is too large")
 )
 

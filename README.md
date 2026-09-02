@@ -105,6 +105,7 @@ symlink-safe, idempotent, and never configures MCP, OAuth, or credentials.
 gofmt -l .
 go vet ./...
 go test -race ./...
+swift test --package-path native/macos/ApprovalProtocol
 python3 ~/.agents/compiler.py --source .agents --root . --scope project --check
 python3 .agents/scripts/sync-rules.py --check
 python3 -m unittest discover -s .agents/tests -p 'test_*.py'

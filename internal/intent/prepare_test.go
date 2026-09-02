@@ -136,6 +136,86 @@ func TestApprovalDisplayBytesContainEverySafetyBinding(t *testing.T) {
 	}
 }
 
+func TestCanonicalPlanLimitCoversEscapeHeavyMaximumKinds(t *testing.T) {
+	profile, policy := escapeHeavyBindings()
+	tests := []struct {
+		name     string
+		kind     Kind
+		request  []byte
+		expected []byte
+	}{
+		{name: "issue create", kind: KindIssueCreate, request: escapeHeavyCreateRequest(), expected: []byte(`{"project_state_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}`)},
+		{name: "issue update", kind: KindIssueUpdate, request: escapeHeavyUpdateRequest(), expected: []byte(`{"issue_id":"APP-1","issue_state_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","touched_fields_sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}`)},
+		{name: "comment add", kind: KindCommentAdd, request: []byte(`{"issue_id":"APP-1","text":"` + strings.Repeat("<", maxBodyLength) + `","visibility":{"mode":"public"},"marker":"none"}`), expected: []byte(`{"issue_id":"APP-1","issue_state_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.request) > MaxRequestBytes {
+				t.Fatalf("test request is %d bytes, above input contract", len(tt.request))
+			}
+			policy.AuthorizedCapability = authorizedCapability(tt.kind)
+			plan, err := PrepareWithSource(profile, policy, tt.kind, tt.request, tt.expected, fixedIDSource("YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			display, err := ApprovalDisplayBytes(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(display) <= 96<<10 {
+				t.Fatalf("escape-heavy regression plan is only %d bytes; it no longer proves the former 96 KiB limit was insufficient", len(display))
+			}
+			if len(display) > MaxCanonicalPlanBytes {
+				t.Fatalf("canonical display is %d bytes, above %d-byte invariant", len(display), MaxCanonicalPlanBytes)
+			}
+			if err := plan.Validate(); err != nil {
+				t.Fatalf("prepared plan does not validate: %v", err)
+			}
+		})
+	}
+}
+
+func TestBoundCanonicalPlanBoundaries(t *testing.T) {
+	if _, err := boundCanonicalPlan(bytes.Repeat([]byte{'x'}, MaxCanonicalPlanBytes)); err != nil {
+		t.Fatalf("exact maximum rejected: %v", err)
+	}
+	if _, err := boundCanonicalPlan(bytes.Repeat([]byte{'x'}, MaxCanonicalPlanBytes+1)); !errors.Is(err, ErrInputTooLarge) {
+		t.Fatalf("one byte over maximum error = %v, want %v", err, ErrInputTooLarge)
+	}
+}
+
+func escapeHeavyBindings() (ProfileSnapshot, ProjectPolicy) {
+	profile, policy := validBindings()
+	instancePrefix := "https://acme.youtrack.cloud/"
+	profile.Instance = instancePrefix + strings.Repeat("<", 2048-len(instancePrefix))
+	profile.RESTBaseURL = profile.Instance + "/api"
+	issuerPrefix := "https://hub.example.test/"
+	profile.OAuthIssuerURL = issuerPrefix + strings.Repeat("<", 2048-len(issuerPrefix))
+	profile.CredentialGeneration = strings.Repeat("<", maxIdentityLength)
+	profile.Account.Login = strings.Repeat("<", maxLoginLength)
+	return profile, policy
+}
+
+func escapeHeavyCreateRequest() []byte {
+	return []byte(`{"summary":"` + strings.Repeat("<", maxSummaryLength) +
+		`","description":"` + strings.Repeat("<", maxBodyLength) +
+		`","visibility":{"mode":"public"},"custom_fields":` + escapeHeavyFields() + `,"marker":"none"}`)
+}
+
+func escapeHeavyUpdateRequest() []byte {
+	return []byte(`{"issue_id":"APP-1","set":{"summary":"` + strings.Repeat("<", maxSummaryLength) +
+		`","description":"` + strings.Repeat("<", maxBodyLength) +
+		`","custom_fields":` + escapeHeavyFields() + `}}`)
+}
+
+func escapeHeavyFields() string {
+	fieldType := strings.Repeat("<", maxFieldTypeLength)
+	literal := strings.Repeat("<", maxLiteralValueBytes)
+	return `[{"field_id":"1","field_type":"` + fieldType + `","text_value":"` + literal +
+		`"},{"field_id":"2","field_type":"` + fieldType + `","text_value":"` + literal +
+		`"},{"field_id":"3","field_type":"` + fieldType + `","text_value":"` + literal + `"}]`
+}
+
 func TestPreparePackageHasNoOnlineOrCredentialImports(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {

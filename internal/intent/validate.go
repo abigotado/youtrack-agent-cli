@@ -70,6 +70,13 @@ func canonicalBytesUnchecked(plan Plan) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal canonical plan: %w", err)
 	}
+	return boundCanonicalPlan(raw)
+}
+
+func boundCanonicalPlan(raw []byte) ([]byte, error) {
+	if len(raw) > MaxCanonicalPlanBytes {
+		return nil, fmt.Errorf("%w: canonical plan exceeds %d bytes", ErrInputTooLarge, MaxCanonicalPlanBytes)
+	}
 	return raw, nil
 }
 

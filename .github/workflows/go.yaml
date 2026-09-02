@@ -76,6 +76,10 @@ jobs:
           CGO_ENABLED=0 go list -f '{{join .GoFiles "\n"}}' ./internal/auth \
             | grep -Fxq 'keychain_unsupported.go'
 
+      - name: Gate 1A cross-language protocol tests
+        if: runner.os == 'macOS'
+        run: swift test --package-path native/macos/ApprovalProtocol
+
       - name: Homebrew offline-readiness rehearsal
         if: runner.os == 'macOS'
         run: |
