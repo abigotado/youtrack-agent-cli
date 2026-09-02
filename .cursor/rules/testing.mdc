@@ -1,0 +1,25 @@
+---
+description: youtrack-agent-cli table-driven tests and boundary mocking conventions.
+alwaysApply: false
+globs: "**/*_test.go"
+---
+
+# Testing
+
+Use table-driven tests with named `t.Run` cases and test boundaries rather than
+private implementation detail.
+
+- HTTP: `httptest`; never call live YouTrack.
+- Secret store and approval: injected fakes; never touch real credentials or UI.
+- Filesystem: `t.TempDir()`; never write the developer's home.
+- Environment: `t.Setenv()`.
+
+Cover fixed-origin redirect refusal, bounded compressed/decompressed bodies,
+non-JSON errors, opaque pagination reconstruction, explicit-profile failures,
+exact reads, search limits, untrusted-content inertness, the six-tool MCP
+allowlist and mutation-tool refusal, offline prepare with a network trap,
+receipt/hash/precondition mismatch, one-shot dispatch, crash recovery, and
+ambiguous reconciliation without replay.
+
+Exit codes and envelope shape are contract tests. Before review run `gofmt -l
+.`, `go vet ./...`, and `go test -race ./...`.

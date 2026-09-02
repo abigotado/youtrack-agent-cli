@@ -1,0 +1,26 @@
+{
+  "name": "work",
+  "service_url": "https://youtrack.example.com",
+  "rest_base_url": "https://youtrack.example.com/api",
+  "mcp_url": "https://youtrack.example.com/mcp?tools=get_current_user,search_issues,get_issue,get_issue_comments,get_project,get_issue_fields_schema&enableToolOutputSchema=true",
+  "oauth": {
+    "issuer_url": "https://youtrack.example.com",
+    "authorization_url": "https://youtrack.example.com/api/rest/oauth2/auth",
+    "token_url": "https://youtrack.example.com/api/rest/oauth2/token",
+    "client_id": "registered-public-client",
+    "scopes": [
+      "YouTrack"
+    ],
+    "redirect_uri": "http://127.0.0.1:18987/oauth/callback"
+  },
+  "expected_account_id": "1-1",
+  "expected_login": "operator",
+  "capabilities": [
+    "read",
+    "issue-create",
+    "issue-update",
+    "comment-add"
+  ],
+  "executor": "rest-best-effort",
+  "assurance": "best-effort"
+}

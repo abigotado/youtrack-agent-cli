@@ -1,0 +1,12 @@
+# Distribution is deliberately disabled until Gate 1A produces an audited,
+# signed macOS build with the native Keychain and LocalAuthentication helper.
+# Keeping a checked GoReleaser sentinel makes an accidental local invocation
+# fail closed instead of publishing portable binaries with no supported secret
+# store or approval path.
+version: 2
+
+project_name: youtrack-agent-cli
+
+builds:
+  - id: distribution-disabled
+    skip: true

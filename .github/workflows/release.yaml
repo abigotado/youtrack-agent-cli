@@ -1,0 +1,22 @@
+name: release-disabled
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# This workflow is intentionally a non-publishing guard. Enabling publication
+# requires an explicit architecture decision after Gate 1A and an audited,
+# signed macOS distribution path exist.
+jobs:
+  release-disabled:
+    name: Distribution remains disabled
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse artifact publication
+        run: |
+          echo "Distribution is disabled until Gate 1A and signed macOS packaging pass review."

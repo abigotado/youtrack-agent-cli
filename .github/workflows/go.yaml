@@ -1,0 +1,171 @@
+name: go
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Git Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::These files are not gofmt-clean:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Verify module checksums
+        run: go mod verify
+
+      - name: Vulnerability scan
+        if: runner.os == 'Linux'
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: Darwin credential backend build modes
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/youtrack-agent-cli-native" ./cmd/youtrack-agent-cli
+          CGO_ENABLED=1 go list -f '{{join .CgoFiles "\n"}}' ./internal/auth \
+            | grep -Fxq 'keychain_darwin.go'
+          otool -L "${RUNNER_TEMP}/youtrack-agent-cli-native" | grep -Fq '/Security.framework/'
+          if grep -aFq '/usr/bin/security' "${RUNNER_TEMP}/youtrack-agent-cli-native"; then
+            echo "::error::native Darwin binary contains the forbidden security subprocess path"
+            exit 1
+          fi
+          CGO_ENABLED=0 go build -o "${RUNNER_TEMP}/youtrack-agent-cli-unsupported" ./cmd/youtrack-agent-cli
+          CGO_ENABLED=0 go list -f '{{join .GoFiles "\n"}}' ./internal/auth \
+            | grep -Fxq 'keychain_unsupported.go'
+
+      - name: Homebrew offline-readiness rehearsal
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          # Staging is the only network-capable phase. homebrewcheck verifies
+          # these proxy zips, creates vendor metadata from them, and performs
+          # the actual CGO build with GOPROXY/GOSUMDB disabled and empty caches.
+          go mod download
+          go run ./tools/homebrewcheck \
+            --proxy-dir "$(go env GOMODCACHE)/cache/download" \
+            --build
+
+      # -race is not optional here: the client paces and retries from shared
+      # state, and a data race there would surface as a wrong rate-limit
+      # decision rather than a crash.
+      - name: go test
+        run: go test -race ./...
+
+      - name: goreleaser check and disabled distribution policy
+        if: runner.os == 'Linux'
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          go install github.com/goreleaser/goreleaser/v2@v2.17.1
+          goreleaser check
+          ruby .github/scripts/verify-portable-release-policy_test.rb
+          ruby .github/scripts/verify-portable-release-policy.rb .goreleaser.yaml
+
+      # Validate workflow expressions and every shell block. Pinned so an
+      # unrelated pull request cannot turn red because a linter changed itself.
+      - name: actionlint
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          # actionlint falls back to workflow-syntax-only when shellcheck is
+          # missing, and reports success having checked no shell at all.
+          # ubuntu-latest ships it; assert that rather than assume it, because
+          # the failure mode is silent loss of coverage.
+          if ! command -v shellcheck >/dev/null; then
+            echo "::error::shellcheck is not installed; actionlint would skip every run: block"
+            exit 1
+          fi
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          actionlint
+
+      # The generated contract is what agents read. If regenerating changes it,
+      # the committed copy no longer matches internal/errx.
+      - name: Generated contract is current
+        run: |
+          go generate ./...
+          DIRTY=$(git status --porcelain)
+          if [ -n "$DIRTY" ]; then
+            echo "::error::go generate changed tracked files; commit the result:"
+            echo "$DIRTY"
+            git diff
+            exit 1
+          fi
+
+  windows-safety:
+    name: Windows fail-closed safety
+    runs-on: windows-latest
+    steps:
+      - name: Git Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Skill mutation fails closed
+        run: go test -race -run '^TestWindowsSkillMutationFailsClosed$' ./internal/skills
+
+      - name: Build unsupported credential backend
+        run: go build ./cmd/youtrack-agent-cli
+
+  required:
+    name: Build and test
+    if: ${{ always() }}
+    needs: [test, windows-safety]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all build jobs
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          WINDOWS_RESULT: ${{ needs.windows-safety.result }}
+        run: |
+          if [ "${TEST_RESULT}" != "success" ] || [ "${WINDOWS_RESULT}" != "success" ]; then
+            echo "::error::test=${TEST_RESULT}, windows-safety=${WINDOWS_RESULT}"
+            exit 1
+          fi
