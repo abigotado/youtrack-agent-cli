@@ -259,19 +259,45 @@ opening trusted UI. After approval it reacquires the same locks, revalidates
 every snapshot and the signed receipt, and performs one revision CAS from
 `prepared` to `confirmed`. No UI or remote request runs while a journal lock is
 held. Any later registry transition invalidates the receipt at the next helper
-validation. No remote executor may be activated until Gate 1B selects and
-proves the exact ordering between apply and a concurrent rotation or
-revocation; Gate 1A does not claim that cross-boundary guarantee.
+validation. No remote executor may be distributed or used outside its
+controlled unpublished Gate candidate until Gate 1B selects and proves the
+exact ordering between apply and a concurrent rotation or revocation; Gate 1A
+does not claim that cross-boundary guarantee.
 
 The journal stores the complete canonical signed receipt and an exact copy of
 the verification SPKI, not only a digest. The copy is binding evidence, never a
-trust root: restore and apply paths reparse it with protocol bounds and require
-it to match an active or retained registry generation before verifying the
-signature, receipt hash, registry status, and all plan bindings.
+trust root. Audit and reconciliation may reparse a historical receipt with
+protocol bounds and match its SPKI to an active or retained generation solely
+to establish historical signature authenticity. That result never authorizes a
+network mutation.
+
+For apply authorization, the signed receipt's registry revision must equal the
+current complete ledger revision and its generation, SPKI, and fingerprint
+must equal the one current `active` generation. The current status
+must explicitly permit apply. Any intervening registry transition makes the
+receipt ineligible; status/apply cancels a still-confirmed plan rather than
+falling back to a retained key. Rotation/revocation races before confirmation,
+between confirmation and apply, and at the future in-flight boundary are Gate
+tests. Gate 1B must settle the last ordering before the executor candidate is
+qualified for any use beyond that controlled Gate run.
+
 This durable confirmation implementation and the native adapter must exist
-before Gate 1A. The dedicated non-writing Gate self-test constructs that
-adapter inside the production CLI, but `application.NewDefault` remains wired
-to `approval.Unsupported` until the operator Gate is recorded as passed.
+before Gate 1A. The current repository remains wired to
+`approval.Unsupported`, but the exact signed Gate candidate must wire the
+native adapter through `application.NewDefault` and exercise the ordinary
+production `mutation confirm` entry point while every remote executor remains
+disabled. If Gate 1A fails, that candidate is discarded. If it passes, the
+recorded executable hashes become the only eligible first-release approval
+artifact; no post-Gate rebuild or wiring change inherits that evidence. Any
+later candidate with different hashes, including the Gate 1B candidate, must
+rerun and pass the complete Gate 1A suite.
+
+The existing pre-Gate receipt schema v2 does not carry registry revision and is
+therefore not activation-eligible. Before durable confirmation, the shared Go
+and Swift contract must advance to schema v3 as specified in
+[Gate 1A approval protocol](gate1a-protocol.md#required-schema-v3-delta), reject
+v2 at the candidate boundary, and regenerate every cross-language golden
+vector. No v2 receipt has been released, so there is no compatibility fallback.
 
 ### First-release, rollover, rollback, and uninstall
 
@@ -320,10 +346,13 @@ Before Gate 1A can pass, an operator-controlled Developer ID Application
 identity must produce an exact hardened-runtime bundle. A black-box Gate
 harness must launch and drive the CLI contained in that bundle; it never links
 the adapter, injects a peer, changes a requirement, or receives Keychain
-entitlements. A dedicated non-writing self-test surface in the same CLI may
-exercise the native adapter and test journal while all remote executors remain
-disabled. Against that exact artifact, the harness exercises enrollment,
-approval, durable journal CAS, cancellation, timeout, process crash, production
+entitlements. The candidate's normal production factory already wires the
+native adapter, and the harness exercises the ordinary `mutation confirm`
+entry point while all remote executors remain disabled. A dedicated
+non-writing self-test surface may cover additional local faults but is not a
+substitute for that production path. Against that exact artifact, the harness
+exercises enrollment, approval, durable journal CAS, cancellation, timeout,
+process crash, production
 peer replacement, rotation, revocation, recovery, identical reinstall, and
 accidental package rollback on a supported clean Mac. A separately signed,
 never-shipped old-build fixture with the production IDs proves both current
@@ -353,11 +382,17 @@ The separate Gate runner identity is diagnostic orchestration only and is
 never accepted as the production helper's protocol peer. A Gate run uses a
 disposable macOS user or VM and destroys its fixture Keychain state afterward.
 
-Gate 1A enables only the native approval boundary. The REST executor stays
-disabled until separate live Gate 1B evidence on a disposable YouTrack 2026.2
-project proves exact identity/preconditions, one-shot `issue.create`, and
-bounded ambiguous-outcome reconciliation. `issue.update` and `comment.add`
-remain subject to their own executor decision.
+Gate 1A qualifies only the exact native-approval candidate. The current REST
+executor stays disabled. A later exact signed candidate must wire the ordinary
+production `mutation apply` entry point for only `issue.create` and pass live
+Gate 1B on a disposable YouTrack 2026.2 project. Because wiring the executor
+changes the artifact, that same candidate must first rerun and pass Gate 1A.
+Gate 1B then proves exact
+identity/preconditions, one-shot execution, rotation/revocation ordering, and
+bounded ambiguous-outcome reconciliation. A failed candidate is discarded; a
+passing candidate is published byte-for-byte with its recorded hashes and no
+post-Gate activation edit. `issue.update` and `comment.add` remain subject to
+their own executor decision.
 
 Public Homebrew distribution is last. The accepted shape is a Cask or private
 tap that installs the already signed/notarized app and links its contained CLI.

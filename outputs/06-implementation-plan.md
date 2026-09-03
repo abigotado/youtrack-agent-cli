@@ -10,22 +10,30 @@ The trust and activation dependencies are now fixed:
    data-protection Keychain namespace, enrollment/rotation/recovery, and package
    topology in `docs/gate1a-trust-root.md`.
 2. Implement full durable receipt verification and two-phase confirmation behind
-   dependency injection while production remains `approval.Unsupported`.
+   dependency injection while the current repository remains
+   `approval.Unsupported`.
 3. Implement the signed native helper, OS-protected approval-key registry,
    bounded Go client, and non-distributed operator runner.
-4. Produce one signed/notarized artifact and pass external Gate 1A on a clean
-   supported Mac.
+4. Produce one unpublished signed/notarized artifact with the ordinary
+   production confirmation path wired and pass external Gate 1A on a clean
+   supported Mac; qualify those exact bytes without rebuilding.
 5. Implement canonical fingerprints, typed `issue.create`, one-shot execution,
-   and bounded reconciliation while production apply remains disabled.
-6. Pass external live Gate 1B on a disposable YouTrack 2026.2 project, including
-   Remote MCP/OAuth host tests and ambiguous-write fault injection.
-7. Activate only `issue.create`; keep REST update/comment best-effort or require
-   the strict custom-MCP transaction gate.
+   and bounded reconciliation while the current repository apply remains
+   disabled.
+6. Produce an unpublished exact candidate with ordinary `issue.create` apply
+   wired, rerun Gate 1A against those changed hashes, then pass live Gate 1B on
+   a disposable YouTrack 2026.2 project, including Remote MCP/OAuth host tests,
+   rotation/revocation races, and ambiguous-write fault injection.
+7. Qualify that exact Gate 1B candidate for publication without an activation
+   edit; keep update/comment best-effort or require the strict custom-MCP
+   transaction gate.
 8. Publish signed artifacts and an audited Cask/private tap last.
 
-Gate 1A cannot pass before durable confirmation exists, but that code cannot be
-reachable from the production CLI before the Gate. Gate 1B is distinct and is
-the first authority to enable a remote mutation.
+Gate 1A cannot pass before durable confirmation exists in the candidate's
+ordinary production entry point. The unpublished candidate is the object under
+test; failure discards it, while PASS qualifies its exact hashes without a
+post-Gate code change. Gate 1B applies the same rule to the first remote
+mutation.
 
 ## Gate 0 — operator architecture decision
 
@@ -241,10 +249,11 @@ The shortest safe path from the current repository is:
 trust/storage/package topology
   -> durable confirmation, injected and unwired
   -> native helper + protected key registry + operator runner
-  -> signed clean-host Gate 1A
+  -> signed candidate with production confirm wiring
+  -> clean-host Gate 1A qualifies those exact bytes
   -> fingerprints + disabled issue.create engine
-  -> live YouTrack Gate 1B
-  -> issue.create activation
+  -> signed candidate with production issue.create wiring
+  -> Gate 1A rerun + live YouTrack Gate 1B qualify those exact bytes
   -> update/comment risk decision or strict custom MCP
   -> signed Cask/private tap
 ```

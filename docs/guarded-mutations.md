@@ -30,15 +30,21 @@ The native helper protocol has two distinct byte sequences. It displays the
 exact bytes returned by `intent.ApprovalDisplayBytes`, stores their SHA-256 as
 `receipt.plan_sha256`, then signs the exact unsigned-receipt JSON returned by
 `approval.SigningBytes`. The signature therefore covers the displayed-plan
-hash together with receipt ID, nonce, TTL, key identity, account, project,
-schema, request, expected-state, and SHA-256 of the fresh IPC challenge. A
-cross-language golden vector pins the unsigned-receipt encoding. The [Gate 1A protocol](gate1a-protocol.md)
-freezes this data-only contract; it does not constitute a trusted helper or a
-passed Gate 1A.
+hash together with receipt ID, nonce, TTL, approval-registry revision, active
+key generation/fingerprint, account, project, schema, request, expected-state,
+and SHA-256 of the fresh IPC challenge. A cross-language golden vector pins the
+unsigned-receipt encoding. The [Gate 1A protocol](gate1a-protocol.md) records
+the implemented pre-Gate v2 contract and the mandatory activation-eligible v3
+registry-revision delta; neither constitutes a trusted helper or a passed Gate
+1A.
 4. `mutation apply` validates the receipt signature, expiry, nonce, plan/payload
    and schema hashes, current identity, project policy, and preconditions. It
-   records `in_flight`, sends at most one mutating request, and performs bounded
-   verification.
+   additionally requires the signed registry revision, generation, exact SPKI,
+   and fingerprint to equal the current active registry entry. Retained public
+   keys verify historical audit/reconciliation evidence only. Any intervening
+   registry transition cancels confirmation rather than authorizing apply. An
+   eligible plan records `in_flight`, sends at most one mutating request, and
+   performs bounded verification.
 5. `mutation reconcile` is read-only. It may establish a unique applied result;
    otherwise it records `operator_resolution_required`.
 

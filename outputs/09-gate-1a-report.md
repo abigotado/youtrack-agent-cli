@@ -18,7 +18,8 @@ they do not prove the signed native approval boundary required by Gate 1A.
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
-| Versioned canonical receipt/signature byte contract | Passed for slice 1 | `docs/gate1a-protocol.md` and `testdata/gate1a` |
+| Pre-Gate v2 canonical receipt/signature byte contract | Passed for slice 1 only | `docs/gate1a-protocol.md` and `testdata/gate1a` |
+| Activation-eligible v3 registry-revision binding | Not implemented | Required v3 delta in `docs/gate1a-protocol.md` |
 | Strict bounded Go receipt codec | Passed for slice 1 | `go test -race ./internal/approval` |
 | Independent Swift parser/encoder agreement | Passed for slice 1 | 39 tests through `swift test` on macOS |
 | Reversible inert rendering of every displayed byte | Passed for slice 1 | all-byte, empty, maximum-size, and round-trip Swift tests |
@@ -103,18 +104,23 @@ and peer requirements and is compile-time absent from the production target.
 Reports must distinguish that fixture evidence from black-box execution of the
 exact notarized candidate.
 
-## Required unwired product integration
+## Required candidate product integration
 
-Before Gate 1A runs, a separate reviewed change must add the full signed receipt
-and exact verification SPKI to the journal, revalidate
-profile/policy/key/revision after approval, and commit `prepared -> confirmed`
-with compare-and-swap. A black-box harness launches the production CLI from the
-exact signed candidate bundle and drives its dedicated non-writing Gate
-self-test; it does not inject an adapter, gain Keychain access, or become an
-accepted helper peer. Production `NewDefault` remains wired to
-`approval.Unsupported` until the Gate passes. `apply` and `reconcile` remain
-disabled until separate live Gate 1B proves their one-shot and
-ambiguous-outcome behavior on a disposable YouTrack project.
+Before Gate 1A runs, a separate reviewed change must add the full signed receipt,
+its exact approval-registry revision, and exact verification SPKI to the
+journal; revalidate profile/policy/key/revisions after approval; and commit
+`prepared -> confirmed` with compare-and-swap. A black-box harness launches the
+production CLI from the
+exact signed candidate bundle and drives its ordinary `mutation confirm`
+entry point; it does not inject an adapter, gain Keychain access, or become an
+accepted helper peer. The current repository remains wired to
+`approval.Unsupported`, but the unpublished Gate candidate's default factory
+must wire the native adapter before signing. Gate success qualifies those exact
+hashes; it is not followed by a wiring commit or rebuild. `apply` and
+`reconcile` remain disabled until a separate exact Gate 1B candidate proves
+their one-shot and ambiguous-outcome behavior on a disposable YouTrack project.
+Because that wiring changes executable hashes, the same candidate must rerun
+and pass Gate 1A before Gate 1B evidence can qualify it.
 
 ## Homebrew decision
 

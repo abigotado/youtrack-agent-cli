@@ -1,9 +1,33 @@
-# Gate 1A approval protocol v2
+# Gate 1A approval protocol (pre-Gate v2)
 
 Status: frozen cross-language data contract for the feasibility spike. Gate 1A
 itself is **not passed**. `approval.Unsupported` remains the only production
 adapter, and this document does not enable confirmation, apply, release, or
 Homebrew installation.
+
+The accepted trust-root ADR found that v2 lacks the approval-registry revision
+needed to invalidate receipts after rotation, revocation, or recovery. V2
+remains evidence for the completed feasibility spike but is not eligible for a
+signed Gate candidate. The next implementation must apply the exact v3 delta
+below before any native adapter is wired.
+
+## Required schema v3 delta
+
+Schema v3 retains every v2 limit and encoding rule and makes only this signed
+contract change:
+
+- `schema_version` is exactly `3`;
+- `registry_revision` is inserted immediately after `challenge_sha256` in both
+  unsigned and signed canonical JSON;
+- `registry_revision` is a JSON integer in `1..256`, matching the bounded
+  append-only helper ledger, with no alternate string or floating encoding;
+- the signature, receipt digest, IPC success response, Go/Swift parsers, and
+  golden vectors bind that added field;
+- candidate decoders reject schema v2 rather than inferring a revision.
+
+All ordinal field references below describe the implemented v2 spike. The v3
+implementation inserts `registry_revision` at position 5 and shifts subsequent
+fields by one.
 
 The native trust boundary, canonical URL/plan-ID grammar, and exact future IPC
 frame are specified in [Gate 1A native approval boundary](gate1a-native-boundary.md).

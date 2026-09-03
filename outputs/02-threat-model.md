@@ -101,6 +101,8 @@ version
 plan_id (allocated during offline prepare and already present in any audit marker)
 receipt_id / nonce
 issued_at / expires_at
+approval_registry_revision
+active_key_generation / key tag / SPKI fingerprint
 profile_id
 normalized_instance_origin
 expected_account_id and login
@@ -112,7 +114,7 @@ expected-state SHA-256 (or explicit “create has no target”)
 reconciliation strategy
 ```
 
-The receipt contains no credential and no full issue/comment body. `prepare` allocates `plan_id`, inserts it into the canonical marker/body, and calculates the final payload hash before the human sees anything. The approval UI loads the canonical bytes once and renders that immutable snapshot; it must not re-read a mutable plan file after display. The separately signed native helper stores `SHA256(displayed_bytes)` as `plan_sha256`, then uses the active generation-specific Secure Enclave key to sign the deterministic unsigned receipt containing that digest, SHA-256 of the fresh IPC challenge, nonce, TTL, identity, project, policy, request, and precondition bindings. Confirmation-response acceptance checks the outstanding challenge and exact helper-registry revision before the receipt is journaled; apply later rechecks the durable receipt signature, registry status, and plan bindings. Confirmation expires quickly (recommended 5 minutes), is single use, and is atomically marked `in_flight` before the network mutation. The signing operation requires fresh LocalAuthentication-backed user presence; merely reading a generic Keychain password from an agent-invoked process is not sufficient attestation.
+The receipt contains no credential and no full issue/comment body. `prepare` allocates `plan_id`, inserts it into the canonical marker/body, and calculates the final payload hash before the human sees anything. The approval UI loads the canonical bytes once and renders that immutable snapshot; it must not re-read a mutable plan file after display. The separately signed native helper stores `SHA256(displayed_bytes)` as `plan_sha256`, then uses the active generation-specific Secure Enclave key to sign the deterministic unsigned receipt containing that digest, the exact current registry revision and active key identity, SHA-256 of the fresh IPC challenge, nonce, TTL, profile/account/project, policy, request, and precondition bindings. Confirmation-response acceptance checks the outstanding challenge and exact helper-registry revision before the receipt is journaled. Apply requires that same revision and key to remain current and active; retained keys verify historical audit/reconciliation evidence only. Any registry transition invalidates a confirmed receipt for apply. Confirmation expires quickly (recommended 5 minutes), is single use, and is atomically marked `in_flight` before the network mutation. The signing operation requires fresh LocalAuthentication-backed user presence; merely reading a generic Keychain password from an agent-invoked process is not sufficient attestation.
 
 ## Ambiguous-outcome state machine
 

@@ -21,7 +21,7 @@ The official YouTrack Remote MCP remains the routine read plane. Its URL must ca
 Before implementing an enabled `mutation confirm` or `mutation apply`, a macOS feasibility spike must demonstrate all of the following on a supported Mac:
 
 1. A separately signed native helper displays the complete bounded canonical snapshot from one immutable in-memory byte buffer.
-2. Only after a fresh LocalAuthentication success, the helper stores the digest of exactly those displayed bytes in `receipt.plan_sha256` and signs the deterministic unsigned receipt from `approval.SigningBytes`, including SHA-256 of the fresh IPC challenge; authentication reuse is disabled.
+2. Only after a fresh LocalAuthentication success, the helper stores the digest of exactly those displayed bytes in `receipt.plan_sha256` and signs the deterministic unsigned receipt from `approval.SigningBytes`, including the exact current approval-registry revision/active key and SHA-256 of the fresh IPC challenge; authentication reuse is disabled.
 3. The on-device P-256 private key is non-exportable, has a documented tag and public-key fingerprint, and cannot be used by an unrelated same-user process.
 4. Cancellation, timeout, helper crash, binary replacement, key rotation,
    mixed-build peers, and identical reinstall fail closed or preserve the
@@ -97,7 +97,7 @@ errx -> standard library only
 - `Journal`: compare-and-swap transitions under one transaction API;
 - `CredentialProvider` and `PolicyChecker`: minimum operations needed by the application service.
 
-The combined `approval.DecodeAndValidateIPCResponse` decoder is the sole response-acceptance path: it binds both response arms to the request challenge and binds a success to the exact snapshot and enrolled signing key before exposing a verified receipt. The interfaces contain at most one to three methods. `internal/youtrack` is a fixed-origin transport/model boundary and imports neither profile nor auth. `internal/cli` does not import `net/http`. Architecture tests enumerate allowed internal edges and fail on every unlisted dependency.
+The combined `approval.DecodeAndValidateIPCResponse` decoder is the sole response-acceptance path: it binds both response arms to the request challenge and binds a success to the exact snapshot, registry revision, and active enrolled signing key before exposing a verified receipt. The interfaces contain at most one to three methods. `internal/youtrack` is a fixed-origin transport/model boundary and imports neither profile nor auth. `internal/cli` does not import `net/http`. Architecture tests enumerate allowed internal edges and fail on every unlisted dependency.
 
 ## Journal transaction and lock contract
 
@@ -105,9 +105,9 @@ All durable mutation operations use one journal transaction API with revision-ba
 
 `prepare` acquires profile, policy, and journal locks, commits the authoritative canonical plan as `prepared`, then exports a 0600 copy. Export failure does not erase or duplicate the journal record.
 
-`confirm` has two phases. It first snapshots the prepared plan under profile/policy/journal locks and releases all locks. The native helper displays that one immutable snapshot, hashes those exact bytes into the receipt, and signs the deterministic unsigned receipt. The service reacquires the locks in the same order, revalidates unchanged identity, policy, plan hash, state, and revision, then atomically stores the receipt and moves to `confirmed`. Concurrent confirmation loses the compare-and-swap and cannot mint a second usable receipt.
+`confirm` has two phases. It first snapshots the prepared plan under profile/policy/journal locks and releases all locks. The native helper displays that one immutable snapshot, hashes those exact bytes into the receipt, and signs the deterministic unsigned receipt together with the current registry revision and active key identity. The service reacquires the locks in the same order, revalidates unchanged identity, policy, plan hash, state, journal revision, registry revision, and active key, then atomically stores the receipt and moves to `confirmed`. Concurrent confirmation loses the compare-and-swap and cannot mint a second usable receipt.
 
-`apply` holds the profile and policy locks while it validates the bound credential and remote preconditions. It briefly acquires the journal lock to atomically consume the receipt and persist `in_flight`, releases the journal lock, sends at most one mutation while retaining the outer identity/policy locks, then reacquires the journal lock to record the outcome. Once `in_flight` is durable, the nonce is never reusable and the state never returns to `confirmed`.
+`apply` holds the profile and policy locks while it validates the bound credential and remote preconditions. Historical verification with a retained public key is audit evidence only. Apply authority requires the signed receipt's registry revision and generation/SPKI/fingerprint to equal the current active registry entry. Any intervening transition cancels a confirmed plan. It briefly acquires the journal lock to atomically consume an eligible receipt and persist `in_flight`, releases the journal lock, sends at most one mutation while retaining the outer identity/policy locks, then reacquires the journal lock to record the outcome. Once `in_flight` is durable, the nonce is never reusable and the state never returns to `confirmed`; Gate 1B must prove the exact apply-versus-rotation/revocation ordering.
 
 `reconcile` snapshots an eligible state and revision, performs bounded reads without the journal lock, then compare-and-swaps the evidence and next state. Repeated reconciliation is read-only and idempotent. Terminal states return their existing record without additional network activity unless the operator explicitly requests a fresh evidence collection.
 
@@ -120,6 +120,7 @@ All durable mutation operations use one journal transaction API with revision-ba
 | `prepared` | operator cancellation or expiry | `canceled` / `expired` | Terminal; create a new plan. |
 | `confirmed` | receipt consumed before dispatch | `in_flight` | Durable non-replay point. |
 | `confirmed` | operator cancellation or expiry before consumption | `canceled` / `expired` | Terminal; no mutation attempt. |
+| `confirmed` | approval registry revision or active generation changed | `canceled` | Retained keys may verify history but never authorize apply. |
 | `in_flight` | definitive rejection proving no mutation | `failed_before_mutation` | Terminal; a new plan is required. |
 | `in_flight` | verified success recorded | `applied` | Non-replayable; proceed to bounded verification. |
 | `in_flight` | timeout, reset, unexpected/invalid response, or uncertain send | `ambiguous` | Never retry; reconcile. |
@@ -142,13 +143,17 @@ A verified remote success followed by stdout failure or journal-finalization fai
 5. Implement bounded exact REST inspection and offline intent preparation.
 6. Implement the journal state machine and fail-closed approval interfaces.
 7. Implement durable two-phase confirmation and its native adapter behind
-   dependency injection while the default production adapter remains disabled.
-8. Run Gate 1A against the signed/notarized candidate; only then wire
-   confirmation, while every remote executor remains disabled.
+   dependency injection while the current repository remains disabled.
+8. Build an unpublished signed/notarized candidate whose default production
+   factory wires confirmation, then run Gate 1A through its ordinary command.
+   A PASS qualifies those exact bytes; no post-Gate wiring or rebuild occurs.
 9. Implement the typed one-shot `issue.create` engine and reconciliation behind
    the disabled executor boundary.
-10. Run live Gate 1B on a disposable YouTrack 2026.2 project; only then activate
-    `issue.create`.
+10. Build an unpublished exact candidate whose ordinary production factory
+    wires only `issue.create`, rerun Gate 1A against those changed hashes, then
+    run live Gate 1B on a disposable YouTrack 2026.2 project. Both PASS results
+    qualify those exact bytes for publication; there is no post-Gate activation
+    edit.
 11. Keep `issue.update` and `comment.add` disabled until their separate
     REST-TOCTOU acceptance or strict custom-MCP transaction decision.
 12. Run contract, security, primary, and independent adversarial review gates
