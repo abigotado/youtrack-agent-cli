@@ -5,6 +5,11 @@
 - Gate result: **NOT PASSED**
 - Production adapter: `approval.Unsupported`
 
+The complementary [trust-root and package-topology
+ADR](gate1a-trust-root.md) freezes the production bundle identifiers, nested
+layout, Team ID input, Keychain registry, enrollment lifecycle, and clean-host
+evidence required to instantiate this protocol.
+
 ## Context
 
 YouTrack mutations require evidence that a human reviewed one exact, bounded
@@ -131,6 +136,16 @@ the [XNU `sys/un.h` header](https://github.com/apple-oss-distributions/xnu/blob/
 the Security framework's [guest-attribute keys](https://developer.apple.com/documentation/security/guest-attribute-dictionary-keys),
 and [`SecCodeCopyGuestWithAttributes`](https://developer.apple.com/documentation/security/seccodecopyguestwithattributes(_:_:_:_:)).
 
+The pinned production requirements are exact, not caller-configurable. Their
+full Developer ID Application expressions and identifiers are frozen in the
+[trust-root ADR](gate1a-trust-root.md#signed-bundle-and-identifiers).
+
+`TEAM_ID` is a required immutable operator-supplied build/Gate input with no
+repository default. The developer-only Gate runner has exact identifier
+`io.github.abigotado.youtrack-agent.gate1a` under a separate Gate policy and
+must never ship or be accepted by the production helper. Unset, wildcard, and
+ad-hoc identities fail closed.
+
 The helper-only permanent key is P-256 Secure Enclave material stored through
 the data-protection Keychain with `kSecAttrAccessControl`. A new `LAContext`
 with zero reuse is bound to the actual private-key signing operation, used
@@ -147,6 +162,31 @@ and the `LAContext`
 control. These sources justify the future design; PR A contains no live use of
 those APIs.
 
+The helper-private data-protection Keychain access group is
+`$(AppIdentifierPrefix)io.github.abigotado.youtrack-agent.approval`; all item
+operations explicitly use `kSecUseDataProtectionKeychain`. The outer app and
+CLI are not entitled to that group and obtain bounded registry reads only from
+the peer-authenticated helper. Every generation attempt appends a fresh random
+128-bit lowercase-hex key ID to the tag prefix
+`io.github.abigotado.youtrack-agent.approval.signing.v1/`; the registry binds
+the exact tag, generation, SPKI, and fingerprint. The append-only versioned
+registry uses service
+`io.github.abigotado.youtrack-agent.approval.registry.v1` and immutable accounts
+formed as `revision/` plus a 20-digit decimal revision.
+The helper entitlement requires compatible code signing and its own embedded
+Developer ID provisioning profile. The helper owns the key and registry; its
+CLI-facing API is read-only and bounded. Mutual peer identity and removal of
+arbitrary write/enrollment surfaces remain mandatory.
+
+Ordinary approval never enrolls. Enrollment has a distinct challenge and
+self-signature domain, fresh trusted UI/user presence, peer verification before
+and after the response, and an atomic helper-owned registry commit. Its response
+binds generation, SPKI, fingerprint, and self-signature. Rotation, revocation,
+recovery, retained verification keys, downgrade behavior, and the CLI
+`profile -> policy -> journal` lock order are defined by the
+[trust-root ADR](gate1a-trust-root.md). Confirmation snapshots key revision and
+generation before UI and revalidates them afterward.
+
 ## Consequences
 
 - Go and Swift consume shared URL, ID, plan, receipt, key, signature, display,
@@ -159,6 +199,8 @@ those APIs.
   **NOT PASSED** until signed/notarized native execution, Secure Enclave
   isolation, peer validation, UI review, and clean-host lifecycle evidence all
   pass.
+- Durable confirmation code may be completed while unwired, but remote write
+  activation additionally waits for the packaged live Gate 1B integration.
 
 ## Rejected alternatives
 

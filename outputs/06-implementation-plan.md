@@ -2,6 +2,31 @@
 
 Status: In progress; phases 2-4 are implemented through the fail-closed Gate 1A boundary
 
+## Accepted remaining order
+
+The trust and activation dependencies are now fixed:
+
+1. Freeze the signed bundle, Team ID parameter, peer requirements,
+   data-protection Keychain namespace, enrollment/rotation/recovery, and package
+   topology in `docs/gate1a-trust-root.md`.
+2. Implement full durable receipt verification and two-phase confirmation behind
+   dependency injection while production remains `approval.Unsupported`.
+3. Implement the signed native helper, OS-protected approval-key registry,
+   bounded Go client, and non-distributed operator runner.
+4. Produce one signed/notarized artifact and pass external Gate 1A on a clean
+   supported Mac.
+5. Implement canonical fingerprints, typed `issue.create`, one-shot execution,
+   and bounded reconciliation while production apply remains disabled.
+6. Pass external live Gate 1B on a disposable YouTrack 2026.2 project, including
+   Remote MCP/OAuth host tests and ambiguous-write fault injection.
+7. Activate only `issue.create`; keep REST update/comment best-effort or require
+   the strict custom-MCP transaction gate.
+8. Publish signed artifacts and an audited Cask/private tap last.
+
+Gate 1A cannot pass before durable confirmation exists, but that code cannot be
+reachable from the production CLI before the Gate. Gate 1B is distinct and is
+the first authority to enable a remote mutation.
+
 ## Gate 0 — operator architecture decision
 
 This gate was approved for local repository and implementation work. Installing
@@ -10,7 +35,8 @@ requires the remaining explicit decisions:
 
 - approve/revise ADR-001;
 - choose executor assurance: REST with accepted issue-move TOCTOU residual risk, or custom MCP for strict atomic project policy;
-- select Stage A mutation kinds;
+- keep `issue.create` as the selected Stage A mutation and decide separately
+  whether update/comment may accept REST TOCTOU or require strict custom MCP;
 - decide receipt-marker policy;
 - state whether simultaneous same-instance multi-account MCP use is mandatory;
 - state whether Server with external Hub must be supported in the first MVP;
@@ -206,17 +232,18 @@ Do not copy built-in mutation scripts and call them “guarded” without these 
 
 ## Initial effort order
 
-The shortest safe path is:
+The shortest safe path from the current repository is:
 
 ```text
-read-plane compatibility + hidden-call spike
-  -> shared instruction-only skill
-  -> profile/auth foundation
-  -> offline receipt protocol
-  -> schema snapshot
-  -> selected REST/custom executor assurance
-  -> issue.create/update/comment
-  -> pilot/security review
+trust/storage/package topology
+  -> durable confirmation, injected and unwired
+  -> native helper + protected key registry + operator runner
+  -> signed clean-host Gate 1A
+  -> fingerprints + disabled issue.create engine
+  -> live YouTrack Gate 1B
+  -> issue.create activation
+  -> update/comment risk decision or strict custom MCP
+  -> signed Cask/private tap
 ```
 
 The custom YouTrack app is outside the critical path only when the operator explicitly accepts the REST executor's project-move TOCTOU residual risk. It is on the critical path for strict atomic project allowlisting.

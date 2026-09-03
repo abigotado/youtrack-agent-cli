@@ -1,6 +1,7 @@
 # Threat model: multi-instance YouTrack agent integration
 
-Status: Proposed
+Status: Accepted for the fail-closed Gate 1A design; native and remote-write
+gates are not passed
 Method: asset/trust-boundary analysis with STRIDE-style threat enumeration
 
 ## Security objectives
@@ -19,7 +20,10 @@ Method: asset/trust-boundary analysis with STRIDE-style threat enumeration
 - OAuth refresh tokens, access tokens, permanent-token fallbacks, and OAuth client secrets.
 - YouTrack issues, comments, articles, links, tags, work items, users, and project metadata.
 - Profile bindings between local name, instance origin, account ID/login, and allowed project IDs/keys.
-- Confirmation signing key, receipt nonce journal, and audit records.
+- Helper-private Secure Enclave signing keys, append-only approval registry,
+  trust manifest, receipt nonce journal, and audit records.
+- Developer ID identity, nested helper provisioning profile, signed/notarized
+  bundle, and release manifest.
 - User trust: the meaning of a confirmation and the expectation that a dry-run has no network side effect.
 
 ## Trust boundaries
@@ -29,7 +33,9 @@ Method: asset/trust-boundary analysis with STRIDE-style threat enumeration
 | Agent model ↔ host tool runtime | Tool name, arguments, returned content | Runtime enforcement; never rely on prompt compliance alone |
 | Host ↔ YouTrack Remote MCP | OAuth/token, tool discovery, issue content | HTTPS, pinned MCP URL, `tools=` discovery allowlist, host runtime allowlist/read-only identity, identity check |
 | Skill ↔ local CLI | Explicit profile, normalized operation payload | Strict schema; stdin/file descriptor for bodies, not shell interpolation |
-| CLI ↔ OS secret store | Refresh/permanent tokens and signing key | Secret-store APIs; values never returned to the agent |
+| CLI ↔ OS secret store | Refresh/permanent tokens | Secret-store APIs; values never returned to the agent |
+| CLI ↔ native approval helper | Canonical display bytes, fresh challenge, bounded registry read, signed receipt | Connection-bound audit token, exact Developer ID Team/bundle requirements, bounded framed protocol, timeout, no caller-selected endpoint |
+| Native helper ↔ private data-protection Keychain/Secure Enclave | Generation-specific private key and immutable registry transitions | Helper-only provisioned access group, fresh user presence for signing/key ceremonies, unique key tags, append-only `SecItemAdd` revisions |
 | CLI ↔ YouTrack APIs | Reads, one mutation, reconciliation reads | Separately pinned service/REST/MCP/OAuth endpoints, timeouts, no unsafe retry |
 | Human ↔ confirmation UI | Rendered canonical intent and approval | Dedicated OS UI or genuinely out-of-band terminal, explicit account/instance/project, user-presence-protected signed receipt |
 | YouTrack content ↔ model context | Descriptions, comments, articles, names, URLs | Always untrusted data; quote and delimit |
@@ -56,6 +62,10 @@ Method: asset/trust-boundary analysis with STRIDE-style threat enumeration
 | T16 | Third-party CLI or dependency is compromised | Credential theft or arbitrary mutation | Do not adopt without source/dependency/release audit; minimize CLI dependencies; signed releases/SBOM later | Own implementation still has supply-chain dependencies |
 | T17 | Confirmation is minted by the agent rather than a human | Approval bypass | A normal PTY is explicitly insufficient when the agent can inject input; use dedicated trusted UI plus Keychain/Secure Enclave key access protected by LocalAuthentication, or an out-of-band approval service; no noninteractive override | A user can still approve without reading; the UI must render instance/account/project/diff before the OS presence check |
 | T18 | Reconciliation search itself is broad or fooled by similar content | False success/failure | Exact target reads first; bounded time window, author, project, receipt ID, and content hash; return `ambiguous` unless unique | Marker-free create reconciliation can remain inconclusive |
+| T19 | A same-user process replaces, races, or speaks directly to the helper endpoint | Approval or registry confused deputy | Both peers authenticate the connection audit token against exact Developer ID requirements; fixed bounded protocol; CLI cannot select an endpoint; helper-private Keychain group; fresh trusted UI and user presence for authority transitions | The same user can interfere with local IPC and deny service; availability is fail-closed, not guaranteed |
+| T20 | Concurrent helpers, crash recovery, or malformed/forked registry state loses a rotation/revocation update | Wrong approval key or revived authority | Immutable deterministic revision accounts; one `SecItemAdd` contender per next revision; predecessor hashes; complete bounded gap-free enumeration; exact post-add read and one-read ambiguous reconciliation; no update/delete/retry | A complete older Keychain-ledger snapshot is internally valid and cannot be detected without an external high-water mark, whether the current or an older binary reads it |
+| T21 | An older legitimately Developer-ID-signed release satisfies the Team/bundle requirement | Newer policy is bypassed after deliberate rollback | Release/Cask refuses ordinary downgrade; retained current ledger must remain a valid chain; clean-host rollback evidence; explicit operator warning | Cryptographic release freshness is not claimed; deliberate old-code or complete-ledger restoration by an administrator or interactive operator is out of scope for the first release |
+| T22 | Rotation creates duplicate-tagged or orphaned Secure Enclave keys | Ambiguous key selection or stale signing authority | Fresh random key ID and unique tag for every generation attempt; registry binds tag/SPKI/fingerprint; only committed active tag may sign; bounded orphan enumeration and explicit cleanup | Failed deletion can consume Keychain space and deny future rotation, but an uncommitted key is never authoritative |
 
 ## Untrusted-content policy
 
@@ -102,7 +112,7 @@ expected-state SHA-256 (or explicit “create has no target”)
 reconciliation strategy
 ```
 
-The receipt contains no credential and no full issue/comment body. `prepare` allocates `plan_id`, inserts it into the canonical marker/body, and calculates the final payload hash before the human sees anything. The approval UI loads the canonical bytes once and renders that immutable snapshot; it must not re-read a mutable plan file after display. The helper stores `SHA256(displayed_bytes)` as `plan_sha256`, then signs the deterministic unsigned receipt containing that digest, SHA-256 of the fresh IPC challenge, nonce, TTL, identity, project, policy, request, and precondition bindings. Confirmation-response acceptance checks the outstanding challenge before the receipt is journaled; apply later rechecks the durable receipt signature and plan bindings. Confirmation expires quickly (recommended 5 minutes), is single use, and is atomically marked `in_flight` before the network mutation. On macOS, the signing operation should require LocalAuthentication-backed user presence; merely reading a generic Keychain password from an agent-invoked process is not sufficient attestation.
+The receipt contains no credential and no full issue/comment body. `prepare` allocates `plan_id`, inserts it into the canonical marker/body, and calculates the final payload hash before the human sees anything. The approval UI loads the canonical bytes once and renders that immutable snapshot; it must not re-read a mutable plan file after display. The separately signed native helper stores `SHA256(displayed_bytes)` as `plan_sha256`, then uses the active generation-specific Secure Enclave key to sign the deterministic unsigned receipt containing that digest, SHA-256 of the fresh IPC challenge, nonce, TTL, identity, project, policy, request, and precondition bindings. Confirmation-response acceptance checks the outstanding challenge and exact helper-registry revision before the receipt is journaled; apply later rechecks the durable receipt signature, registry status, and plan bindings. Confirmation expires quickly (recommended 5 minutes), is single use, and is atomically marked `in_flight` before the network mutation. The signing operation requires fresh LocalAuthentication-backed user presence; merely reading a generic Keychain password from an agent-invoked process is not sufficient attestation.
 
 ## Ambiguous-outcome state machine
 
@@ -117,7 +127,14 @@ There is no transition from `ambiguous` back to `confirmed`. A retry is a new in
 
 ## Out of scope for this threat model
 
-- Compromise of the YouTrack server, OAuth authorization server, OS kernel, or agent provider.
+- Compromise of the YouTrack server, OAuth authorization server, or agent provider.
 - Organization-wide data classification and retention policy.
 - Approval delegation, four-eyes approval, and centralized compliance workflows.
 - Attachment upload/download and arbitrary article writes in the MVP.
+- OS kernel, Secure Enclave, Keychain service, Apple code-signing/notarization,
+  Developer ID account, or administrator/root compromise.
+- Detection or cryptographic prevention of an interactive operator,
+  administrator, backup/restore mechanism, or compromised Keychain service
+  replacing the approval ledger with any older complete snapshot, with either
+  the current or an older validly signed release; the first release has no
+  external monotonic high-water service.

@@ -8,7 +8,7 @@
 
 ## Reuse baseline
 
-Use the clean `confluence-cli` `main` revision `fea3152` as the canonical source for the provider-neutral harness, JSON v1 envelope, panic recovery, bounded output, direct Security.framework Keychain adapter, atomic registries, lockfiles, embedded skill installer, generated command/contract documentation, and CI. Distribution remains explicitly disabled until Gate 1A defines an audited signed and notarized macOS package; the inherited portable archive and Homebrew paths are not safe defaults for this credential-bearing CLI. Homebrew dependency metadata and validation may be prepared before that gate, but an installable Formula/Cask and every tap publication path remain forbidden.
+Use the clean `confluence-cli` `main` revision `fea3152` as the canonical source for the provider-neutral harness, JSON v1 envelope, panic recovery, bounded output, direct Security.framework Keychain adapter, atomic registries, lockfiles, embedded skill installer, generated command/contract documentation, and CI. Distribution remains explicitly disabled until Gate 1A passes with the frozen trust/package topology and an audited signed and notarized macOS package; the inherited portable archive and Homebrew paths are not safe defaults for this credential-bearing CLI. Homebrew dependency metadata and validation may be prepared before that gate, but an installable Formula/Cask and every tap publication path remain forbidden.
 
 Use the current `jira-cli` feature branch only as a reviewed source for issue/project modeling, exact project policy, and centralized one-shot HTTP request policy. Do not copy the dirty `trello-cli` worktree.
 
@@ -34,21 +34,20 @@ separately signed native helper's designated requirement and entitlements.
 Homebrew therefore remains unavailable before Gate 1A even though the
 non-writing CLI surface can be built locally.
 
-After Gate 1A, a separate accepted architecture decision must choose among a
-signed/notarized bundle delivered by Formula, Cask, or a private tap. It must
-define immutable CLI and helper provenance, signing and notarization evidence,
-tap ownership, update and rollback behavior, and whether Homebrew may build any
-component from source. The gate must prove that upgrades preserve helper
-identity and fail closed when they do not.
+The accepted [trust-root topology](../docs/gate1a-trust-root.md) now chooses one
+signed/notarized `YouTrackAgent.app` delivered later by Cask or private tap.
+Homebrew may link the contained CLI but may not build, replace, extract, or
+re-sign the helper. Gate 1A must prove immutable CLI/helper provenance and that
+install, upgrade, rollback, and replacement preserve identity or fail closed.
 
 The same gate must test Homebrew Cellar path changes against the application-
 bound Keychain ACL. Upgrade hooks must not silently reauthorize credentials;
 the only permitted migration is the operator-invoked
 `auth migrate-keychain --profile NAME --yes` flow, with cancellation and
-partial failure covered. At this decision's acceptance date the repository has
-no commit, remote, immutable release tag, source archive checksum, signing
-identity, or notarization evidence, so it cannot provide release provenance for
-an active Formula or Cask.
+partial failure covered. The repository now has committed source and a remote,
+but no immutable release tag, signed archive checksum, installed Developer ID
+Application identity, or notarization evidence, so it cannot provide release
+provenance for an active Cask.
 
 If Gate 1A cannot be proven without access to an operator-controlled signing identity, the first coherent release includes profile/auth/inspect, the Remote MCP skill/configuration, offline prepare/export/status, and the complete fail-closed journal schema. `confirm` and `apply` return `USER_PRESENCE_UNAVAILABLE`; no PTY, stdin, environment, Keychain-password, or `--yes` fallback exists.
 
@@ -132,8 +131,17 @@ A verified remote success followed by stdout failure or journal-finalization fai
 4. Implement Keychain-bound public-client OAuth Authorization Code + PKCE and permanent-token fallback.
 5. Implement bounded exact REST inspection and offline intent preparation.
 6. Implement the journal state machine and fail-closed approval interfaces.
-7. Run Gate 1A. Enable `confirm/apply` only after it passes; otherwise ship them disabled with a typed error.
-8. Add the REST executor in order: update, create, then comment only after its compatibility gate.
-9. Run contract, security, primary, and independent adversarial review gates before packaging.
+7. Implement durable two-phase confirmation and its native adapter behind
+   dependency injection while the default production adapter remains disabled.
+8. Run Gate 1A against the signed/notarized candidate; only then wire
+   confirmation, while every remote executor remains disabled.
+9. Implement the typed one-shot `issue.create` engine and reconciliation behind
+   the disabled executor boundary.
+10. Run live Gate 1B on a disposable YouTrack 2026.2 project; only then activate
+    `issue.create`.
+11. Keep `issue.update` and `comment.add` disabled until their separate
+    REST-TOCTOU acceptance or strict custom-MCP transaction decision.
+12. Run contract, security, primary, and independent adversarial review gates
+    before packaging.
 
 The REST executor is always labeled `rest-best-effort`. Strict atomic project enforcement remains a later custom YouTrack MCP executor because a local REST preflight cannot close the concurrent issue-move race.

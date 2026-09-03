@@ -15,11 +15,12 @@ Gate 1A. Rebuilding or replacing that helper changes the identity on which
 receipt signing and Keychain access depend. Ad-hoc signing is not production
 evidence, and removing Gatekeeper quarantine is never an acceptable workaround.
 
-Before Homebrew can be enabled, a follow-up architecture decision must choose
-and audit the complete macOS delivery shape:
+The [Gate 1A trust-root ADR](gate1a-trust-root.md) now fixes the complete macOS
+delivery shape before helper implementation:
 
-- a signed and notarized application/helper bundle and its update boundary;
-- Formula versus Cask, and whether distribution belongs in a private tap;
+- one signed and notarized `YouTrackAgent.app` with its nested helper;
+- a Cask or private tap that installs the finished bundle and links its
+  contained CLI, never a source Formula that rebuilds the helper;
 - immutable release inputs and provenance for the CLI and helper;
 - preservation and verification of helper identity and entitlements through
   install, upgrade, rollback, and uninstall;
@@ -34,12 +35,12 @@ interruption, binary replacement, helper replacement, and failed migration.
 
 ## Missing release provenance
 
-This repository currently has no committed release revision, remote release
-source, immutable version tag, source-archive checksum, notarization record, or
-operator-controlled signing evidence. Consequently, no correct Formula or Cask
-can be materialized from the repository today.
+This repository has committed source and a remote, but it still has no immutable
+release tag, signed release archive checksum, notarization record, installed
+Developer ID Application identity, or operator-controlled signing evidence.
+Consequently, no correct Cask can be materialized from the repository today.
 
-Homebrew may be activated only after Gate 1A passes, the follow-up packaging
-decision is accepted, and the fail-closed release-policy guard is deliberately
-updated in the same reviewed change. Until then, use a local source build for
-development and do not publish or install a Homebrew package.
+Homebrew may be activated only after Gate 1A and live Gate 1B pass and the
+fail-closed release-policy guard is deliberately updated in the same reviewed
+change. Until then, use a local source build for development and do not publish
+or install a Homebrew package.

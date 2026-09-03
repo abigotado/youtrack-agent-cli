@@ -84,6 +84,7 @@ source-built Formula cannot preserve the native approval helper's required
 signing identity and entitlements. Linux/Windows and unsigned portable archives
 are not a supported credential-bearing release path. The repository's Homebrew
 manifest and checker are readiness inputs, not an installable Formula; see
+[the trust-root topology](docs/gate1a-trust-root.md) and
 [Homebrew readiness](docs/homebrew.md).
 
 ## Agent Skill

@@ -5,6 +5,11 @@
 - Scope completed by this report: protocol-contract spike only
 - Production approval adapter: `approval.Unsupported`
 
+The accepted [trust-root and package-topology ADR](../docs/gate1a-trust-root.md)
+freezes the identifiers, Team ID input, Keychain namespace, enrollment,
+rotation/recovery, signed layout, and evidence order. It is a design result,
+not Gate evidence.
+
 This report is deliberately fail-closed. Protocol code, shared Go/Swift golden
 vectors, parser tests, and ad-hoc development builds are preparation evidence;
 they do not prove the signed native approval boundary required by Gate 1A.
@@ -54,8 +59,9 @@ PASSED**.
 
 ### Disposable Secure Enclave and UI spike
 
-- The signing key is permanent P-256 Secure Enclave material in a helper-only
-  data-protection Keychain access group.
+- Every signing generation is permanent P-256 Secure Enclave material with a
+  fresh random key ID/tag in a helper-only data-protection Keychain access
+  group; only a committed active registry transition may select it.
 - The item uses `kSecAttrAccessControl`; it does not combine that contract with
   legacy `kSecAttrAccess` ACL configuration.
 - One new `LAContext` is bound to the actual private-key sign operation, has no
@@ -74,7 +80,8 @@ Keychain or Secure Enclave state.
 ### Production signing and clean-host gate
 
 - An operator-controlled Developer ID Application identity signs the frozen
-  helper bundle with hardened runtime, timestamp, exact entitlements, and no
+  helper bundle with hardened runtime, timestamp, exact entitlements, its
+  matching embedded Developer ID provisioning profile, and no
   `get-task-allow`.
 - The bundle is notarized and stapled; `codesign`, `spctl`, and stapler checks
   pass against the exact designated requirement, Team ID, and architecture set.
@@ -87,18 +94,32 @@ Keychain or Secure Enclave state.
 Missing production signing, notarization, Secure Enclave isolation, or
 clean-machine evidence is an automatic Gate 1A failure.
 
-## Deferred product integration
+Helper-private corruption, key-loss, orphan-cleanup, and ambiguous-Keychain
+faults are exercised only by the separately signed Gate fixture defined in the
+trust-root ADR. It uses disjoint identifiers, access group, key tags, registry,
+and peer requirements and is compile-time absent from the production target.
+Reports must distinguish that fixture evidence from black-box execution of the
+exact notarized candidate.
 
-Even after Gate 1A passes, a separate reviewed change must add the full signed
-receipt to the journal, revalidate profile/policy/revision after approval, and
-commit `prepared -> confirmed` with compare-and-swap. `apply` and `reconcile`
-remain disabled until their own one-shot and ambiguous-outcome gates pass.
+## Required unwired product integration
+
+Before Gate 1A runs, a separate reviewed change must add the full signed receipt
+and exact verification SPKI to the journal, revalidate
+profile/policy/key/revision after approval, and commit `prepared -> confirmed`
+with compare-and-swap. A black-box harness launches the production CLI from the
+exact signed candidate bundle and drives its dedicated non-writing Gate
+self-test; it does not inject an adapter, gain Keychain access, or become an
+accepted helper peer. Production `NewDefault` remains wired to
+`approval.Unsupported` until the Gate passes. `apply` and `reconcile` remain
+disabled until separate live Gate 1B proves their one-shot and
+ambiguous-outcome behavior on a disposable YouTrack project.
 
 ## Homebrew decision
 
-Homebrew remains blocked. This spike does not authorize a Formula, Cask, tap,
-release workflow, source rebuild of the helper, or package publication. After
-Gate 1A passes, a separate packaging ADR must prove that a signed and notarized
-helper retains its identity and entitlements across Cellar path changes,
-upgrade, rollback, and uninstall. The existing offline module manifest and
-checker remain readiness inputs only.
+Homebrew remains blocked. The trust-root ADR selects a future Cask/private-tap
+shape, but this work does not authorize a Formula, Cask, tap, release workflow,
+source rebuild of the helper, or package publication. Gate 1A must prove that
+the signed and notarized nested helper retains its identity and entitlements
+across install, upgrade, rollback, replacement, and uninstall. Gate 1B must
+then prove the live one-shot YouTrack write path. The existing offline module
+manifest and checker remain readiness inputs only.
