@@ -2,8 +2,6 @@ package intent
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
+	"github.com/abigotado/youtrack-agent-cli/internal/protocolvalue"
 )
 
 type canonicalPlan struct {
@@ -36,10 +35,8 @@ const (
 )
 
 var (
-	namePattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
-	identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-	projectKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,31}$`)
-	issueIDPattern    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,31}-[1-9][0-9]*$`)
+	namePattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	issueIDPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,31}-[1-9][0-9]*$`)
 )
 
 // CanonicalBytes returns the exact bounded bytes hashed by IntentSHA256. The
@@ -56,7 +53,13 @@ func CanonicalBytes(plan Plan) ([]byte, error) {
 // signs approval.SigningBytes(receipt), making the receipt attest to every
 // plan binding plus nonce, TTL, and helper-key identity.
 func ApprovalDisplayBytes(plan Plan) ([]byte, error) {
-	return CanonicalBytes(plan)
+	if err := plan.Validate(); err != nil {
+		return nil, err
+	}
+	if err := ValidateApprovalProfile(plan.Profile); err != nil {
+		return nil, err
+	}
+	return canonicalBytesUnchecked(plan)
 }
 
 func canonicalBytesUnchecked(plan Plan) ([]byte, error) {
@@ -108,6 +111,9 @@ func ParseApprovalSnapshot(raw []byte, maximumBytes int) (Plan, error) {
 	if err := plan.Validate(); err != nil {
 		return Plan{}, err
 	}
+	if err := ValidateApprovalProfile(plan.Profile); err != nil {
+		return Plan{}, err
+	}
 	canonical, err := canonicalBytesUnchecked(plan)
 	if err != nil {
 		return Plan{}, err
@@ -134,7 +140,7 @@ func (plan Plan) Validate() error {
 	if err := ValidatePlanID(plan.PlanID); err != nil {
 		return err
 	}
-	if err := validateProfile(plan.Profile); err != nil {
+	if err := validateProfileLegacy(plan.Profile); err != nil {
 		return err
 	}
 	if err := validatePolicy(plan.Policy); err != nil {
@@ -166,26 +172,26 @@ func (plan Plan) Validate() error {
 	return nil
 }
 
-func validateProfile(profile ProfileSnapshot) error {
+func validateProfileLegacy(profile ProfileSnapshot) error {
 	if !namePattern.MatchString(profile.Name) {
 		return fmt.Errorf("%w: profile name is not canonical", ErrInvalidPlan)
 	}
-	if err := validateInstance(profile.Instance); err != nil {
-		return err
+	if err := endpoint.ValidateServiceURL(profile.Instance); err != nil {
+		return fmt.Errorf("%w: instance URL is invalid: %v", ErrInvalidPlan, err)
 	}
-	if err := endpoint.ValidateApprovalRESTBaseURL(profile.Instance, profile.RESTBaseURL); err != nil {
+	if err := endpoint.ValidateRESTBaseURL(profile.Instance, profile.RESTBaseURL); err != nil {
 		return fmt.Errorf("%w: REST base URL does not derive from the selected instance: %v", ErrInvalidPlan, err)
 	}
-	if err := validateInstance(profile.OAuthIssuerURL); err != nil {
+	if err := endpoint.ValidateServiceURL(profile.OAuthIssuerURL); err != nil {
 		return fmt.Errorf("%w: OAuth issuer URL is invalid", ErrInvalidPlan)
 	}
-	if !isDigest(profile.IdentitySHA256) {
+	if !protocolvalue.IsSHA256(profile.IdentitySHA256) {
 		return fmt.Errorf("%w: profile identity digest is not canonical", ErrInvalidPlan)
 	}
 	if err := validateBoundString("credential generation", profile.CredentialGeneration, maxIdentityLength); err != nil {
 		return err
 	}
-	if !identifierPattern.MatchString(profile.Account.ID) {
+	if !protocolvalue.IsIdentifier(profile.Account.ID) {
 		return fmt.Errorf("%w: account ID is not canonical", ErrInvalidPlan)
 	}
 	if err := validateBoundString("account login", profile.Account.Login, maxLoginLength); err != nil {
@@ -194,24 +200,33 @@ func validateProfile(profile ProfileSnapshot) error {
 	return nil
 }
 
-func validateInstance(raw string) error {
-	if err := endpoint.ValidateApprovalURL(raw); err != nil {
+// ValidateApprovalProfile applies the narrower, language-neutral URL grammar
+// required at the native approval boundary. Plan.Validate deliberately uses
+// the legacy profile grammar so existing journals remain readable.
+func ValidateApprovalProfile(profile ProfileSnapshot) error {
+	if err := protocolvalue.ValidateApprovalURL(profile.Instance); err != nil {
 		return fmt.Errorf("%w: instance URL is outside the approval URL grammar: %v", ErrInvalidPlan, err)
+	}
+	if err := protocolvalue.ValidateApprovalRESTBaseURL(profile.Instance, profile.RESTBaseURL); err != nil {
+		return fmt.Errorf("%w: REST base URL is outside the approval URL grammar: %v", ErrInvalidPlan, err)
+	}
+	if err := protocolvalue.ValidateApprovalURL(profile.OAuthIssuerURL); err != nil {
+		return fmt.Errorf("%w: OAuth issuer URL is outside the approval URL grammar: %v", ErrInvalidPlan, err)
 	}
 	return nil
 }
 
 func validatePolicy(policy ProjectPolicy) error {
-	if !identifierPattern.MatchString(policy.Project.ID) {
+	if !protocolvalue.IsIdentifier(policy.Project.ID) {
 		return fmt.Errorf("%w: project ID is not canonical", ErrInvalidPlan)
 	}
-	if !projectKeyPattern.MatchString(policy.Project.Key) {
+	if !protocolvalue.IsProjectKey(policy.Project.Key) {
 		return fmt.Errorf("%w: project key is not canonical", ErrInvalidPlan)
 	}
 	if policy.PolicyRevision == 0 {
 		return fmt.Errorf("%w: policy revision must be positive", ErrInvalidPlan)
 	}
-	if !isDigest(policy.PolicySHA256) || !isDigest(policy.SchemaSHA256) {
+	if !protocolvalue.IsSHA256(policy.PolicySHA256) || !protocolvalue.IsSHA256(policy.SchemaSHA256) {
 		return fmt.Errorf("%w: policy and schema digests must be canonical", ErrInvalidPlan)
 	}
 	if policy.ExecutorAssurance != "rest-best-effort" && policy.ExecutorAssurance != "custom-mcp-atomic" {
@@ -290,7 +305,7 @@ func validateIssueCreate(operation IssueCreateOperation, planID string) error {
 	if err := validateFields(operation.Request.CustomFields); err != nil {
 		return err
 	}
-	if !isDigest(operation.Expected.ProjectStateSHA256) {
+	if !protocolvalue.IsSHA256(operation.Expected.ProjectStateSHA256) {
 		return fmt.Errorf("%w: project-state digest is not canonical", ErrInvalidPlan)
 	}
 	return nil
@@ -317,7 +332,7 @@ func validateIssueUpdate(operation IssueUpdateOperation) error {
 	if err := validateFields(patch.CustomFields); err != nil {
 		return err
 	}
-	if !isDigest(operation.Expected.IssueStateSHA256) || !isDigest(operation.Expected.TouchedFieldsSHA256) {
+	if !protocolvalue.IsSHA256(operation.Expected.IssueStateSHA256) || !protocolvalue.IsSHA256(operation.Expected.TouchedFieldsSHA256) {
 		return fmt.Errorf("%w: update precondition digests are not canonical", ErrInvalidPlan)
 	}
 	return nil
@@ -343,7 +358,7 @@ func validateCommentAdd(operation CommentAddOperation, planID string) error {
 	if err := validateRequiredText("comment text", text, maxBodyLength); err != nil {
 		return err
 	}
-	if !isDigest(operation.Expected.IssueStateSHA256) {
+	if !protocolvalue.IsSHA256(operation.Expected.IssueStateSHA256) {
 		return fmt.Errorf("%w: issue-state digest is not canonical", ErrInvalidPlan)
 	}
 	return nil
@@ -400,7 +415,7 @@ func validateVisibility(visibility Visibility) error {
 		}
 		previous := ""
 		for _, id := range visibility.GroupIDs {
-			if !identifierPattern.MatchString(id) || id <= previous {
+			if !protocolvalue.IsIdentifier(id) || id <= previous {
 				return fmt.Errorf("%w: visibility group IDs must be unique, sorted, and canonical", ErrInvalidPlan)
 			}
 			previous = id
@@ -418,7 +433,7 @@ func validateFields(fields []CustomFieldValue) error {
 	seen := make(map[string]struct{}, len(fields))
 	previous := ""
 	for index, field := range fields {
-		if !identifierPattern.MatchString(field.FieldID) {
+		if !protocolvalue.IsIdentifier(field.FieldID) {
 			return fmt.Errorf("%w: custom field ID is not canonical", ErrInvalidPlan)
 		}
 		if index > 0 && field.FieldID <= previous {
@@ -435,7 +450,7 @@ func validateFields(fields []CustomFieldValue) error {
 		if (field.ValueID == nil) == (field.TextValue == nil) {
 			return fmt.Errorf("%w: custom field %q needs exactly one value form", ErrInvalidPlan, field.FieldID)
 		}
-		if field.ValueID != nil && !identifierPattern.MatchString(*field.ValueID) {
+		if field.ValueID != nil && !protocolvalue.IsIdentifier(*field.ValueID) {
 			return fmt.Errorf("%w: custom field value ID is not canonical", ErrInvalidPlan)
 		}
 		if field.TextValue != nil {
@@ -466,12 +481,4 @@ func validateBoundString(label, value string, maximum int) error {
 		return fmt.Errorf("%w: %s is empty, oversized, or non-canonical", ErrInvalidPlan, label)
 	}
 	return nil
-}
-
-func isDigest(value string) bool {
-	if len(value) != sha256.Size*2 || strings.ToLower(value) != value {
-		return false
-	}
-	decoded, err := hex.DecodeString(value)
-	return err == nil && len(decoded) == sha256.Size
 }

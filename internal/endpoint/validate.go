@@ -10,10 +10,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/abigotado/youtrack-agent-cli/internal/protocolvalue"
 )
 
 const (
-	MaxURLLength = 2048
+	MaxURLLength = protocolvalue.MaxURLBytes
 
 	OAuthAuthorizationPath = "/api/rest/oauth2/auth"
 	OAuthTokenPath         = "/api/rest/oauth2/token"
@@ -59,12 +61,8 @@ func ValidateServiceURL(raw string) error {
 // both the Go plan authority and the native approval boundary. It performs no
 // DNS resolution or network I/O.
 func ValidateApprovalURL(raw string) error {
-	parsed, err := parseApprovalHTTPS(raw)
-	if err != nil {
-		return err
-	}
-	if parsed.RawQuery != "" || parsed.ForceQuery {
-		return invalid("approval URL must not contain a query")
+	if err := protocolvalue.ValidateApprovalURL(raw); err != nil {
+		return invalid("%v", err)
 	}
 	return nil
 }
@@ -73,14 +71,8 @@ func ValidateApprovalURL(raw string) error {
 // be derived exactly from the strict instance URL. It is intentionally
 // separate from the backward-compatible profile-plane validator.
 func ValidateApprovalRESTBaseURL(instanceURL, restBaseURL string) error {
-	if err := ValidateApprovalURL(instanceURL); err != nil {
-		return fmt.Errorf("instance URL: %w", err)
-	}
-	if restBaseURL != instanceURL+RESTPath {
-		return invalid("REST base URL must equal instance_url + %s", RESTPath)
-	}
-	if err := ValidateApprovalURL(restBaseURL); err != nil {
-		return fmt.Errorf("REST base URL: %w", err)
+	if err := protocolvalue.ValidateApprovalRESTBaseURL(instanceURL, restBaseURL); err != nil {
+		return invalid("%v", err)
 	}
 	return nil
 }
@@ -247,158 +239,6 @@ func validateCanonicalPath(path string) error {
 		}
 	}
 	return nil
-}
-
-func parseApprovalHTTPS(raw string) (*url.URL, error) {
-	if raw == "" || len(raw) > MaxURLLength || !hasOnlyASCIIURLBytes(raw) || strings.Contains(raw, "%") {
-		return nil, invalid("URL is empty, oversized, or contains percent encoding, non-ASCII, control, or space bytes")
-	}
-	if !strings.HasPrefix(raw, "https://") {
-		return nil, invalid("URL must start with literal lowercase https://")
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return nil, invalid("parse URL: %v", err)
-	}
-	if parsed.Scheme != "https" || parsed.Opaque != "" || parsed.User != nil || parsed.Host == "" || parsed.Fragment != "" {
-		return nil, invalid("URL must be absolute HTTPS without credentials or fragment")
-	}
-	if err := validateCanonicalAuthority(parsed.Host); err != nil {
-		return nil, err
-	}
-	if parsed.String() != raw {
-		return nil, invalid("URL is not in canonical form")
-	}
-	if err := validateApprovalPath(parsed.Path); err != nil {
-		return nil, err
-	}
-	return parsed, nil
-}
-
-func validateApprovalPath(path string) error {
-	if path == "" {
-		return nil
-	}
-	if path[0] != '/' || path == "/" || strings.HasSuffix(path, "/") || strings.Contains(path, "//") {
-		return invalid("URL path must be empty or contain nonempty slash-prefixed segments")
-	}
-	for _, segment := range strings.Split(path, "/") {
-		if segment == "." || segment == ".." {
-			return invalid("URL path must not contain dot segments")
-		}
-	}
-	for index := 1; index < len(path); index++ {
-		if path[index] == '/' {
-			continue
-		}
-		if !isApprovalPathByte(path[index]) {
-			return invalid("URL path contains a byte outside the canonical ASCII alphabet")
-		}
-	}
-	return nil
-}
-
-func validateCanonicalAuthority(authority string) error {
-	if authority == "" || authority != strings.ToLower(authority) || strings.ContainsAny(authority, "[]") || strings.Count(authority, ":") > 1 {
-		return invalid("URL host must be canonical lowercase DNS or dotted IPv4")
-	}
-	host, port, hasPort := authority, "", false
-	if index := strings.LastIndexByte(authority, ':'); index >= 0 {
-		host, port, hasPort = authority[:index], authority[index+1:], true
-	}
-	if !validateCanonicalIPv4(host) && !validateCanonicalDNSName(host) {
-		return invalid("URL host must be canonical lowercase DNS or dotted IPv4")
-	}
-	if looksLikeDottedIPv4(host) && !validateCanonicalIPv4(host) {
-		return invalid("dotted IPv4 host is not canonical")
-	}
-	if hasPort {
-		if port == "" || !isASCIIDecimal(port) || (len(port) > 1 && port[0] == '0') {
-			return invalid("URL port is empty or has a leading zero")
-		}
-		value, err := strconv.Atoi(port)
-		if err != nil || value < 1 || value > 65535 || value == 443 {
-			return invalid("URL port must be 1 through 65535 and omit the default 443")
-		}
-	}
-	return nil
-}
-
-func isASCIIDecimal(value string) bool {
-	for index := range len(value) {
-		if value[index] < '0' || value[index] > '9' {
-			return false
-		}
-	}
-	return value != ""
-}
-
-func validateCanonicalDNSName(host string) bool {
-	if host == "" || len(host) > 253 || strings.HasSuffix(host, ".") {
-		return false
-	}
-	for _, label := range strings.Split(host, ".") {
-		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for index := range len(label) {
-			value := label[index]
-			if (value < 'a' || value > 'z') && (value < '0' || value > '9') && value != '-' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func validateCanonicalIPv4(host string) bool {
-	parts := strings.Split(host, ".")
-	if len(parts) != 4 {
-		return false
-	}
-	for _, part := range parts {
-		if part == "" || (len(part) > 1 && part[0] == '0') {
-			return false
-		}
-		for index := range len(part) {
-			if part[index] < '0' || part[index] > '9' {
-				return false
-			}
-		}
-		value, err := strconv.Atoi(part)
-		if err != nil || value > 255 {
-			return false
-		}
-	}
-	return true
-}
-
-func looksLikeDottedIPv4(host string) bool {
-	if strings.Count(host, ".") != 3 {
-		return false
-	}
-	for index := range len(host) {
-		if (host[index] < '0' || host[index] > '9') && host[index] != '.' {
-			return false
-		}
-	}
-	return true
-}
-
-func hasOnlyASCIIURLBytes(raw string) bool {
-	for index := range len(raw) {
-		if raw[index] < 0x21 || raw[index] > 0x7e {
-			return false
-		}
-	}
-	return true
-}
-
-func isApprovalPathByte(value byte) bool {
-	if (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9') {
-		return true
-	}
-	return strings.ContainsRune("-._~!$&'()*+,;=:@", rune(value))
 }
 
 func sameToolSet(actual, expected []string) bool {

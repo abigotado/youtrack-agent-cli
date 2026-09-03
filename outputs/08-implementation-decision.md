@@ -21,10 +21,10 @@ The official YouTrack Remote MCP remains the routine read plane. Its URL must ca
 Before implementing an enabled `mutation confirm` or `mutation apply`, a macOS feasibility spike must demonstrate all of the following on a supported Mac:
 
 1. A separately signed native helper displays the complete bounded canonical snapshot from one immutable in-memory byte buffer.
-2. Only after a fresh LocalAuthentication success, the helper stores the digest of exactly those displayed bytes in `receipt.plan_sha256` and signs the deterministic unsigned receipt from `approval.SigningBytes`; authentication reuse is disabled.
+2. Only after a fresh LocalAuthentication success, the helper stores the digest of exactly those displayed bytes in `receipt.plan_sha256` and signs the deterministic unsigned receipt from `approval.SigningBytes`, including SHA-256 of the fresh IPC challenge; authentication reuse is disabled.
 3. The on-device P-256 private key is non-exportable, has a documented tag and public-key fingerprint, and cannot be used by an unrelated same-user process.
 4. Cancellation, timeout, helper crash, binary replacement, key rotation, and application upgrade fail closed.
-5. The CLI verifies the helper code identity, receipt signature, plan digest, TTL, nonce, profile identity, and key generation.
+5. The CLI verifies the helper code identity, enrolled key, receipt signature, signed request challenge, plan digest, TTL, nonce, profile identity, and key generation.
 6. Packaging and update paths preserve the required code-signing identity and entitlements. Development or ad-hoc signing is not accepted as production evidence.
 
 ## Homebrew activation gate

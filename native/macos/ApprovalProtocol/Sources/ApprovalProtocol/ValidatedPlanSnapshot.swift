@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 public struct PlanBindings: Equatable, Sendable {
@@ -45,24 +44,24 @@ private enum PlanValidator {
             "request_sha256", "expected_sha256",
         ])
         guard plan["schema_version"]?.uint64 == 1,
-              let planID = plan["plan_id"]?.string, isPlanID(planID),
+              let planID = plan["plan_id"]?.string, ProtocolGrammar.isCanonicalBase32ID(planID, prefix: "YTAP-"),
               let kind = plan["kind"]?.string,
               ["issue.create", "issue.update", "comment.add"].contains(kind),
-              let requestDigest = plan["request_sha256"]?.string, isDigest(requestDigest),
-              let expectedDigest = plan["expected_sha256"]?.string, isDigest(expectedDigest),
+              let requestDigest = plan["request_sha256"]?.string, ProtocolGrammar.isDigest(requestDigest),
+              let expectedDigest = plan["expected_sha256"]?.string, ProtocolGrammar.isDigest(expectedDigest),
               let profileNode = plan["profile"], let policyNode = plan["policy"], let operationNode = plan["operation"]
         else { throw ApprovalProtocolError.invalidField("plan") }
 
         let profile = try validateProfile(profileNode)
         let policy = try validatePolicy(policyNode, kind: kind)
         let operation = try validateOperation(operationNode, kind: kind, planID: planID)
-        guard digest(JSONCanonicalEncoder.encode(operation.request)) == requestDigest,
-              digest(JSONCanonicalEncoder.encode(operation.expected)) == expectedDigest
+        guard ProtocolGrammar.sha256(JSONCanonicalEncoder.encode(operation.request)) == requestDigest,
+              ProtocolGrammar.sha256(JSONCanonicalEncoder.encode(operation.expected)) == expectedDigest
         else { throw ApprovalProtocolError.invalidField("request/expected digest") }
 
         return PlanBindings(
             planID: planID,
-            planSHA256: digest(exactBytes),
+            planSHA256: ProtocolGrammar.sha256(exactBytes),
             profileIdentitySHA256: profile.identity,
             accountID: profile.accountID,
             projectID: policy.projectID,
@@ -82,12 +81,12 @@ private enum PlanValidator {
               let instance = value["instance"]?.string, isURL(instance),
               let rest = value["rest_base_url"]?.string, rest == instance + "/api", rest.utf8.count <= 2048,
               let issuer = value["oauth_issuer_url"]?.string, isURL(issuer),
-              let identity = value["identity_sha256"]?.string, isDigest(identity),
+              let identity = value["identity_sha256"]?.string, ProtocolGrammar.isDigest(identity),
               let generation = value["credential_generation"]?.string, isBoundString(generation, max: 256),
               let accountNode = value["account"]
         else { throw ApprovalProtocolError.invalidField("profile") }
         let account = try accountNode.exactObject(["id", "login"])
-        guard let id = account["id"]?.string, isIdentifier(id),
+        guard let id = account["id"]?.string, ProtocolGrammar.isIdentifier(id),
               let login = account["login"]?.string, isBoundString(login, max: 256)
         else { throw ApprovalProtocolError.invalidField("account") }
         return (identity, id)
@@ -100,8 +99,8 @@ private enum PlanValidator {
         ])
         let expectedCapability = ["issue.create": "issue-create", "issue.update": "issue-update", "comment.add": "comment-add"][kind]
         guard let revision = value["policy_revision"]?.uint64, revision > 0,
-              let policyDigest = value["policy_sha256"]?.string, isDigest(policyDigest),
-              let schema = value["schema_sha256"]?.string, isDigest(schema),
+              let policyDigest = value["policy_sha256"]?.string, ProtocolGrammar.isDigest(policyDigest),
+              let schema = value["schema_sha256"]?.string, ProtocolGrammar.isDigest(schema),
               let assurance = value["executor_assurance"]?.string,
               ["rest-best-effort", "custom-mcp-atomic"].contains(assurance),
               value["authorized_capability"]?.string == expectedCapability,
@@ -110,8 +109,8 @@ private enum PlanValidator {
               let projectNode = value["project"]
         else { throw ApprovalProtocolError.invalidField("policy") }
         let project = try projectNode.exactObject(["id", "key"])
-        guard let id = project["id"]?.string, isIdentifier(id),
-              let key = project["key"]?.string, isProjectKey(key)
+        guard let id = project["id"]?.string, ProtocolGrammar.isIdentifier(id),
+              let key = project["key"]?.string, ProtocolGrammar.isProjectKey(key)
         else { throw ApprovalProtocolError.invalidField("project") }
         return (id, key, schema)
     }
@@ -144,7 +143,7 @@ private enum PlanValidator {
         try validateFields(value["custom_fields"])
         try validateMarker(marker, body: description, planID: planID)
         let exp = try expected.exactObject(["project_state_sha256"])
-        guard let hash = exp["project_state_sha256"]?.string, isDigest(hash) else { throw ApprovalProtocolError.invalidField("expected") }
+        guard let hash = exp["project_state_sha256"]?.string, ProtocolGrammar.isDigest(hash) else { throw ApprovalProtocolError.invalidField("expected") }
     }
 
     private static func validateUpdate(_ request: JSONNode, _ expected: JSONNode) throws {
@@ -165,8 +164,8 @@ private enum PlanValidator {
         try validateFields(patch["custom_fields"])
         let exp = try expected.exactObject(["issue_id", "issue_state_sha256", "touched_fields_sha256"])
         guard exp["issue_id"]?.string == issueID,
-              let state = exp["issue_state_sha256"]?.string, isDigest(state),
-              let touched = exp["touched_fields_sha256"]?.string, isDigest(touched)
+              let state = exp["issue_state_sha256"]?.string, ProtocolGrammar.isDigest(state),
+              let touched = exp["touched_fields_sha256"]?.string, ProtocolGrammar.isDigest(touched)
         else { throw ApprovalProtocolError.invalidField("expected") }
     }
 
@@ -182,7 +181,7 @@ private enum PlanValidator {
         guard isRequiredText(original, max: 32 << 10) else { throw ApprovalProtocolError.invalidField("comment text") }
         let exp = try expected.exactObject(["issue_id", "issue_state_sha256"])
         guard exp["issue_id"]?.string == issueID,
-              let hash = exp["issue_state_sha256"]?.string, isDigest(hash)
+              let hash = exp["issue_state_sha256"]?.string, ProtocolGrammar.isDigest(hash)
         else { throw ApprovalProtocolError.invalidField("expected") }
     }
 
@@ -194,7 +193,7 @@ private enum PlanValidator {
               let groups = value["group_ids"]?.array, (1...32).contains(groups.count)
         else { throw ApprovalProtocolError.invalidField("visibility") }
         let ids = groups.compactMap(\.string)
-        guard ids.count == groups.count, ids.allSatisfy(isIdentifier), ids == ids.sorted(), Set(ids).count == ids.count else {
+        guard ids.count == groups.count, ids.allSatisfy(ProtocolGrammar.isIdentifier), ids == ids.sorted(), Set(ids).count == ids.count else {
             throw ApprovalProtocolError.invalidField("visibility")
         }
     }
@@ -210,10 +209,10 @@ private enum PlanValidator {
                 throw ApprovalProtocolError.invalidField("custom_field")
             }
             let field = Dictionary(uniqueKeysWithValues: pairs.map { ($0.name, $0.value) })
-            guard let id = field["field_id"]?.string, isIdentifier(id), id > previous,
+            guard let id = field["field_id"]?.string, ProtocolGrammar.isIdentifier(id), id > previous,
                   let type = field["field_type"]?.string, isBoundString(type, max: 128)
             else { throw ApprovalProtocolError.invalidField("custom_field") }
-            if let valueID = field["value_id"]?.string, !isIdentifier(valueID) { throw ApprovalProtocolError.invalidField("value_id") }
+            if let valueID = field["value_id"]?.string, !ProtocolGrammar.isIdentifier(valueID) { throw ApprovalProtocolError.invalidField("value_id") }
             if field["value_id"] != nil && field["value_id"]?.string == nil { throw ApprovalProtocolError.invalidField("value_id") }
             if let text = field["text_value"]?.string, !isText(text, min: 0, max: 8 << 10) { throw ApprovalProtocolError.invalidField("text_value") }
             if field["text_value"] != nil && field["text_value"]?.string == nil { throw ApprovalProtocolError.invalidField("text_value") }
@@ -222,20 +221,35 @@ private enum PlanValidator {
     }
 
     private static func validateMarker(_ marker: String, body: String, planID: String) throws {
-        let prefix = "Agent plan: ", exact = prefix + planID
+        let prefix = Array("Agent plan: ".utf8)
+        let exact = prefix + Array(planID.utf8)
+        let bodyBytes = Array(body.utf8)
         if marker == "none" {
-            guard !body.contains(prefix) else { throw ApprovalProtocolError.invalidField("marker") }
+            guard occurrences(of: prefix, in: bodyBytes) == 0 else { throw ApprovalProtocolError.invalidField("marker") }
         } else if marker == "visible_footer" {
-            guard (body == exact || body.hasSuffix("\n\n" + exact)), body.components(separatedBy: prefix).count - 1 == 1 else {
+            let footer = [UInt8(0x0A), 0x0A] + exact
+            guard (bodyBytes == exact || bodyBytes.suffix(footer.count).elementsEqual(footer)),
+                  occurrences(of: prefix, in: bodyBytes) == 1
+            else {
                 throw ApprovalProtocolError.invalidField("marker")
             }
         } else { throw ApprovalProtocolError.invalidField("marker") }
     }
 
     private static func stripMarker(_ body: String, planID: String) -> String {
-        let marker = "Agent plan: " + planID
-        if body == marker { return "" }
-        return String(body.dropLast(("\n\n" + marker).count))
+        let marker = Array(("Agent plan: " + planID).utf8)
+        let bytes = Array(body.utf8)
+        if bytes == marker { return "" }
+        return String(decoding: bytes.dropLast(marker.count + 2), as: UTF8.self)
+    }
+
+    private static func occurrences(of needle: [UInt8], in bytes: [UInt8]) -> Int {
+        guard !needle.isEmpty, bytes.count >= needle.count else { return 0 }
+        var count = 0
+        for offset in 0...(bytes.count - needle.count) where bytes[offset..<(offset + needle.count)].elementsEqual(needle) {
+            count += 1
+        }
+        return count
     }
 
     private static func isURL(_ value: String) -> Bool {
@@ -282,31 +296,18 @@ private enum PlanValidator {
         }
     }
 
-    private static func isPlanID(_ value: String) -> Bool { isBase32ID(value, prefix: "YTAP-") }
-    private static func isBase32ID(_ value: String, prefix: String) -> Bool {
-        guard value.hasPrefix(prefix) else { return false }
-        let body = Array(value.dropFirst(prefix.count).utf8)
-        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".utf8)
-        guard body.count == 26, body.allSatisfy(alphabet.contains), let last = body.last,
-              let index = alphabet.firstIndex(of: last) else { return false }
-        return index & 3 == 0
-    }
     private static func isName(_ value: String) -> Bool {
-        let b = Array(value.utf8); return (1...64).contains(b.count) && isAlnum(b[0]) && b.dropFirst().allSatisfy { isAlnum($0) || [0x2E, 0x5F, 0x2D].contains($0) }
-    }
-    private static func isIdentifier(_ value: String) -> Bool {
-        let b = Array(value.utf8); return (1...128).contains(b.count) && isAlnum(b[0]) && b.dropFirst().allSatisfy { isAlnum($0) || [0x2E, 0x5F, 0x3A, 0x2D].contains($0) }
-    }
-    private static func isProjectKey(_ value: String) -> Bool {
-        let b = Array(value.utf8); return (1...32).contains(b.count) && (0x41...0x5A).contains(b[0]) && b.dropFirst().allSatisfy { (0x41...0x5A).contains($0) || (0x30...0x39).contains($0) || $0 == 0x5F }
+        let bytes = Array(value.utf8)
+        return (1...64).contains(bytes.count) && ProtocolGrammar.isASCIIAlphanumeric(bytes[0]) &&
+            bytes.dropFirst().allSatisfy {
+                ProtocolGrammar.isASCIIAlphanumeric($0) || [0x2E, 0x5F, 0x2D].contains($0)
+            }
     }
     private static func isIssueID(_ value: String) -> Bool {
         guard let dash = value.lastIndex(of: "-") else { return false }
         let key = String(value[..<dash]), number = String(value[value.index(after: dash)...])
-        return isProjectKey(key) && !number.isEmpty && number.first != "0" && number.allSatisfy { $0.isASCII && $0.isNumber }
+        return ProtocolGrammar.isProjectKey(key) && !number.isEmpty && number.first != "0" && number.allSatisfy { $0.isASCII && $0.isNumber }
     }
-    private static func isAlnum(_ b: UInt8) -> Bool { (0x30...0x39).contains(b) || (0x41...0x5A).contains(b) || (0x61...0x7A).contains(b) }
-    private static func isDigest(_ value: String) -> Bool { value.utf8.count == 64 && value.utf8.allSatisfy { (0x30...0x39).contains($0) || (0x61...0x66).contains($0) } }
     private static func isText(_ value: String, min: Int, max: Int) -> Bool { value.utf8.count >= min && value.utf8.count <= max && !value.contains("\0") }
     private static func isRequiredText(_ value: String, max: Int) -> Bool {
         isText(value, min: 1, max: max) && value.unicodeScalars.contains(where: { !isGoSpace($0) })
@@ -326,5 +327,4 @@ private enum PlanValidator {
             false
         }
     }
-    private static func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 }

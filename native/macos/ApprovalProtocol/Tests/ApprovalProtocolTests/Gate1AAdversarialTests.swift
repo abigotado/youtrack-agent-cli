@@ -38,6 +38,51 @@ import Testing
     _ = try ValidatedPlanSnapshot(canonicalBytes: boundaryCommentPlan(text: zeroWidth))
 }
 
+@Test func leadingBOMInEveryAcceptedTextPositionIsByteFaithful() throws {
+    let bom = "\u{FEFF}"
+    _ = try ValidatedPlanSnapshot(canonicalBytes: boundaryPlan(loginPrefix: bom))
+    _ = try ValidatedPlanSnapshot(canonicalBytes: boundaryCommentPlan(text: bom + "Comment fixture"))
+    for (old, new) in [
+        ("Create fixture", bom + "Create fixture"),
+        (#"Untrusted \u003cb\u003etext\u003c/b\u003e"#, bom + #"Untrusted \u003cb\u003etext\u003c/b\u003e"#),
+        ("\"value_id\":\"normal\"", "\"text_value\":\"\(bom)normal\""),
+    ] {
+        _ = try ValidatedPlanSnapshot(canonicalBytes: boundaryCreatePlan(replacing: old, with: new))
+    }
+}
+
+@Test func CRLFBeforeVisibleMarkerMatchesGoByteSemantics() throws {
+    let planID = "YTAP-6DQNBQFQUCIIA4DAKBADAIAQAA"
+    let originalRequest = Data(
+        #"{"issue_id":"APP-1","text":"Comment fixture","visibility":{"mode":"public"},"marker":"none"}"#.utf8
+    )
+    let changedRequest = Data(
+        #"{"issue_id":"APP-1","text":"hello\r\n\nAgent plan: \#(planID)","visibility":{"mode":"public"},"marker":"visible_footer"}"#.utf8
+    )
+    var plan = boundaryReplacing(
+        try boundaryFixture("plan-comment-add.json"),
+        String(decoding: originalRequest, as: UTF8.self),
+        with: String(decoding: changedRequest, as: UTF8.self)
+    )
+    plan = boundaryReplacing(
+        plan,
+        "87ecebe85e37fca8dd48b2cb607822c539e859ce19d5a8be2afe78171f73b37d",
+        with: boundarySHA256(changedRequest)
+    )
+    _ = try ValidatedPlanSnapshot(canonicalBytes: plan)
+}
+
+@Test func missingColonIsMalformedNotDuplicate() throws {
+    var parser = try BoundedJSONParser(data: Data(#"{"x"0}"#.utf8), maximumBytes: 32)
+    #expect(throws: ApprovalProtocolError.malformedJSON) { _ = try parser.parse() }
+
+    var invalidUTF8 = Data(#"{"x":""#.utf8)
+    invalidUTF8.append(0xFF)
+    invalidUTF8.append(contentsOf: Data(#""}"#.utf8))
+    var invalidParser = try BoundedJSONParser(data: invalidUTF8, maximumBytes: 32)
+    #expect(throws: ApprovalProtocolError.malformedJSON) { _ = try invalidParser.parse() }
+}
+
 @Test func boundedJSONEnforcesDepthCollectionValueAndPreallocationLimits() throws {
     let exactDepth = String(repeating: "[", count: BoundedJSONParser.maximumDepth) + "0" +
         String(repeating: "]", count: BoundedJSONParser.maximumDepth)
@@ -143,11 +188,13 @@ import Testing
 @Test func receiptFactoryRejectsSignerIdentityAndMessageSubstitution() throws {
     let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
     let clock = BoundaryClock(value: try boundaryDate("2026-09-02T15:34:56Z"))
+    let challenge = try boundaryChallenge()
 
     for signer in [BoundarySigner(mode: .wrongIdentity), BoundarySigner(mode: .wrongMessage)] {
         #expect(throws: ApprovalProtocolError.self) {
             _ = try ApprovalReceiptFactory.makeReceipt(
                 for: snapshot,
+                challenge: challenge,
                 signer: signer,
                 random: BoundaryRandom(),
                 clock: clock
@@ -158,15 +205,17 @@ import Testing
 
     var inputSPKI = try boundaryDecodeHex(try boundaryFixtureString("public-key.spki.hex"))
     let expected = inputSPKI
-    let identity = try ApprovalSigningKeyIdentity(generation: "test-1", spkiDER: inputSPKI)
+    let identity = try EnrolledSigningKey(generation: "test-1", spkiDER: inputSPKI)
     inputSPKI[0] ^= 1
     #expect(identity.spkiDER == expected)
 }
 
 @Test func receiptFactoryAcceptsExactRandomBytesFromNonzeroStartSlices() throws {
     let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
+    let challenge = try boundaryChallenge()
     let receipt = try ApprovalReceiptFactory.makeReceipt(
         for: snapshot,
+        challenge: challenge,
         signer: BoundarySigner(mode: .valid),
         random: SlicedBoundaryRandom(),
         clock: BoundaryClock(value: try boundaryDate("2026-09-02T15:34:56Z"))
@@ -176,6 +225,7 @@ import Testing
     #expect(throws: ApprovalProtocolError.self) {
         _ = try ApprovalReceiptFactory.makeReceipt(
             for: snapshot,
+            challenge: challenge,
             signer: BoundarySigner(mode: .valid),
             random: WrongSizedBoundaryRandom(),
             clock: BoundaryClock(value: try boundaryDate("2026-09-02T15:34:56Z"))
@@ -187,6 +237,7 @@ import Testing
     let requestFrame = try boundaryDecodeHex(try boundaryFixtureString("ipc-request.hex"))
     let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(requestFrame)
     let now = try boundaryDate("2026-09-02T15:35:00Z")
+    let expectedKey = try boundaryFixtureKey()
     let fixtures: [(String, UInt8, Data, UInt32, UInt32)] = [
         ("request", 1, requestFrame, 33, UInt32(32 + ValidatedPlanSnapshot.maximumBytes)),
         ("success", 2, try boundaryDecodeHex(try boundaryFixtureString("ipc-success.hex")), 124, UInt32(32 + 91 + ApprovalReceipt.maximumReceiptBytes)),
@@ -204,7 +255,8 @@ import Testing
                     _ = try ApprovalIPCCodec.decodeRequest(malformed)
                 } else {
                     _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-                        malformed, expectedChallenge: challenge, snapshot: snapshot, now: now
+                        malformed, expectedChallenge: challenge, snapshot: snapshot,
+                        expectedKey: expectedKey, now: now
                     )
                 }
             }
@@ -218,7 +270,8 @@ import Testing
     for code in codes {
         let frame = ApprovalIPCCodec.encodeFailure(challenge: challenge, code: code)
         #expect(try ApprovalIPCCodec.decodeAndValidateResponse(
-            frame, expectedChallenge: challenge, snapshot: snapshot, now: now
+            frame, expectedChallenge: challenge, snapshot: snapshot,
+            expectedKey: expectedKey, now: now
         ) == .failure(code))
     }
     for rawCode: UInt8 in [0, 7, 255] {
@@ -226,7 +279,8 @@ import Testing
         frame[frame.count - 1] = rawCode
         #expect(throws: ApprovalProtocolError.self) {
             _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-                frame, expectedChallenge: challenge, snapshot: snapshot, now: now
+                frame, expectedChallenge: challenge, snapshot: snapshot,
+                expectedKey: expectedKey, now: now
             )
         }
     }
@@ -250,6 +304,7 @@ import Testing
     let bytes = Data(0..<UInt8(ApprovalIPCChallenge.byteCount))
     let challenge = try ApprovalIPCChallenge(bytes: bytes)
     let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
+    let expectedKey = try boundaryFixtureKey()
     for index in [0, ApprovalIPCChallenge.byteCount / 2, ApprovalIPCChallenge.byteCount - 1] {
         var changed = bytes
         changed[index] ^= 0xFF
@@ -258,13 +313,26 @@ import Testing
         let failure = ApprovalIPCCodec.encodeFailure(challenge: challenge, code: .userCanceled)
         #expect(throws: ApprovalProtocolError.self) {
             _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-                failure, expectedChallenge: wrong, snapshot: snapshot, now: Date()
+                failure, expectedChallenge: wrong, snapshot: snapshot,
+                expectedKey: expectedKey, now: Date()
             )
         }
     }
     #expect(challenge.constantTimeEquals(try ApprovalIPCChallenge(bytes: bytes)))
     #expect(throws: ApprovalProtocolError.self) { _ = try ApprovalIPCChallenge(bytes: Data(bytes.dropLast())) }
     #expect(throws: ApprovalProtocolError.self) { _ = try ApprovalIPCChallenge(bytes: bytes + Data([0])) }
+
+    var v1Request = ApprovalIPCCodec.encodeRequest(challenge: challenge, snapshot: snapshot)
+    v1Request[8] = 1
+    #expect(throws: ApprovalProtocolError.self) { _ = try ApprovalIPCCodec.decodeRequest(v1Request) }
+    var v1Failure = ApprovalIPCCodec.encodeFailure(challenge: challenge, code: .userCanceled)
+    v1Failure[8] = 1
+    #expect(throws: ApprovalProtocolError.self) {
+        _ = try ApprovalIPCCodec.decodeAndValidateResponse(
+            v1Failure, expectedChallenge: challenge, snapshot: snapshot,
+            expectedKey: expectedKey, now: Date()
+        )
+    }
 }
 
 @Test func IPCSuccessBindsKeyMessagePlanAndTTLBoundariesCryptographically() throws {
@@ -274,28 +342,31 @@ import Testing
     let issued = try boundaryDate("2026-09-02T15:34:56Z")
     let receipt = try ApprovalReceiptFactory.makeReceipt(
         for: snapshot,
+        challenge: challenge,
         signer: signer,
         random: BoundaryRandom(),
         clock: BoundaryClock(value: issued)
     )
     let validFrame = ApprovalIPCCodec.encodeSuccess(
         challenge: challenge,
-        keyIdentity: signer.keyIdentity,
+        enrolledKey: signer.enrolledKey,
         receipt: receipt
     )
     _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-        validFrame, expectedChallenge: challenge, snapshot: snapshot, now: issued.addingTimeInterval(60)
+        validFrame, expectedChallenge: challenge, snapshot: snapshot,
+        expectedKey: signer.enrolledKey, now: issued.addingTimeInterval(60)
     )
 
-    let wrongIdentity = BoundarySigner(mode: .valid).keyIdentity
+    let wrongIdentity = BoundarySigner(mode: .valid).enrolledKey
     let wrongKeyFrame = ApprovalIPCCodec.encodeSuccess(
         challenge: challenge,
-        keyIdentity: wrongIdentity,
+        enrolledKey: wrongIdentity,
         receipt: receipt
     )
     #expect(throws: ApprovalProtocolError.self) {
         _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-            wrongKeyFrame, expectedChallenge: challenge, snapshot: snapshot, now: issued.addingTimeInterval(60)
+            wrongKeyFrame, expectedChallenge: challenge, snapshot: snapshot,
+            expectedKey: signer.enrolledKey, now: issued.addingTimeInterval(60)
         )
     }
 
@@ -305,11 +376,12 @@ import Testing
         signatureDER: P256Signature.normalizeLowS(der: wrongMessageDER).der
     )
     let wrongMessageFrame = ApprovalIPCCodec.encodeSuccess(
-        challenge: challenge, keyIdentity: signer.keyIdentity, receipt: wrongMessageReceipt
+        challenge: challenge, enrolledKey: signer.enrolledKey, receipt: wrongMessageReceipt
     )
     #expect(throws: ApprovalProtocolError.invalidSignature) {
         _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-            wrongMessageFrame, expectedChallenge: challenge, snapshot: snapshot, now: issued.addingTimeInterval(60)
+            wrongMessageFrame, expectedChallenge: challenge, snapshot: snapshot,
+            expectedKey: signer.enrolledKey, now: issued.addingTimeInterval(60)
         )
     }
 
@@ -322,11 +394,12 @@ import Testing
         signatureDER: P256Signature.normalizeLowS(der: try signer.signature(for: changedBinding.encodedSigningBytes())).der
     )
     let changedBindingFrame = ApprovalIPCCodec.encodeSuccess(
-        challenge: challenge, keyIdentity: signer.keyIdentity, receipt: changedBindingReceipt
+        challenge: challenge, enrolledKey: signer.enrolledKey, receipt: changedBindingReceipt
     )
     #expect(throws: ApprovalProtocolError.self) {
         _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-            changedBindingFrame, expectedChallenge: challenge, snapshot: snapshot, now: issued.addingTimeInterval(60)
+            changedBindingFrame, expectedChallenge: challenge, snapshot: snapshot,
+            expectedKey: signer.enrolledKey, now: issued.addingTimeInterval(60)
         )
     }
 
@@ -340,19 +413,22 @@ import Testing
         signatureDER: P256Signature.normalizeLowS(der: try signer.signature(for: fiveMinute.encodedSigningBytes())).der
     )
     let fiveMinuteFrame = ApprovalIPCCodec.encodeSuccess(
-        challenge: challenge, keyIdentity: signer.keyIdentity, receipt: fiveMinuteReceipt
+        challenge: challenge, enrolledKey: signer.enrolledKey, receipt: fiveMinuteReceipt
     )
     _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-        fiveMinuteFrame, expectedChallenge: challenge, snapshot: snapshot, now: issued.addingTimeInterval(-30)
+        fiveMinuteFrame, expectedChallenge: challenge, snapshot: snapshot,
+        expectedKey: signer.enrolledKey, now: issued.addingTimeInterval(-30)
     )
     #expect(throws: ApprovalProtocolError.self) {
         _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-            fiveMinuteFrame, expectedChallenge: challenge, snapshot: snapshot, now: issued.addingTimeInterval(-31)
+            fiveMinuteFrame, expectedChallenge: challenge, snapshot: snapshot,
+            expectedKey: signer.enrolledKey, now: issued.addingTimeInterval(-31)
         )
     }
     #expect(throws: ApprovalProtocolError.self) {
         _ = try ApprovalIPCCodec.decodeAndValidateResponse(
-            fiveMinuteFrame, expectedChallenge: challenge, snapshot: snapshot, now: issued.addingTimeInterval(300)
+            fiveMinuteFrame, expectedChallenge: challenge, snapshot: snapshot,
+            expectedKey: signer.enrolledKey, now: issued.addingTimeInterval(300)
         )
     }
 }
@@ -361,6 +437,7 @@ import Testing
     let request = try boundaryDecodeHex(try boundaryFixtureString("ipc-request.hex"))
     let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(request)
     let success = try boundaryDecodeHex(try boundaryFixtureString("ipc-success.hex"))
+    let expectedKey = try boundaryFixtureKey()
     for seconds in [
         Double.nan,
         Double.infinity,
@@ -374,7 +451,75 @@ import Testing
                 success,
                 expectedChallenge: challenge,
                 snapshot: snapshot,
+                expectedKey: expectedKey,
                 now: Date(timeIntervalSince1970: seconds)
+            )
+        }
+    }
+}
+
+@Test func IPCV2RejectsChallengeReplayAndSelfSelectedKey() throws {
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
+    let expectedSigner = BoundarySigner(mode: .valid)
+    let challengeA = try boundaryChallenge()
+    var challengeBBytes = challengeA.bytes()
+    challengeBBytes[0] ^= 0xFF
+    let challengeB = try ApprovalIPCChallenge(bytes: challengeBBytes)
+    let issued = try boundaryDate("2026-09-02T15:34:56Z")
+    let receiptA = try ApprovalReceiptFactory.makeReceipt(
+        for: snapshot, challenge: challengeA, signer: expectedSigner,
+        random: BoundaryRandom(), clock: BoundaryClock(value: issued)
+    )
+    let spliced = ApprovalIPCCodec.encodeSuccess(
+        challenge: challengeB, enrolledKey: expectedSigner.enrolledKey, receipt: receiptA
+    )
+    #expect(throws: ApprovalProtocolError.self) {
+        _ = try ApprovalIPCCodec.decodeAndValidateResponse(
+            spliced, expectedChallenge: challengeB, snapshot: snapshot,
+            expectedKey: expectedSigner.enrolledKey, now: issued.addingTimeInterval(10)
+        )
+    }
+
+    let attacker = BoundarySigner(mode: .valid)
+    let attackerReceipt = try ApprovalReceiptFactory.makeReceipt(
+        for: snapshot, challenge: challengeA, signer: attacker,
+        random: BoundaryRandom(), clock: BoundaryClock(value: issued)
+    )
+    let selfSelected = ApprovalIPCCodec.encodeSuccess(
+        challenge: challengeA, enrolledKey: attacker.enrolledKey, receipt: attackerReceipt
+    )
+    #expect(throws: ApprovalProtocolError.self) {
+        _ = try ApprovalIPCCodec.decodeAndValidateResponse(
+            selfSelected, expectedChallenge: challengeA, snapshot: snapshot,
+            expectedKey: expectedSigner.enrolledKey, now: issued.addingTimeInterval(10)
+        )
+    }
+}
+
+@Test func IPCV2RejectsWrongEnrolledGenerationAndFingerprint() throws {
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
+    let signer = BoundarySigner(mode: .valid)
+    let challenge = try boundaryChallenge()
+    let issued = try boundaryDate("2026-09-02T15:34:56Z")
+    let receipt = try ApprovalReceiptFactory.makeReceipt(
+        for: snapshot, challenge: challenge, signer: signer,
+        random: BoundaryRandom(), clock: BoundaryClock(value: issued)
+    )
+    for changed in [
+        try boundaryUnsigned(copying: receipt.unsigned, keyGeneration: "other-1"),
+        try boundaryUnsigned(copying: receipt.unsigned, keyFingerprintSHA256: String(repeating: "f", count: 64)),
+    ] {
+        let signed = try ApprovalReceipt(
+            unsigned: changed,
+            signatureDER: P256Signature.normalizeLowS(der: try signer.signature(for: changed.encodedSigningBytes())).der
+        )
+        let frame = ApprovalIPCCodec.encodeSuccess(
+            challenge: challenge, enrolledKey: signer.enrolledKey, receipt: signed
+        )
+        #expect(throws: ApprovalProtocolError.self) {
+            _ = try ApprovalIPCCodec.decodeAndValidateResponse(
+                frame, expectedChallenge: challenge, snapshot: snapshot,
+                expectedKey: signer.enrolledKey, now: issued.addingTimeInterval(10)
             )
         }
     }
@@ -397,7 +542,7 @@ private final class BoundarySigner: ApprovalSigner {
         identityKey = mode == .wrongIdentity ? P256.Signing.PrivateKey() : signingKey
     }
 
-    lazy var keyIdentity: ApprovalSigningKeyIdentity = try! ApprovalSigningKeyIdentity(
+    lazy var enrolledKey: EnrolledSigningKey = try! EnrolledSigningKey(
         generation: "boundary-1",
         spkiDER: P256PublicKeyCodec.spkiDER(fromX963: identityKey.publicKey.x963Representation)
     )
@@ -441,12 +586,16 @@ private struct BoundaryClock: ApprovalClock {
 private func boundaryUnsigned(
     copying receipt: UnsignedApprovalReceipt,
     planSHA256: String? = nil,
+    challengeSHA256: String? = nil,
+    keyGeneration: String? = nil,
+    keyFingerprintSHA256: String? = nil,
     issuedAt: String? = nil,
     expiresAt: String? = nil
 ) throws -> UnsignedApprovalReceipt {
     try UnsignedApprovalReceipt(
         receiptID: receipt.receiptID,
         nonce: receipt.nonce,
+        challengeSHA256: challengeSHA256 ?? receipt.challengeSHA256,
         planID: receipt.planID,
         planSHA256: planSHA256 ?? receipt.planSHA256,
         profileIdentitySHA256: receipt.profileIdentitySHA256,
@@ -458,8 +607,8 @@ private func boundaryUnsigned(
         expectedSHA256: receipt.expectedSHA256,
         issuedAt: issuedAt ?? receipt.issuedAt,
         expiresAt: expiresAt ?? receipt.expiresAt,
-        keyGeneration: receipt.keyGeneration,
-        keyFingerprintSHA256: receipt.keyFingerprintSHA256
+        keyGeneration: keyGeneration ?? receipt.keyGeneration,
+        keyFingerprintSHA256: keyFingerprintSHA256 ?? receipt.keyFingerprintSHA256
     )
 }
 
@@ -485,6 +634,20 @@ private func boundaryCommentPlan(text: String) throws -> Data {
     return plan
 }
 
+private func boundaryCreatePlan(replacing old: String, with new: String) throws -> Data {
+    let originalRequest = Data(
+        #"{"summary":"Create fixture","description":"Untrusted \u003cb\u003etext\u003c/b\u003e","visibility":{"mode":"public"},"custom_fields":[{"field_id":"priority","field_type":"enum","value_id":"normal"}],"marker":"none"}"#.utf8
+    )
+    let changedRequest = boundaryReplacing(originalRequest, old, with: new)
+    var plan = boundaryReplacing(try boundaryFixture("plan-issue-create.json"), old, with: new)
+    plan = boundaryReplacing(
+        plan,
+        "bb6a78c3861939df7fd7f5a9e6112397c94d318f6e944a44a626d8194af42f18",
+        with: boundarySHA256(changedRequest)
+    )
+    return plan
+}
+
 private func parseBoundaryJSON(_ value: String) throws -> JSONNode {
     var parser = try BoundedJSONParser(data: Data(value.utf8), maximumBytes: 512 << 10)
     return try parser.parse()
@@ -504,7 +667,7 @@ private func boundaryFlipDigest(_ data: Data, field: String) -> Data {
 }
 
 private func boundaryFrameHeader(kind: UInt8, length: UInt32) -> Data {
-    var output = Data([0x59, 0x54, 0x41, 0x50, 0x49, 0x50, 0x43, 0x00, 1, kind, 0, 0])
+    var output = Data([0x59, 0x54, 0x41, 0x50, 0x49, 0x50, 0x43, 0x00, 2, kind, 0, 0])
     output.append(contentsOf: [
         UInt8((length >> 24) & 0xFF),
         UInt8((length >> 16) & 0xFF),
@@ -512,6 +675,17 @@ private func boundaryFrameHeader(kind: UInt8, length: UInt32) -> Data {
         UInt8(length & 0xFF),
     ])
     return output
+}
+
+private func boundaryChallenge() throws -> ApprovalIPCChallenge {
+    try ApprovalIPCChallenge(bytes: Data(0..<32))
+}
+
+private func boundaryFixtureKey() throws -> EnrolledSigningKey {
+    try EnrolledSigningKey(
+        generation: "1",
+        spkiDER: boundaryDecodeHex(try boundaryFixtureString("public-key.spki.hex"))
+    )
 }
 
 private func boundaryDate(_ value: String) throws -> Date {

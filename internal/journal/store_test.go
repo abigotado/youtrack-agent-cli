@@ -1,7 +1,10 @@
 package journal
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -131,6 +134,55 @@ func TestStorePersistsPlanAboveFormerRecordLimit(t *testing.T) {
 	}
 	if info.Size() <= 256<<10 || info.Size() > maxRecordBytes {
 		t.Fatalf("journal record size = %d, want former limit < size <= %d", info.Size(), maxRecordBytes)
+	}
+}
+
+func TestStoreReadsLegacyApprovalIncompatiblePlan(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "journal"))
+	plan := journalPlan(t)
+	if _, err := store.Create(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := intent.CanonicalBytes(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacements := [][2][]byte{
+		{[]byte(`"instance":"https://acme.youtrack.cloud"`), []byte(`"instance":"https://acme.youtrack.cloud:443"`)},
+		{[]byte(`"rest_base_url":"https://acme.youtrack.cloud/api"`), []byte(`"rest_base_url":"https://acme.youtrack.cloud:443/api"`)},
+		{[]byte(`"oauth_issuer_url":"https://hub.example.test"`), []byte(`"oauth_issuer_url":"https://hub.example.test:443"`)},
+	}
+	legacyCanonical := append([]byte(nil), canonical...)
+	for _, replacement := range replacements {
+		if !bytes.Contains(legacyCanonical, replacement[0]) {
+			t.Fatalf("canonical plan is missing %q", replacement[0])
+		}
+		legacyCanonical = bytes.ReplaceAll(legacyCanonical, replacement[0], replacement[1])
+	}
+	digest := sha256.Sum256(legacyCanonical)
+	legacyDigest := hex.EncodeToString(digest[:])
+	path := filepath.Join(store.directory, plan.PlanID+".json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, replacement := range [][2][]byte{
+		{[]byte(`"https://acme.youtrack.cloud/api"`), []byte(`"https://acme.youtrack.cloud:443/api"`)},
+		{[]byte(`"https://acme.youtrack.cloud"`), []byte(`"https://acme.youtrack.cloud:443"`)},
+		{[]byte(`"https://hub.example.test"`), []byte(`"https://hub.example.test:443"`)},
+	} {
+		raw = bytes.ReplaceAll(raw, replacement[0], replacement[1])
+	}
+	raw = bytes.ReplaceAll(raw, []byte(plan.IntentSHA256), []byte(legacyDigest))
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Get(context.Background(), plan.PlanID)
+	if err != nil {
+		t.Fatalf("read legacy journal record: %v", err)
+	}
+	if loaded.Plan.Profile.Instance != "https://acme.youtrack.cloud:443" || loaded.Plan.IntentSHA256 != legacyDigest {
+		t.Fatalf("loaded plan changed legacy bindings: %#v", loaded.Plan)
 	}
 }
 

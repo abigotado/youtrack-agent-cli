@@ -62,9 +62,10 @@ struct BoundedJSONParser {
         while true {
             guard pairs.count < Self.maximumObjectFields else { throw ApprovalProtocolError.malformedJSON }
             let key = try parseString()
-            guard !pairs.contains(where: { $0.name == key }), take(0x3A) else {
+            guard !pairs.contains(where: { $0.name == key }) else {
                 throw ApprovalProtocolError.duplicateField(key)
             }
+            guard take(0x3A) else { throw ApprovalProtocolError.malformedJSON }
             pairs.append(JSONMember(name: key, value: try parseValue(depth: depth + 1)))
             if take(0x7D) { return .object(pairs) }
             guard take(0x2C) else { throw ApprovalProtocolError.malformedJSON }
@@ -105,7 +106,9 @@ struct BoundedJSONParser {
         var result = ""
         var start = offset
         func decode(_ range: Range<Int>) throws -> String {
-            guard let text = String(bytes: bytes[range], encoding: .utf8) else { throw ApprovalProtocolError.malformedJSON }
+            let segment = Array(bytes[range])
+            let text = String(decoding: segment, as: UTF8.self)
+            guard Array(text.utf8) == segment else { throw ApprovalProtocolError.malformedJSON }
             return text
         }
         while let byte = peek {

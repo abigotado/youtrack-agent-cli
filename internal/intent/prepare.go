@@ -45,7 +45,10 @@ func PrepareWithSource(profile ProfileSnapshot, policy ProjectPolicy, kind Kind,
 	if source == nil {
 		return Plan{}, fmt.Errorf("%w: nil plan ID source", ErrInvalidPlan)
 	}
-	if err := validateProfile(profile); err != nil {
+	if err := validateProfileLegacy(profile); err != nil {
+		return Plan{}, err
+	}
+	if err := ValidateApprovalProfile(profile); err != nil {
 		return Plan{}, err
 	}
 	if err := validatePolicy(policy); err != nil {

@@ -201,6 +201,62 @@ func TestPrepareMutationRequiresExactOperationCapability(t *testing.T) {
 	}
 }
 
+func TestPrepareMutationRejectsIncompatibleProfileBeforeCapabilityOrSideEffects(t *testing.T) {
+	directory := t.TempDir()
+	profiles := profile.NewRegistry(filepath.Join(directory, "config", "profiles.json"))
+	selected := profile.Profile{
+		Name: "work", ServiceURL: "https://tracker.example.test:443", RESTBaseURL: "https://tracker.example.test:443/api",
+		OAuth: profile.OAuthConfig{
+			IssuerURL: "https://hub.example.test:443", AuthorizationURL: "https://hub.example.test:443/api/rest/oauth2/auth",
+			TokenURL: "https://hub.example.test:443/api/rest/oauth2/token", ClientID: "client", Scopes: []string{"YouTrack"},
+			RedirectURI: "http://127.0.0.1:18987/oauth/callback",
+		},
+		ExpectedAccountID: "1-42", ExpectedLogin: "alice", Capabilities: []profile.Capability{profile.CapabilityRead},
+		Executor: profile.ExecutorRESTBestEffort, Assurance: profile.AssuranceBestEffort,
+	}
+	var err error
+	selected.MCPURL, err = endpoint.CanonicalMCPURL(selected.ServiceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err = selected.WithNewCredentialGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := profiles.Add(context.Background(), selected); err != nil {
+		t.Fatal(err)
+	}
+	policyDirectory := filepath.Join(directory, "policy")
+	journalDirectory := filepath.Join(directory, "journal")
+	exportPath := filepath.Join(directory, "exports", "plan.json")
+	credentials := &trapCredentials{}
+	transport := &trapTransport{}
+	service := &Service{
+		Profiles: profiles, Policies: writepolicy.NewRegistry(filepath.Join(policyDirectory, "write-policies.json")),
+		Credentials: credentials, Journal: journal.New(journalDirectory), Approver: approval.Unsupported{}, HTTP: transport,
+	}
+	_, err = service.PrepareMutationInfo(context.Background(), validPrepareInput(exportPath))
+	var typed *errx.Error
+	if !errors.As(err, &typed) || typed.Code != errx.CodeUsage || typed.Reason != "MUTATION_PROFILE_INCOMPATIBLE" {
+		t.Fatalf("error = %#v, want early profile compatibility rejection", err)
+	}
+	if !strings.Contains(typed.Hint, "canonical DNS or IPv4 HTTPS URLs") {
+		t.Fatalf("compatibility hint = %q", typed.Hint)
+	}
+	if credentials.calls != 0 || transport.calls != 0 {
+		t.Fatalf("compatibility rejection touched credentials=%d network=%d", credentials.calls, transport.calls)
+	}
+	for name, path := range map[string]string{
+		"policy directory":  policyDirectory,
+		"journal directory": journalDirectory,
+		"export path":       exportPath,
+	} {
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("%s was touched: %v", name, statErr)
+		}
+	}
+}
+
 func TestPrepareExportFailurePreservesPlanIDAndCanReexport(t *testing.T) {
 	service, _, _ := mutationService(t)
 	directory := t.TempDir()

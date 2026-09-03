@@ -10,6 +10,7 @@ public struct ApprovalIPCChallenge: Equatable, Sendable {
     }
 
     func bytes() -> Data { storage }
+    public var sha256: String { ProtocolGrammar.sha256(storage) }
 
     public func constantTimeEquals(_ other: ApprovalIPCChallenge) -> Bool {
         zip(storage, other.storage).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) } == 0
@@ -26,7 +27,7 @@ public enum ApprovalIPCErrorCode: UInt8, Equatable, Sendable {
 }
 
 public struct ApprovalIPCSuccess: Equatable, Sendable {
-    public let keyIdentity: ApprovalSigningKeyIdentity
+    public let enrolledKey: EnrolledSigningKey
     public let receipt: ApprovalReceipt
 }
 
@@ -55,11 +56,11 @@ public enum ApprovalIPCCodec {
 
     public static func encodeSuccess(
         challenge: ApprovalIPCChallenge,
-        keyIdentity: ApprovalSigningKeyIdentity,
+        enrolledKey: EnrolledSigningKey,
         receipt: ApprovalReceipt
     ) -> Data {
         var payload = challenge.bytes()
-        payload.append(keyIdentity.spkiDER)
+        payload.append(enrolledKey.spkiDER)
         payload.append(receipt.encodedReceiptBytes())
         return frame(kind: 2, payload: payload)
     }
@@ -74,6 +75,7 @@ public enum ApprovalIPCCodec {
         _ input: Data,
         expectedChallenge: ApprovalIPCChallenge,
         snapshot: ValidatedPlanSnapshot,
+        expectedKey: EnrolledSigningKey,
         now: Date
     ) throws -> ApprovalIPCResponse {
         let header = try parseHeader(input)
@@ -81,20 +83,22 @@ public enum ApprovalIPCCodec {
         case 2:
             let payload = try decodeFrame(input, expectedKind: 2, maximumPayload: 32 + 91 + ApprovalReceipt.maximumReceiptBytes)
             guard payload.count >= 124 else { throw ApprovalProtocolError.invalidField("success frame") }
-            let payloadBytes = Array(payload)
-            let challenge = try ApprovalIPCChallenge(bytes: Data(payloadBytes.prefix(32)))
+            let challenge = try ApprovalIPCChallenge(bytes: Data(payload.prefix(32)))
             guard challenge.constantTimeEquals(expectedChallenge) else { throw ApprovalProtocolError.invalidField("challenge") }
-            let spki = Data(payloadBytes[32..<123])
-            let receipt = try ApprovalReceipt(receiptBytes: Data(payloadBytes.dropFirst(123)))
-            let identity = try ApprovalSigningKeyIdentity(generation: receipt.unsigned.keyGeneration, spkiDER: spki)
-            try validate(receipt: receipt, keyIdentity: identity, snapshot: snapshot, now: now)
-            return .success(ApprovalIPCSuccess(keyIdentity: identity, receipt: receipt))
+            let spki = Data(payload.dropFirst(32).prefix(91))
+            guard spki == expectedKey.spkiDER else { throw ApprovalProtocolError.invalidPublicKey }
+            let receipt = try ApprovalReceipt(receiptBytes: Data(payload.dropFirst(123)))
+            try validate(
+                receipt: receipt, expectedChallenge: expectedChallenge,
+                expectedKey: expectedKey, snapshot: snapshot, now: now
+            )
+            return .success(ApprovalIPCSuccess(enrolledKey: expectedKey, receipt: receipt))
         case 3:
             let payload = try decodeFrame(input, expectedKind: 3, maximumPayload: 33)
             guard payload.count == 33 else { throw ApprovalProtocolError.invalidField("error frame") }
-            let payloadBytes = Array(payload)
-            let challenge = try ApprovalIPCChallenge(bytes: Data(payloadBytes.prefix(32)))
-            guard challenge.constantTimeEquals(expectedChallenge), let code = ApprovalIPCErrorCode(rawValue: payloadBytes[32]) else {
+            let challenge = try ApprovalIPCChallenge(bytes: Data(payload.prefix(32)))
+            guard challenge.constantTimeEquals(expectedChallenge), let rawCode = payload.last,
+                  let code = ApprovalIPCErrorCode(rawValue: rawCode) else {
                 throw ApprovalProtocolError.invalidField("error frame")
             }
             return .failure(code)
@@ -105,7 +109,8 @@ public enum ApprovalIPCCodec {
 
     private static func validate(
         receipt: ApprovalReceipt,
-        keyIdentity: ApprovalSigningKeyIdentity,
+        expectedChallenge: ApprovalIPCChallenge,
+        expectedKey: EnrolledSigningKey,
         snapshot: ValidatedPlanSnapshot,
         now: Date
     ) throws {
@@ -120,7 +125,9 @@ public enum ApprovalIPCCodec {
               receiptBinding.schemaSHA256 == plan.schemaSHA256,
               receiptBinding.requestSHA256 == plan.requestSHA256,
               receiptBinding.expectedSHA256 == plan.expectedSHA256,
-              receiptBinding.keyFingerprintSHA256 == keyIdentity.fingerprintSHA256,
+              receiptBinding.challengeSHA256 == expectedChallenge.sha256,
+              receiptBinding.keyGeneration == expectedKey.generation,
+              receiptBinding.keyFingerprintSHA256 == expectedKey.fingerprintSHA256,
               let issued = UnsignedApprovalReceipt.wholeSecondUTCValue(receiptBinding.issuedAt),
               let expires = UnsignedApprovalReceipt.wholeSecondUTCValue(receiptBinding.expiresAt),
               expires > issued, expires - issued <= 300
@@ -132,7 +139,7 @@ public enum ApprovalIPCCodec {
         else { throw ApprovalProtocolError.invalidField("current time") }
         let current = Int64(currentSeconds)
         guard issued <= current + 30, current < expires else { throw ApprovalProtocolError.invalidField("receipt ttl") }
-        let x963 = try P256PublicKeyCodec.x963(fromSPKIDER: keyIdentity.spkiDER)
+        let x963 = try P256PublicKeyCodec.x963(fromSPKIDER: expectedKey.spkiDER)
         let signature = try P256Signature(derBase64URL: receipt.signature)
         guard try P256PublicKeyCodec.verify(
             message: receiptBinding.encodedSigningBytes(), derSignature: signature.der, x963: x963
@@ -141,7 +148,7 @@ public enum ApprovalIPCCodec {
 
     private static func frame(kind: UInt8, payload: Data) -> Data {
         var output = magic
-        output.append(1)
+        output.append(2)
         output.append(kind)
         output.append(contentsOf: [0, 0])
         let length = UInt32(payload.count)
@@ -155,7 +162,7 @@ public enum ApprovalIPCCodec {
 
     private static func parseHeader(_ input: Data) throws -> (kind: UInt8, length: Int) {
         let header = Array(input.prefix(headerBytes))
-        guard header.count == headerBytes, Data(header.prefix(8)) == magic, header[8] == 1,
+        guard header.count == headerBytes, Data(header.prefix(8)) == magic, header[8] == 2,
               header[10] == 0, header[11] == 0 else { throw ApprovalProtocolError.invalidField("frame header") }
         let length = Int(header[12]) << 24 | Int(header[13]) << 16 | Int(header[14]) << 8 | Int(header[15])
         return (header[9], length)
@@ -166,6 +173,6 @@ public enum ApprovalIPCCodec {
         guard header.kind == expectedKind, header.length <= maximumPayload,
               input.count == headerBytes + header.length
         else { throw ApprovalProtocolError.invalidField("frame") }
-        return Data(input.dropFirst(headerBytes))
+        return input.dropFirst(headerBytes)
     }
 }

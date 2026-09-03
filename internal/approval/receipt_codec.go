@@ -14,6 +14,7 @@ type unsignedReceiptWire struct {
 	SchemaVersion         int    `json:"schema_version"`
 	ReceiptID             string `json:"receipt_id"`
 	Nonce                 string `json:"nonce"`
+	ChallengeSHA256       string `json:"challenge_sha256"`
 	PlanID                string `json:"plan_id"`
 	PlanSHA256            string `json:"plan_sha256"`
 	ProfileIdentitySHA256 string `json:"profile_identity_sha256"`
@@ -33,6 +34,7 @@ type receiptWire struct {
 	SchemaVersion         int    `json:"schema_version"`
 	ReceiptID             string `json:"receipt_id"`
 	Nonce                 string `json:"nonce"`
+	ChallengeSHA256       string `json:"challenge_sha256"`
 	PlanID                string `json:"plan_id"`
 	PlanSHA256            string `json:"plan_sha256"`
 	ProfileIdentitySHA256 string `json:"profile_identity_sha256"`
@@ -49,9 +51,9 @@ type receiptWire struct {
 	Signature             string `json:"signature"`
 }
 
-const receiptFieldCount = 17
+const receiptFieldCount = 18
 
-// ReceiptBytes returns the deterministic protocol-v1 signed receipt JSON.
+// ReceiptBytes returns the deterministic protocol-v2 signed receipt JSON.
 // Its field order is part of the cross-language contract.
 func ReceiptBytes(receipt Receipt) ([]byte, error) {
 	if err := validateReceipt(receipt); err != nil {
@@ -67,7 +69,8 @@ func ReceiptBytes(receipt Receipt) ([]byte, error) {
 	}
 	raw, err := json.Marshal(receiptWire{
 		SchemaVersion: receipt.SchemaVersion, ReceiptID: receipt.ReceiptID,
-		Nonce: receipt.Nonce, PlanID: receipt.PlanID, PlanSHA256: receipt.PlanSHA256,
+		Nonce: receipt.Nonce, ChallengeSHA256: receipt.ChallengeSHA256,
+		PlanID: receipt.PlanID, PlanSHA256: receipt.PlanSHA256,
 		ProfileIdentitySHA256: receipt.ProfileIdentitySHA256, AccountID: receipt.AccountID,
 		ProjectID: receipt.ProjectID, ProjectKey: receipt.ProjectKey,
 		SchemaSHA256: receipt.SchemaSHA256, RequestSHA256: receipt.RequestSHA256,
@@ -94,7 +97,7 @@ func ReceiptDigestSHA256(receipt Receipt) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-// ParseReceiptBytes parses only the exact canonical protocol-v1 receipt JSON.
+// ParseReceiptBytes parses only the exact canonical protocol-v2 receipt JSON.
 // The size check happens before decoder, map, or field allocations.
 func ParseReceiptBytes(raw []byte) (Receipt, error) {
 	if len(raw) == 0 || len(raw) > MaxReceiptBytes {
@@ -117,7 +120,8 @@ func ParseReceiptBytes(raw []byte) (Receipt, error) {
 	}
 	receipt := Receipt{
 		SchemaVersion: wire.SchemaVersion, ReceiptID: wire.ReceiptID, Nonce: wire.Nonce,
-		PlanID: wire.PlanID, PlanSHA256: wire.PlanSHA256,
+		ChallengeSHA256: wire.ChallengeSHA256,
+		PlanID:          wire.PlanID, PlanSHA256: wire.PlanSHA256,
 		ProfileIdentitySHA256: wire.ProfileIdentitySHA256, AccountID: wire.AccountID,
 		ProjectID: wire.ProjectID, ProjectKey: wire.ProjectKey, SchemaSHA256: wire.SchemaSHA256,
 		RequestSHA256: wire.RequestSHA256, ExpectedSHA256: wire.ExpectedSHA256,
@@ -180,7 +184,7 @@ func decodeExactReceiptObject(raw []byte) error {
 
 func isReceiptFieldName(name string) bool {
 	switch name {
-	case "schema_version", "receipt_id", "nonce", "plan_id", "plan_sha256",
+	case "schema_version", "receipt_id", "nonce", "challenge_sha256", "plan_id", "plan_sha256",
 		"profile_identity_sha256", "account_id", "project_id", "project_key",
 		"schema_sha256", "request_sha256", "expected_sha256", "issued_at",
 		"expires_at", "key_generation", "key_fingerprint_sha256", "signature":

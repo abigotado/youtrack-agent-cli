@@ -5,19 +5,17 @@ import (
 	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/asn1"
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"math/big"
+
+	"github.com/abigotado/youtrack-agent-cli/internal/protocolvalue"
 )
 
 const (
-	receiptIDPrefix = "YTAR-"
-	noncePrefix     = "YTAN-"
-	idPayloadBytes  = 16
-	idEncodedBytes  = 26
-
+	receiptIDPrefix          = "YTAR-"
+	noncePrefix              = "YTAN-"
 	maxP256DERSignatureBytes = 72
 	p256X963Bytes            = 65
 	p256DERSPKIBytes         = 91
@@ -55,7 +53,7 @@ func EncodeP256DERSignature(signature []byte) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
-// ValidateP256DERSignature enforces the protocol-v1 DER representation.
+// ValidateP256DERSignature enforces the protocol-v2 DER representation.
 func ValidateP256DERSignature(signature []byte) error {
 	if len(signature) == 0 || len(signature) > maxP256DERSignatureBytes {
 		return fmt.Errorf("P-256 DER signature is empty or exceeds %d bytes", maxP256DERSignatureBytes)
@@ -84,7 +82,7 @@ func ValidateP256DERSignature(signature []byte) error {
 }
 
 // P256X963ToDERSPKI converts an exact uncompressed 65-byte P-256 ANSI X9.63
-// public point to the protocol-v1 91-byte DER SubjectPublicKeyInfo form.
+// public point to the protocol-v2 91-byte DER SubjectPublicKeyInfo form.
 func P256X963ToDERSPKI(x963 []byte) ([]byte, error) {
 	if err := validateP256X963(x963); err != nil {
 		return nil, err
@@ -95,11 +93,11 @@ func P256X963ToDERSPKI(x963 []byte) ([]byte, error) {
 	return spki, nil
 }
 
-// P256DERSPKIToX963 validates the exact protocol-v1 SPKI prefix and returns
+// P256DERSPKIToX963 validates the exact protocol-v2 SPKI prefix and returns
 // its uncompressed P-256 point.
 func P256DERSPKIToX963(spki []byte) ([]byte, error) {
 	if len(spki) != p256DERSPKIBytes || string(spki[:len(p256DERSPKIPrefix)]) != p256DERSPKIPrefix {
-		return nil, fmt.Errorf("P-256 SPKI must use the exact protocol-v1 DER encoding")
+		return nil, fmt.Errorf("P-256 SPKI must use the exact protocol-v2 DER encoding")
 	}
 	x963 := spki[len(p256DERSPKIPrefix):]
 	if err := validateP256X963(x963); err != nil {
@@ -130,53 +128,17 @@ func validateP256X963(x963 []byte) error {
 }
 
 func validateCanonicalApprovalID(value, prefix string) error {
-	if len(value) != len(prefix)+idEncodedBytes || value[:len(prefix)] != prefix {
-		return fmt.Errorf("approval identifier has the wrong prefix or length")
-	}
-	encoded := value[len(prefix):]
-	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(encoded)
-	if err != nil || len(raw) != idPayloadBytes || base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw) != encoded {
-		return fmt.Errorf("approval identifier is not canonical 128-bit unpadded base32")
-	}
-	return nil
+	return protocolvalue.ValidateCanonicalBase32ID(value, prefix)
 }
 
 func isCanonicalIdentifier(value string) bool {
-	if len(value) == 0 || len(value) > 128 || !isASCIIAlphaNumeric(value[0]) {
-		return false
-	}
-	for index := 1; index < len(value); index++ {
-		if !isASCIIAlphaNumeric(value[index]) && value[index] != '.' && value[index] != '_' && value[index] != ':' && value[index] != '-' {
-			return false
-		}
-	}
-	return true
+	return protocolvalue.IsIdentifier(value)
 }
 
 func isCanonicalProjectKey(value string) bool {
-	if len(value) == 0 || len(value) > 32 || value[0] < 'A' || value[0] > 'Z' {
-		return false
-	}
-	for index := 1; index < len(value); index++ {
-		if (value[index] < 'A' || value[index] > 'Z') && (value[index] < '0' || value[index] > '9') && value[index] != '_' {
-			return false
-		}
-	}
-	return true
+	return protocolvalue.IsProjectKey(value)
 }
 
 func isCanonicalKeyGeneration(value string) bool {
-	if len(value) == 0 || len(value) > MaxKeyGenerationBytes || !isASCIIAlphaNumeric(value[0]) {
-		return false
-	}
-	for index := 1; index < len(value); index++ {
-		if !isASCIIAlphaNumeric(value[index]) && value[index] != '.' && value[index] != '_' && value[index] != '-' {
-			return false
-		}
-	}
-	return true
-}
-
-func isASCIIAlphaNumeric(value byte) bool {
-	return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9')
+	return protocolvalue.IsKeyGeneration(value, MaxKeyGenerationBytes)
 }

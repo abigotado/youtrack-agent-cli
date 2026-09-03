@@ -351,6 +351,17 @@ func (s *Service) PrepareMutation(ctx context.Context, input PrepareInput) (jour
 		if err != nil {
 			return err
 		}
+		if err := intent.ValidateApprovalProfile(intent.ProfileSnapshot{
+			Instance: selected.ServiceURL, RESTBaseURL: selected.RESTBaseURL,
+			OAuthIssuerURL: selected.OAuth.IssuerURL,
+		}); err != nil {
+			return (&errx.Error{
+				Code:    errx.CodeUsage,
+				Reason:  "MUTATION_PROFILE_INCOMPATIBLE",
+				Message: fmt.Sprintf("profile %q cannot be represented by the trusted approval protocol", input.Profile),
+				Hint:    "recreate the profile with canonical DNS or IPv4 HTTPS URLs and no explicit :443 port",
+			}).Wrap(err)
+		}
 		if selected.CredentialGeneration == "" {
 			return errx.Auth("PROFILE_NOT_AUTHENTICATED", "profile %q has no credential generation", input.Profile)
 		}

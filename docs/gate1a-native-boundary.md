@@ -27,9 +27,10 @@ renders every plan byte inertly and reversibly, obtains fresh user presence,
 and signs one cross-bound receipt with a non-exportable P-256 key. Neither side
 trusts decoded values merely because the other side accepted them.
 
-PR A freezes only pure value codecs, shared vectors, and the future connection
-contract. It introduces no socket, process launch, helper discovery, Keychain,
-Secure Enclave, UI, application-service, journal-transition, or mutation I/O.
+PR A freezes pure value codecs, shared vectors, the future connection contract,
+and one offline application guard for newly prepared mutations. It introduces
+no socket, process launch, helper discovery, Keychain, Secure Enclave, UI,
+confirmation orchestration, journal transition, or mutation I/O.
 
 ### Canonical URL and plan identity
 
@@ -41,7 +42,7 @@ dotted IPv4:
   `a-z`, `0-9`, and internal hyphens, and has no trailing dot.
 - IPv4 has exactly four decimal octets in `0..255`; leading zeroes are forbidden
   except for the value `0`.
-- IPv6 is excluded from protocol v1.
+- IPv6 is excluded from protocol v2.
 - An optional port is decimal `1..65535` without a leading zero. Port `443` is
   omitted.
 
@@ -49,8 +50,16 @@ The path is empty or `/segment(/segment)*`. Segments are nonempty and contain
 only RFC 3986 unreserved ASCII, sub-delimiters, `:`, and `@`. A trailing slash,
 double slash, `.`/`..` segment, percent encoding, backslash, control/space,
 query, fragment, userinfo, or non-ASCII byte fails closed. REST is exactly the
-instance URL plus `/api`, still within 2,048 bytes. `endpoint.ValidateApprovalURL`
-is the shared Go validator.
+instance URL plus `/api`, still within 2,048 bytes.
+`protocolvalue.ValidateApprovalURL` is the shared Go grammar authority;
+`endpoint.ValidateApprovalURL` delegates to it for profile-facing callers.
+
+Persisted profiles and journal plans continue to use the legacy service URL
+grammar, including explicit `:443` and IPv6, so existing read and export paths
+remain compatible. A new `mutation prepare` applies the narrower approval
+grammar immediately after its locked profile read. An incompatible profile
+fails with `MUTATION_PROFILE_INCOMPATIBLE` before policy, journal, credential,
+network, randomness, or export side effects.
 
 Plan IDs are `YTAP-` plus uppercase RFC 4648 Base32 without padding over
 exactly 16 bytes. Decode/re-encode equality rejects unused nonzero final bits.
@@ -64,7 +73,7 @@ The 16-byte header is:
 | Offset | Width | Value |
 | ---: | ---: | --- |
 | 0 | 8 | raw ASCII `YTAPIPC\x00` |
-| 8 | 1 | version `1` |
+| 8 | 1 | version `2` |
 | 9 | 1 | kind: `1=request`, `2=success`, `3=error` |
 | 10 | 2 | reserved big-endian zero |
 | 12 | 4 | unsigned big-endian payload length |
@@ -83,24 +92,27 @@ The complete error vocabulary is `1=user_canceled`, `2=request_invalid`,
 `6=internal_failure`. There is no error text or extension field.
 
 The CLI creates a fresh opaque 32-byte CSPRNG challenge per request. Both
-success and error responses echo it, and Go compares it in constant time.
+success and error responses echo it, Go compares it in constant time, and a
+success receipt signs its lowercase SHA-256 as `challenge_sha256`.
 
 ### Cross-binding acceptance
 
 Go accepts a success only after all of these checks succeed:
 
 1. the challenge equals the outstanding request;
-2. SPKI has the exact P-256 representation and is on-curve;
+2. response SPKI exactly equals the previously enrolled expected SPKI, has the
+   exact P-256 representation, and is on-curve;
 3. the receipt strictly parses and byte-for-byte re-encodes canonically;
 4. plan ID, SHA-256 of the exact displayed snapshot, profile identity,
    account, project ID/key, schema, request, and expected-state hashes match
    the validated snapshot;
-5. receipt fingerprint equals SHA-256 of the response SPKI;
+5. receipt generation and fingerprint equal the enrolled key, and the signed
+   challenge digest equals SHA-256 of the outstanding challenge;
 6. timestamps use whole-second UTC, lifetime is positive and no more than five
    minutes, issue time is no more than 30 seconds in the future, and `now` is
    strictly before expiry;
 7. the low-S strict DER ECDSA P-256 signature verifies over the exact
-   `approval.SigningBytes` using the response SPKI.
+   `approval.SigningBytes` using only the enrolled expected key.
 
 The future native factory uses an exact two-minute receipt lifetime. This is a
 minting policy; the five-minute bound remains the verifier safety ceiling.
@@ -141,9 +153,8 @@ those APIs.
   and frame fixtures; disagreement is a blocking failure.
 - The binary format has no ambiguity from JSON envelopes, Unicode, optional
   fields, helper-supplied text, or integer byte order.
-- The returned SPKI is cryptographically checked but is not yet enrollment
-  authority. Production integration must pin the expected key generation and
-  enrolled SPKI/designated requirement before enabling confirmation.
+- The pure Go validator requires an explicit enrolled key generation, exact
+  SPKI, and fingerprint; the response cannot select its own verification key.
 - `approval.Unsupported` remains the only production adapter. Gate 1A stays
   **NOT PASSED** until signed/notarized native execution, Secure Enclave
   isolation, peer validation, UI review, and clean-host lifecycle evidence all

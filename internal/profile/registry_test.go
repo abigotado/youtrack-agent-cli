@@ -2,11 +2,14 @@ package profile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
 )
 
 func TestRegistryRoundTripAndPermissions(t *testing.T) {
@@ -30,6 +33,42 @@ func TestRegistryRoundTripAndPermissions(t *testing.T) {
 		if info.Mode().Perm() != mode {
 			t.Fatalf("%s mode=%v", path, info.Mode().Perm())
 		}
+	}
+}
+
+func TestRegistryReadsLegacyApprovalIncompatibleProfile(t *testing.T) {
+	profile := testProfile("work")
+	profile.ServiceURL = "https://tracker.example.test:443/youtrack"
+	profile.RESTBaseURL = profile.ServiceURL + endpoint.RESTPath
+	var err error
+	profile.MCPURL, err = endpoint.CanonicalMCPURL(profile.ServiceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.OAuth.IssuerURL = "https://hub.example.test:443/hub"
+	profile.OAuth.AuthorizationURL = profile.OAuth.IssuerURL + endpoint.OAuthAuthorizationPath
+	profile.OAuth.TokenURL = profile.OAuth.IssuerURL + endpoint.OAuthTokenPath
+	if err := profile.Validate(); err != nil {
+		t.Fatalf("legacy profile no longer passes durable validation: %v", err)
+	}
+	raw, err := json.Marshal([]Profile{profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(t.TempDir(), "config")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "profiles.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := NewRegistry(path).Get(context.Background(), "work")
+	if err != nil {
+		t.Fatalf("read legacy profile: %v", err)
+	}
+	if loaded.ServiceURL != profile.ServiceURL || loaded.OAuth.IssuerURL != profile.OAuth.IssuerURL {
+		t.Fatalf("loaded profile changed legacy endpoints: %#v", loaded)
 	}
 }
 
