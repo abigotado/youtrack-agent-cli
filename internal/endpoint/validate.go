@@ -10,10 +10,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/abigotado/youtrack-agent-cli/internal/protocolvalue"
 )
 
 const (
-	MaxURLLength = 2048
+	MaxURLLength = protocolvalue.MaxURLBytes
 
 	OAuthAuthorizationPath = "/api/rest/oauth2/auth"
 	OAuthTokenPath         = "/api/rest/oauth2/token"
@@ -53,6 +55,26 @@ func ValidateServiceURL(raw string) error {
 		return invalid("service URL must not end with a slash")
 	}
 	return validateCanonicalPath(parsed.Path)
+}
+
+// ValidateApprovalURL enforces the language-neutral URL grammar understood by
+// both the Go plan authority and the native approval boundary. It performs no
+// DNS resolution or network I/O.
+func ValidateApprovalURL(raw string) error {
+	if err := protocolvalue.ValidateApprovalURL(raw); err != nil {
+		return invalid("%v", err)
+	}
+	return nil
+}
+
+// ValidateApprovalRESTBaseURL requires the strict approval-plane REST base to
+// be derived exactly from the strict instance URL. It is intentionally
+// separate from the backward-compatible profile-plane validator.
+func ValidateApprovalRESTBaseURL(instanceURL, restBaseURL string) error {
+	if err := protocolvalue.ValidateApprovalRESTBaseURL(instanceURL, restBaseURL); err != nil {
+		return invalid("%v", err)
+	}
+	return nil
 }
 
 // ValidateRESTBaseURL requires the REST base to be derived exactly from the

@@ -1,7 +1,6 @@
 package approval
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -9,114 +8,13 @@ import (
 	"time"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
-	"github.com/abigotado/youtrack-agent-cli/internal/intent"
 )
-
-type fixedID string
-
-func (f fixedID) NewPlanID() (string, error) { return string(f), nil }
-
-type strictFixtureVerifier struct {
-	keyGeneration string
-	fingerprint   string
-	message       []byte
-	signature     []byte
-	calls         int
-}
-
-func (v *strictFixtureVerifier) Verify(ctx context.Context, keyGeneration, fingerprint string, message, signature []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	v.calls++
-	if keyGeneration != v.keyGeneration || fingerprint != v.fingerprint ||
-		!bytes.Equal(message, v.message) || !bytes.Equal(signature, v.signature) {
-		return errors.New("signature verification inputs mismatch")
-	}
-	return nil
-}
-
-func approvalPlan(t *testing.T) intent.Plan {
-	t.Helper()
-	plan, err := intent.PrepareWithSource(
-		intent.ProfileSnapshot{Name: "work", Instance: "https://acme.youtrack.cloud", RESTBaseURL: "https://acme.youtrack.cloud/api", OAuthIssuerURL: "https://hub.example.test", IdentitySHA256: strings.Repeat("a", 64), CredentialGeneration: "gen-1", Account: intent.AccountBinding{ID: "1-2", Login: "alice"}},
-		intent.ProjectPolicy{Project: intent.ProjectBinding{ID: "0-1", Key: "APP"}, PolicyRevision: 1, PolicySHA256: strings.Repeat("b", 64), SchemaSHA256: strings.Repeat("c", 64), ExecutorAssurance: "rest-best-effort", AuthorizedCapability: "comment-add", NotificationPolicy: "youtrack-default", ReconciliationStrategy: "bounded-exact-and-marker"},
-		intent.KindCommentAdd,
-		[]byte(`{"issue_id":"APP-1","text":"hello","visibility":{"mode":"public"},"marker":"none"}`),
-		[]byte(`{"issue_id":"APP-1","issue_state_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}`),
-		fixedID("YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA"),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return plan
-}
-
-func signedReceipt(t *testing.T, plan intent.Plan, issued time.Time) Receipt {
-	t.Helper()
-	receipt := Receipt{
-		SchemaVersion: ReceiptSchemaVersion, ReceiptID: "YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4",
-		Nonce: "YTAN-6DQNBQFQUCIIA4DAKBADAIAQAA", PlanID: plan.PlanID,
-		PlanSHA256: plan.IntentSHA256, ProfileIdentitySHA256: plan.Profile.IdentitySHA256,
-		AccountID: plan.Profile.Account.ID, ProjectID: plan.Policy.Project.ID,
-		ProjectKey: plan.Policy.Project.Key, SchemaSHA256: plan.Policy.SchemaSHA256,
-		RequestSHA256: plan.RequestSHA256, ExpectedSHA256: plan.ExpectedSHA256,
-		IssuedAt: issued, ExpiresAt: issued.Add(5 * time.Minute),
-		KeyGeneration: "key-1", KeyFingerprintSHA256: strings.Repeat("e", 64),
-	}
-	receipt.Signature = "MAYCAQECAQI"
-	return receipt
-}
-
-func TestBindingVerifierTamperTTLAndSignature(t *testing.T) {
-	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
-	plan := approvalPlan(t)
-	valid := signedReceipt(t, plan, now.Add(-time.Minute))
-	validMessage, err := SigningBytes(valid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	validSignature, err := DecodeP256DERSignature(valid.Signature)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tests := []struct {
-		name            string
-		mutate          func(*Receipt)
-		wantErr         bool
-		wantVerifyCalls int
-	}{
-		{name: "valid", mutate: func(*Receipt) {}, wantVerifyCalls: 1},
-		{name: "binding tamper", mutate: func(r *Receipt) { r.ProjectKey = "OTHER" }, wantErr: true},
-		{name: "expired", mutate: func(r *Receipt) { r.IssuedAt = now.Add(-10 * time.Minute); r.ExpiresAt = now.Add(-5 * time.Minute) }, wantErr: true},
-		{name: "ttl too long", mutate: func(r *Receipt) { r.ExpiresAt = r.IssuedAt.Add(6 * time.Minute) }, wantErr: true},
-		{name: "signature tamper", mutate: func(r *Receipt) { r.Signature = "MAYCAQICAQI" }, wantErr: true, wantVerifyCalls: 1},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			receipt := valid
-			tt.mutate(&receipt)
-			verifier := &strictFixtureVerifier{
-				keyGeneration: "key-1",
-				fingerprint:   strings.Repeat("e", 64),
-				message:       validMessage,
-				signature:     validSignature,
-			}
-			err := (BindingVerifier{Signatures: verifier, Now: func() time.Time { return now }}).Verify(context.Background(), plan, receipt)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if verifier.calls != tt.wantVerifyCalls {
-				t.Fatalf("signature verifier calls = %d, want %d", verifier.calls, tt.wantVerifyCalls)
-			}
-		})
-	}
-}
 
 func TestSigningBytesGoldenVector(t *testing.T) {
 	receipt := Receipt{
-		SchemaVersion: 1, ReceiptID: "YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4", Nonce: "YTAN-6DQNBQFQUCIIA4DAKBADAIAQAA",
-		PlanID: "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", PlanSHA256: strings.Repeat("1", 64),
+		SchemaVersion: ReceiptSchemaVersion, ReceiptID: "YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4", Nonce: "YTAN-6DQNBQFQUCIIA4DAKBADAIAQAA",
+		ChallengeSHA256: "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
+		PlanID:          "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", PlanSHA256: strings.Repeat("1", 64),
 		ProfileIdentitySHA256: strings.Repeat("2", 64), AccountID: "1-2", ProjectID: "0-1", ProjectKey: "APP",
 		SchemaSHA256: strings.Repeat("3", 64), RequestSHA256: strings.Repeat("4", 64), ExpectedSHA256: strings.Repeat("5", 64),
 		IssuedAt:      time.Date(2026, 9, 2, 15, 34, 56, 0, time.UTC),
@@ -127,17 +25,15 @@ func TestSigningBytesGoldenVector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"schema_version":1,"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4","nonce":"YTAN-6DQNBQFQUCIIA4DAKBADAIAQAA","plan_id":"YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA","plan_sha256":"1111111111111111111111111111111111111111111111111111111111111111","profile_identity_sha256":"2222222222222222222222222222222222222222222222222222222222222222","account_id":"1-2","project_id":"0-1","project_key":"APP","schema_sha256":"3333333333333333333333333333333333333333333333333333333333333333","request_sha256":"4444444444444444444444444444444444444444444444444444444444444444","expected_sha256":"5555555555555555555555555555555555555555555555555555555555555555","issued_at":"2026-09-02T15:34:56Z","expires_at":"2026-09-02T15:39:56Z","key_generation":"key-1","key_fingerprint_sha256":"6666666666666666666666666666666666666666666666666666666666666666"}`
+	want := `{"schema_version":2,"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4","nonce":"YTAN-6DQNBQFQUCIIA4DAKBADAIAQAA","challenge_sha256":"630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd","plan_id":"YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA","plan_sha256":"1111111111111111111111111111111111111111111111111111111111111111","profile_identity_sha256":"2222222222222222222222222222222222222222222222222222222222222222","account_id":"1-2","project_id":"0-1","project_key":"APP","schema_sha256":"3333333333333333333333333333333333333333333333333333333333333333","request_sha256":"4444444444444444444444444444444444444444444444444444444444444444","expected_sha256":"5555555555555555555555555555555555555555555555555555555555555555","issued_at":"2026-09-02T15:34:56Z","expires_at":"2026-09-02T15:39:56Z","key_generation":"key-1","key_fingerprint_sha256":"6666666666666666666666666666666666666666666666666666666666666666"}`
 	if string(got) != want {
 		t.Fatalf("signing bytes changed\n got: %s\nwant: %s", got, want)
 	}
 }
 
 func TestUnsupportedAlwaysFailsClosed(t *testing.T) {
-	plan := approvalPlan(t)
 	_, err := (Unsupported{}).Confirm(context.Background(), []byte("immutable"))
 	assertPresenceUnavailable(t, err)
-	assertPresenceUnavailable(t, (Unsupported{}).Verify(context.Background(), plan, Receipt{}))
 }
 
 func assertPresenceUnavailable(t *testing.T, err error) {

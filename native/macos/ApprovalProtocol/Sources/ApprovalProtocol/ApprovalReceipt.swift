@@ -1,12 +1,12 @@
-import CryptoKit
-import Foundation
+import struct Foundation.Data
 
 public struct UnsignedApprovalReceipt: Equatable, Sendable {
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
     public static let maximumSigningBytes = 3_072
 
     public let receiptID: String
     public let nonce: String
+    public let challengeSHA256: String
     public let planID: String
     public let planSHA256: String
     public let profileIdentitySHA256: String
@@ -20,6 +20,35 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
     public let expiresAt: String
     public let keyGeneration: String
     public let keyFingerprintSHA256: String
+
+    init(
+        receiptID: String, nonce: String, challengeSHA256: String, planID: String, planSHA256: String,
+        profileIdentitySHA256: String, accountID: String, projectID: String,
+        projectKey: String, schemaSHA256: String, requestSHA256: String,
+        expectedSHA256: String, issuedAt: String, expiresAt: String,
+        keyGeneration: String, keyFingerprintSHA256: String
+    ) throws {
+        self.receiptID = receiptID
+        self.nonce = nonce
+        self.challengeSHA256 = challengeSHA256
+        self.planID = planID
+        self.planSHA256 = planSHA256
+        self.profileIdentitySHA256 = profileIdentitySHA256
+        self.accountID = accountID
+        self.projectID = projectID
+        self.projectKey = projectKey
+        self.schemaSHA256 = schemaSHA256
+        self.requestSHA256 = requestSHA256
+        self.expectedSHA256 = expectedSHA256
+        self.issuedAt = issuedAt
+        self.expiresAt = expiresAt
+        self.keyGeneration = keyGeneration
+        self.keyFingerprintSHA256 = keyFingerprintSHA256
+        try validate()
+        guard encodedSigningBytes().count <= Self.maximumSigningBytes else {
+            throw ApprovalProtocolError.inputTooLarge(limit: Self.maximumSigningBytes)
+        }
+    }
 
     public init(signingBytes: Data) throws {
         var parser = try StrictJSONObjectParser(data: signingBytes, maximumBytes: Self.maximumSigningBytes)
@@ -44,6 +73,7 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
 
         receiptID = try takeString("receipt_id")
         nonce = try takeString("nonce")
+        challengeSHA256 = try takeString("challenge_sha256")
         planID = try takeString("plan_id")
         planSHA256 = try takeString("plan_sha256")
         profileIdentitySHA256 = try takeString("profile_identity_sha256")
@@ -74,6 +104,7 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         appendInteger(name: "schema_version", value: Self.schemaVersion, first: true, into: &output)
         appendString(name: "receipt_id", value: receiptID, into: &output)
         appendString(name: "nonce", value: nonce, into: &output)
+        appendString(name: "challenge_sha256", value: challengeSHA256, into: &output)
         appendString(name: "plan_id", value: planID, into: &output)
         appendString(name: "plan_sha256", value: planSHA256, into: &output)
         appendString(name: "profile_identity_sha256", value: profileIdentitySHA256, into: &output)
@@ -96,26 +127,27 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
     }
 
     private func validate() throws {
-        guard Self.isCanonicalBase32ID(receiptID, prefix: "YTAR-"),
-              Self.isCanonicalBase32ID(nonce, prefix: "YTAN-")
+        guard ProtocolGrammar.isCanonicalBase32ID(receiptID, prefix: "YTAR-"),
+              ProtocolGrammar.isCanonicalBase32ID(nonce, prefix: "YTAN-")
         else {
             throw ApprovalProtocolError.invalidField("receipt_id/nonce")
         }
         for (name, value) in [
+            ("challenge_sha256", challengeSHA256),
             ("plan_sha256", planSHA256),
             ("profile_identity_sha256", profileIdentitySHA256),
             ("schema_sha256", schemaSHA256),
             ("request_sha256", requestSHA256),
             ("expected_sha256", expectedSHA256),
             ("key_fingerprint_sha256", keyFingerprintSHA256),
-        ] where !Self.isLowercaseSHA256(value) {
+        ] where !ProtocolGrammar.isDigest(value) {
             throw ApprovalProtocolError.invalidField(name)
         }
-        guard Self.isPlanID(planID) else { throw ApprovalProtocolError.invalidField("plan_id") }
-        guard Self.isIdentifier(accountID) else { throw ApprovalProtocolError.invalidField("account_id") }
-        guard Self.isIdentifier(projectID) else { throw ApprovalProtocolError.invalidField("project_id") }
-        guard Self.isProjectKey(projectKey) else { throw ApprovalProtocolError.invalidField("project_key") }
-        guard Self.isKeyGeneration(keyGeneration) else {
+        guard ProtocolGrammar.isCanonicalBase32ID(planID, prefix: "YTAP-") else { throw ApprovalProtocolError.invalidField("plan_id") }
+        guard ProtocolGrammar.isIdentifier(accountID) else { throw ApprovalProtocolError.invalidField("account_id") }
+        guard ProtocolGrammar.isIdentifier(projectID) else { throw ApprovalProtocolError.invalidField("project_id") }
+        guard ProtocolGrammar.isProjectKey(projectKey) else { throw ApprovalProtocolError.invalidField("project_key") }
+        guard ProtocolGrammar.isKeyGeneration(keyGeneration) else {
             throw ApprovalProtocolError.invalidField("key_generation")
         }
         guard let issuedSeconds = Self.wholeSecondUTCValue(issuedAt),
@@ -127,61 +159,7 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         }
     }
 
-    private static func isLowercaseSHA256(_ value: String) -> Bool {
-        value.utf8.count == 64 && value.utf8.allSatisfy { ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x61 && $0 <= 0x66) }
-    }
-
-    private static func isKeyGeneration(_ value: String) -> Bool {
-        let bytes = Array(value.utf8)
-        guard (1...64).contains(bytes.count), isASCIIAlphanumeric(bytes[0]) else { return false }
-        return bytes.dropFirst().allSatisfy { isASCIIAlphanumeric($0) || $0 == 0x2E || $0 == 0x5F || $0 == 0x2D }
-    }
-
-    private static func isASCIIAlphanumeric(_ byte: UInt8) -> Bool {
-        (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)
-    }
-
-    private static func isPlanID(_ value: String) -> Bool {
-        let prefix = "YTAP-"
-        guard value.hasPrefix(prefix) else { return false }
-        let encoded = value.dropFirst(prefix.count)
-        return encoded.utf8.count == 26 && encoded.utf8.allSatisfy {
-            ($0 >= 0x41 && $0 <= 0x5A) || ($0 >= 0x32 && $0 <= 0x37)
-        }
-    }
-
-    private static func isIdentifier(_ value: String) -> Bool {
-        let bytes = Array(value.utf8)
-        guard (1...128).contains(bytes.count), isASCIIAlphanumeric(bytes[0]) else { return false }
-        return bytes.dropFirst().allSatisfy {
-            isASCIIAlphanumeric($0) || $0 == 0x2E || $0 == 0x5F || $0 == 0x3A || $0 == 0x2D
-        }
-    }
-
-    private static func isProjectKey(_ value: String) -> Bool {
-        let bytes = Array(value.utf8)
-        guard (1...32).contains(bytes.count), bytes[0] >= 0x41, bytes[0] <= 0x5A else { return false }
-        return bytes.dropFirst().allSatisfy {
-            ($0 >= 0x41 && $0 <= 0x5A) || ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x5F
-        }
-    }
-
-    private static func isCanonicalBase32ID(_ value: String, prefix: String) -> Bool {
-        guard value.hasPrefix(prefix) else { return false }
-        let encoded = value.dropFirst(prefix.count)
-        guard encoded.utf8.count == 26, encoded.utf8.allSatisfy({
-            ($0 >= 0x41 && $0 <= 0x5A) || ($0 >= 0x32 && $0 <= 0x37)
-        }) else { return false }
-
-        // A 16-byte RFC 4648 base32 value has two zero padding bits. Checking
-        // them makes decode/re-encode canonical without allocating decoded data.
-        guard let last = encoded.utf8.last else { return false }
-        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".utf8)
-        guard let index = alphabet.firstIndex(of: last) else { return false }
-        return index & 0b11 == 0
-    }
-
-    private static func wholeSecondUTCValue(_ value: String) -> Int64? {
+    static func wholeSecondUTCValue(_ value: String) -> Int64? {
         let bytes = Array(value.utf8)
         guard bytes.count == 20,
               bytes[4] == 0x2D, bytes[7] == 0x2D, bytes[10] == 0x54,
@@ -213,12 +191,12 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         let shiftedMonth = month + (month > 2 ? -3 : 9)
         let dayOfYear = (153 * shiftedMonth + 2) / 5 + day - 1
         let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
-        let civilDays = Int64(era * 146_097 + dayOfEra)
+        let civilDays = Int64(era * 146_097 + dayOfEra - 719_468)
         return civilDays * 86_400 + Int64(hour * 3_600 + minute * 60 + second)
     }
 
     fileprivate static func sha256Hex(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        ProtocolGrammar.sha256(data)
     }
 }
 

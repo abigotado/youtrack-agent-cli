@@ -1,10 +1,103 @@
 package endpoint
 
 import (
+	"encoding/json"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestApprovalURLSharedCorpus(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "gate1a", "approval-url-corpus.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus struct {
+		Valid   []string `json:"valid"`
+		Invalid []string `json:"invalid"`
+	}
+	if err := json.Unmarshal(raw, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range corpus.Valid {
+		if err := ValidateApprovalURL(candidate); err != nil {
+			t.Errorf("valid shared URL %q: %v", candidate, err)
+		}
+	}
+	for _, candidate := range corpus.Invalid {
+		if err := ValidateApprovalURL(candidate); !errors.Is(err, ErrInvalidEndpoint) {
+			t.Errorf("invalid shared URL %q error = %v", candidate, err)
+		}
+	}
+}
+
+func TestValidateApprovalURLLanguageNeutralGrammar(t *testing.T) {
+	valid := []string{
+		"https://acme.youtrack.cloud",
+		"https://tracker.example:8443/youtrack",
+		"https://192.0.2.10/yt_A-1",
+		"https://example/UPPER~ok!$&'()*+,;=:@",
+	}
+	for _, candidate := range valid {
+		t.Run("valid "+candidate, func(t *testing.T) {
+			if err := ValidateApprovalURL(candidate); err != nil {
+				t.Fatalf("ValidateApprovalURL(%q) error = %v", candidate, err)
+			}
+		})
+	}
+
+	invalid := []string{
+		"HTTPS://acme.youtrack.cloud",
+		"https://Acme.youtrack.cloud",
+		"https://acme.youtrack.cloud:443",
+		"https://acme.youtrack.cloud:0443",
+		"https://acme.youtrack.cloud:+80",
+		"https://acme.youtrack.cloud:0",
+		"https://acme.youtrack.cloud:65536",
+		"https://01.2.3.4",
+		"https://256.2.3.4",
+		"https://[2001:db8::1]",
+		"https://münchen.example",
+		"https://-bad.example",
+		"https://bad-.example",
+		"https://bad..example",
+		"https://acme.youtrack.cloud/",
+		"https://acme.youtrack.cloud/a//b",
+		"https://acme.youtrack.cloud/a/./b",
+		"https://acme.youtrack.cloud/a/../b",
+		"https://acme.youtrack.cloud/a%20b",
+		"https://acme.youtrack.cloud/a\\b",
+		"https://user@acme.youtrack.cloud",
+		"https://acme.youtrack.cloud/path?x=1",
+		"https://acme.youtrack.cloud/path#fragment",
+		"https://" + strings.Repeat("a", 64) + ".example",
+		"https://" + strings.Repeat("a", MaxURLLength),
+	}
+	for _, candidate := range invalid {
+		t.Run("invalid "+candidate, func(t *testing.T) {
+			if err := ValidateApprovalURL(candidate); !errors.Is(err, ErrInvalidEndpoint) {
+				t.Fatalf("ValidateApprovalURL(%q) error = %v, want ErrInvalidEndpoint", candidate, err)
+			}
+		})
+	}
+}
+
+func TestStrictApprovalGrammarDoesNotNarrowExistingServiceURLs(t *testing.T) {
+	for _, candidate := range []string{
+		"https://tracker.example:443",
+		"https://[2001:db8::1]",
+	} {
+		if err := ValidateServiceURL(candidate); err != nil {
+			t.Fatalf("ValidateServiceURL(%q) compatibility error = %v", candidate, err)
+		}
+		if err := ValidateApprovalURL(candidate); !errors.Is(err, ErrInvalidEndpoint) {
+			t.Fatalf("ValidateApprovalURL(%q) error = %v, want ErrInvalidEndpoint", candidate, err)
+		}
+	}
+}
 
 func TestValidateServiceTopology(t *testing.T) {
 	service := "https://tracker.example.test/youtrack"

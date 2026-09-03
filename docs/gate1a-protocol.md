@@ -1,9 +1,12 @@
-# Gate 1A approval protocol v1
+# Gate 1A approval protocol v2
 
 Status: frozen cross-language data contract for the feasibility spike. Gate 1A
 itself is **not passed**. `approval.Unsupported` remains the only production
 adapter, and this document does not enable confirmation, apply, release, or
 Homebrew installation.
+
+The native trust boundary, canonical URL/plan-ID grammar, and exact future IPC
+frame are specified in [Gate 1A native approval boundary](gate1a-native-boundary.md).
 
 ## Authority and limits
 
@@ -70,24 +73,27 @@ fields in this exact order:
 1. `schema_version`
 2. `receipt_id`
 3. `nonce`
-4. `plan_id`
-5. `plan_sha256`
-6. `profile_identity_sha256`
-7. `account_id`
-8. `project_id`
-9. `project_key`
-10. `schema_sha256`
-11. `request_sha256`
-12. `expected_sha256`
-13. `issued_at`
-14. `expires_at`
-15. `key_generation`
-16. `key_fingerprint_sha256`
+4. `challenge_sha256`
+5. `plan_id`
+6. `plan_sha256`
+7. `profile_identity_sha256`
+8. `account_id`
+9. `project_id`
+10. `project_key`
+11. `schema_sha256`
+12. `request_sha256`
+13. `expected_sha256`
+14. `issued_at`
+15. `expires_at`
+16. `key_generation`
+17. `key_fingerprint_sha256`
 
 `approval.SigningBytes` is the sole Go encoder for that representation. The
-signed receipt returned by `approval.ReceiptBytes` appends `signature` as field
-17. `approval.ReceiptDigestSHA256` is lowercase SHA-256 hex over those complete
-signed receipt bytes, including the signature text.
+`challenge_sha256` is lowercase SHA-256 over the exact 32-byte request
+challenge, so an outer-frame challenge splice invalidates the signed receipt.
+The signed receipt returned by `approval.ReceiptBytes` appends `signature` as
+field 18. `approval.ReceiptDigestSHA256` is lowercase SHA-256 hex over those
+complete signed receipt bytes, including the signature text.
 
 `approval.ParseReceiptBytes` accepts only that canonical signed encoding. It
 rejects a non-object top level, absent, duplicate, or unknown fields, alternate

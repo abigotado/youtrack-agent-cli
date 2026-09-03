@@ -15,12 +15,30 @@ they do not prove the signed native approval boundary required by Gate 1A.
 | --- | --- | --- |
 | Versioned canonical receipt/signature byte contract | Passed for slice 1 | `docs/gate1a-protocol.md` and `testdata/gate1a` |
 | Strict bounded Go receipt codec | Passed for slice 1 | `go test -race ./internal/approval` |
-| Independent Swift parser/encoder agreement | Passed for slice 1 | 16 tests through `swift test` on macOS |
+| Independent Swift parser/encoder agreement | Passed for slice 1 | 39 tests through `swift test` on macOS |
 | Reversible inert rendering of every displayed byte | Passed for slice 1 | all-byte, empty, maximum-size, and round-trip Swift tests |
 | Production approval helper used by the CLI | Not implemented | `approval.Unsupported` remains the only adapter |
 
 Completion of this slice must not change this report's overall status from
 **NOT PASSED**.
+
+## PR A: native-boundary value contract
+
+The accepted boundary ADR freezes the language-neutral ASCII URL grammar,
+canonical 128-bit plan ID, binary frame header and payload union, a signed
+CSPRNG challenge digest, closed error codes, strict canonical plan parsing,
+and a Go verifier requiring the enrolled generation/SPKI/fingerprint. Shared
+fixtures cover all three mutation plan kinds plus URL, identifier, request,
+success, and error frames. Existing profile and journal reads retain their
+legacy URL grammar; new mutation preparation fails early with
+`MUTATION_PROFILE_INCOMPATIBLE` when the selected profile cannot be represented
+by the narrower approval protocol.
+
+This remains value-codec evidence plus an offline compatibility guard. There is
+no production AF_UNIX I/O, process launch, peer audit-token validation, native
+key access, approval UI, helper integration, or confirmation orchestration.
+Consequently PR A does not advance the overall Gate result beyond **NOT
+PASSED**.
 
 ## Required later evidence
 

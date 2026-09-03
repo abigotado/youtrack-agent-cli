@@ -1,5 +1,3 @@
-import Foundation
-
 public enum ApprovalProtocolError: Error, Equatable, Sendable {
     case inputTooLarge(limit: Int)
     case malformedJSON

@@ -45,7 +45,10 @@ func PrepareWithSource(profile ProfileSnapshot, policy ProjectPolicy, kind Kind,
 	if source == nil {
 		return Plan{}, fmt.Errorf("%w: nil plan ID source", ErrInvalidPlan)
 	}
-	if err := validateProfile(profile); err != nil {
+	if err := validateProfileLegacy(profile); err != nil {
+		return Plan{}, err
+	}
+	if err := ValidateApprovalProfile(profile); err != nil {
 		return Plan{}, err
 	}
 	if err := validatePolicy(policy); err != nil {
@@ -72,8 +75,8 @@ func PrepareWithSource(profile ProfileSnapshot, policy ProjectPolicy, kind Kind,
 	if err != nil {
 		return Plan{}, err
 	}
-	if !planIDPattern.MatchString(planID) {
-		return Plan{}, fmt.Errorf("%w: generated plan ID is not canonical", ErrInvalidPlan)
+	if err := ValidatePlanID(planID); err != nil {
+		return Plan{}, fmt.Errorf("generated plan ID: %w", err)
 	}
 	insertMarker(operation, planID)
 	normalizeOperation(operation)

@@ -6,20 +6,18 @@ package approval
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/intent"
+	"github.com/abigotado/youtrack-agent-cli/internal/protocolvalue"
 )
 
 const (
-	// ReceiptSchemaVersion is the first durable approval receipt schema.
-	ReceiptSchemaVersion = 1
+	// ReceiptSchemaVersion is the current durable approval receipt schema.
+	ReceiptSchemaVersion = 2
 	// MaxApprovalDisplayBytes bounds the immutable canonical plan snapshot.
 	MaxApprovalDisplayBytes = intent.MaxCanonicalPlanBytes
 	// MaxReceiptBytes bounds one canonical signed receipt.
@@ -28,11 +26,10 @@ const (
 	MaxSigningBytes = 3 << 10
 	// MaxKeyGenerationBytes bounds the non-secret helper-key generation label.
 	MaxKeyGenerationBytes = 64
-	// MaximumReceiptTTL is the longest receipt lifetime accepted by protocol v1.
+	// MaximumReceiptTTL is the longest receipt lifetime accepted by protocol v2.
 	MaximumReceiptTTL = 5 * time.Minute
 
-	defaultMaximumTTL = MaximumReceiptTTL
-	defaultClockSkew  = 30 * time.Second
+	defaultClockSkew = 30 * time.Second
 )
 
 // Receipt is a non-secret, short-lived signed binding to one exact plan.
@@ -40,6 +37,7 @@ type Receipt struct {
 	SchemaVersion         int       `json:"schema_version"`
 	ReceiptID             string    `json:"receipt_id"`
 	Nonce                 string    `json:"nonce"`
+	ChallengeSHA256       string    `json:"challenge_sha256"`
 	PlanID                string    `json:"plan_id"`
 	PlanSHA256            string    `json:"plan_sha256"`
 	ProfileIdentitySHA256 string    `json:"profile_identity_sha256"`
@@ -63,92 +61,6 @@ type Approver interface {
 	Confirm(ctx context.Context, canonicalPlan []byte) (Receipt, error)
 }
 
-// Verifier verifies a receipt against the complete current plan binding.
-type Verifier interface {
-	Verify(ctx context.Context, plan intent.Plan, receipt Receipt) error
-}
-
-// SignatureVerifier is implemented by a code-identity-pinned native helper.
-type SignatureVerifier interface {
-	Verify(ctx context.Context, keyGeneration, fingerprintSHA256 string, message, signature []byte) error
-}
-
-// BindingVerifier validates receipt shape, binding, TTL, and signature.
-type BindingVerifier struct {
-	Signatures SignatureVerifier
-	Now        func() time.Time
-	MaximumTTL time.Duration
-	ClockSkew  time.Duration
-}
-
-func (v BindingVerifier) Verify(ctx context.Context, plan intent.Plan, receipt Receipt) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := plan.Validate(); err != nil {
-		return fmt.Errorf("verify receipt plan: %w", err)
-	}
-	displayed, err := intent.ApprovalDisplayBytes(plan)
-	if err != nil {
-		return fmt.Errorf("encode displayed approval plan: %w", err)
-	}
-	if err := ValidateApprovalDisplayBytes(displayed); err != nil {
-		return err
-	}
-	displayedHash := sha256.Sum256(displayed)
-	displayedSHA256 := hex.EncodeToString(displayedHash[:])
-	if err := validateReceipt(receipt); err != nil {
-		return err
-	}
-	if receipt.PlanID != plan.PlanID || receipt.PlanSHA256 != displayedSHA256 || receipt.PlanSHA256 != plan.IntentSHA256 ||
-		receipt.ProfileIdentitySHA256 != plan.Profile.IdentitySHA256 ||
-		receipt.AccountID != plan.Profile.Account.ID ||
-		receipt.ProjectID != plan.Policy.Project.ID || receipt.ProjectKey != plan.Policy.Project.Key ||
-		receipt.SchemaSHA256 != plan.Policy.SchemaSHA256 ||
-		receipt.RequestSHA256 != plan.RequestSHA256 || receipt.ExpectedSHA256 != plan.ExpectedSHA256 {
-		return receiptError("RECEIPT_BINDING_MISMATCH", "the approval receipt does not match the complete mutation plan")
-	}
-	now := time.Now().UTC()
-	if v.Now != nil {
-		now = v.Now().UTC()
-	}
-	maximumTTL := v.MaximumTTL
-	if maximumTTL <= 0 {
-		maximumTTL = defaultMaximumTTL
-	}
-	clockSkew := v.ClockSkew
-	if clockSkew < 0 {
-		return errx.Internal("approval verifier has a negative clock-skew allowance")
-	}
-	if clockSkew == 0 {
-		clockSkew = defaultClockSkew
-	}
-	if receipt.ExpiresAt.Sub(receipt.IssuedAt) > maximumTTL {
-		return receiptError("RECEIPT_TTL_INVALID", "the approval receipt lifetime exceeds the configured maximum")
-	}
-	if now.Before(receipt.IssuedAt.Add(-clockSkew)) {
-		return receiptError("RECEIPT_NOT_YET_VALID", "the approval receipt was issued in the future")
-	}
-	if !now.Before(receipt.ExpiresAt) {
-		return receiptError("RECEIPT_EXPIRED", "the approval receipt has expired")
-	}
-	if v.Signatures == nil {
-		return userPresenceUnavailable()
-	}
-	message, err := SigningBytes(receipt)
-	if err != nil {
-		return err
-	}
-	signature, err := DecodeP256DERSignature(receipt.Signature)
-	if err != nil {
-		return receiptError("RECEIPT_SIGNATURE_INVALID", "the approval receipt signature is malformed")
-	}
-	if err := v.Signatures.Verify(ctx, receipt.KeyGeneration, receipt.KeyFingerprintSHA256, message, signature); err != nil {
-		return receiptError("RECEIPT_SIGNATURE_INVALID", "the approval receipt signature is invalid").Wrap(err)
-	}
-	return nil
-}
-
 // SigningBytes returns the deterministic signature message. The helper first
 // displays the canonical plan bytes, stores SHA256(displayed bytes) in
 // PlanSHA256, then signs this unsigned-receipt encoding. Signature is excluded.
@@ -166,7 +78,8 @@ func SigningBytes(receipt Receipt) ([]byte, error) {
 	}
 	raw, err := json.Marshal(unsignedReceiptWire{
 		SchemaVersion: receipt.SchemaVersion, ReceiptID: receipt.ReceiptID, Nonce: receipt.Nonce,
-		PlanID: receipt.PlanID, PlanSHA256: receipt.PlanSHA256,
+		ChallengeSHA256: receipt.ChallengeSHA256,
+		PlanID:          receipt.PlanID, PlanSHA256: receipt.PlanSHA256,
 		ProfileIdentitySHA256: receipt.ProfileIdentitySHA256, AccountID: receipt.AccountID,
 		ProjectID: receipt.ProjectID, ProjectKey: receipt.ProjectKey, SchemaSHA256: receipt.SchemaSHA256,
 		RequestSHA256: receipt.RequestSHA256, ExpectedSHA256: receipt.ExpectedSHA256,
@@ -182,7 +95,7 @@ func SigningBytes(receipt Receipt) ([]byte, error) {
 	return raw, nil
 }
 
-// ValidateApprovalDisplayBytes applies the v1 byte bound before a native
+// ValidateApprovalDisplayBytes applies the v2 byte bound before a native
 // helper copies, decodes, or renders an immutable approval snapshot.
 func ValidateApprovalDisplayBytes(canonicalPlan []byte) error {
 	if len(canonicalPlan) == 0 || len(canonicalPlan) > MaxApprovalDisplayBytes {
@@ -202,13 +115,6 @@ func (Unsupported) Confirm(ctx context.Context, canonicalPlan []byte) (Receipt, 
 	return Receipt{}, userPresenceUnavailable()
 }
 
-func (Unsupported) Verify(ctx context.Context, plan intent.Plan, receipt Receipt) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return userPresenceUnavailable()
-}
-
 func validateReceipt(receipt Receipt) error {
 	if err := validateUnsignedReceipt(receipt); err != nil {
 		return err
@@ -223,7 +129,7 @@ func validateUnsignedReceipt(receipt Receipt) error {
 	if receipt.SchemaVersion != ReceiptSchemaVersion || validateCanonicalApprovalID(receipt.ReceiptID, receiptIDPrefix) != nil || validateCanonicalApprovalID(receipt.Nonce, noncePrefix) != nil {
 		return receiptError("RECEIPT_INVALID", "the approval receipt identifiers or schema are invalid")
 	}
-	if !isCanonicalPlanID(receipt.PlanID) || !isCanonicalIdentifier(receipt.AccountID) || !isCanonicalIdentifier(receipt.ProjectID) || !isCanonicalProjectKey(receipt.ProjectKey) {
+	if intent.ValidatePlanID(receipt.PlanID) != nil || !isCanonicalIdentifier(receipt.AccountID) || !isCanonicalIdentifier(receipt.ProjectID) || !isCanonicalProjectKey(receipt.ProjectKey) {
 		return receiptError("RECEIPT_INVALID", "the approval receipt contains a non-canonical plan, account, or project binding")
 	}
 	if _, err := canonicalReceiptTime(receipt.IssuedAt); err != nil {
@@ -235,7 +141,7 @@ func validateUnsignedReceipt(receipt Receipt) error {
 	if !receipt.ExpiresAt.After(receipt.IssuedAt) || receipt.ExpiresAt.Sub(receipt.IssuedAt) > MaximumReceiptTTL {
 		return receiptError("RECEIPT_TTL_INVALID", "the approval receipt time window is invalid")
 	}
-	for _, value := range []string{receipt.PlanSHA256, receipt.ProfileIdentitySHA256, receipt.SchemaSHA256, receipt.RequestSHA256, receipt.ExpectedSHA256, receipt.KeyFingerprintSHA256} {
+	for _, value := range []string{receipt.ChallengeSHA256, receipt.PlanSHA256, receipt.ProfileIdentitySHA256, receipt.SchemaSHA256, receipt.RequestSHA256, receipt.ExpectedSHA256, receipt.KeyFingerprintSHA256} {
 		if !isSHA256(value) {
 			return receiptError("RECEIPT_INVALID", "the approval receipt contains a non-canonical digest")
 		}
@@ -262,11 +168,7 @@ func canonicalReceiptTime(value time.Time) (string, error) {
 }
 
 func isSHA256(value string) bool {
-	if len(value) != sha256.Size*2 || value != strings.ToLower(value) {
-		return false
-	}
-	raw, err := hex.DecodeString(value)
-	return err == nil && len(raw) == sha256.Size
+	return protocolvalue.IsSHA256(value)
 }
 
 func receiptError(reason, message string) *errx.Error {

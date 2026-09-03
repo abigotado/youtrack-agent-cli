@@ -21,10 +21,10 @@ The official YouTrack Remote MCP remains the routine read plane. Its URL must ca
 Before implementing an enabled `mutation confirm` or `mutation apply`, a macOS feasibility spike must demonstrate all of the following on a supported Mac:
 
 1. A separately signed native helper displays the complete bounded canonical snapshot from one immutable in-memory byte buffer.
-2. Only after a fresh LocalAuthentication success, the helper stores the digest of exactly those displayed bytes in `receipt.plan_sha256` and signs the deterministic unsigned receipt from `approval.SigningBytes`; authentication reuse is disabled.
+2. Only after a fresh LocalAuthentication success, the helper stores the digest of exactly those displayed bytes in `receipt.plan_sha256` and signs the deterministic unsigned receipt from `approval.SigningBytes`, including SHA-256 of the fresh IPC challenge; authentication reuse is disabled.
 3. The on-device P-256 private key is non-exportable, has a documented tag and public-key fingerprint, and cannot be used by an unrelated same-user process.
 4. Cancellation, timeout, helper crash, binary replacement, key rotation, and application upgrade fail closed.
-5. The CLI verifies the helper code identity, receipt signature, plan digest, TTL, nonce, profile identity, and key generation.
+5. The CLI verifies the helper code identity, enrolled key, receipt signature, signed request challenge, plan digest, TTL, nonce, profile identity, and key generation.
 6. Packaging and update paths preserve the required code-signing identity and entitlements. Development or ad-hoc signing is not accepted as production evidence.
 
 ## Homebrew activation gate
@@ -62,9 +62,10 @@ application -> {profile, auth, oauth, writepolicy, intent, mutation,
                 approval, journal, skills, youtrack, restexec, reconcile}
 
 mutation -> {intent, errx}
+intent -> {endpoint, protocolvalue}
 restexec -> {mutation, youtrack, errx}
 reconcile -> {mutation, youtrack, errx}
-approval -> {intent, errx}
+approval -> {intent, protocolvalue, errx}
 journal -> {intent, lockfile, errx}
 auth -> {profile, lockfile, errx}
 oauth -> {endpoint, errx}
@@ -73,7 +74,8 @@ writepolicy -> {profile, lockfile, errx}
 profile -> {endpoint, lockfile, errx}
 skills -> {assets, lockfile, errx}
 output -> errx
-endpoint -> errx
+endpoint -> protocolvalue
+protocolvalue -> standard library only
 lockfile -> errx
 errx -> standard library only
 ```
@@ -82,11 +84,11 @@ errx -> standard library only
 
 - `Executor`: preflight plus exactly one typed execute operation;
 - `Reconciler`: bounded read-only evidence collection;
-- `Approver`: display/sign or verify a receipt, with no journal access;
+- `Approver`: invoke the display/sign boundary for one exact canonical snapshot, with no receipt-verification or journal access;
 - `Journal`: compare-and-swap transitions under one transaction API;
 - `CredentialProvider` and `PolicyChecker`: minimum operations needed by the application service.
 
-The interfaces contain at most one to three methods. `internal/youtrack` is a fixed-origin transport/model boundary and imports neither profile nor auth. `internal/cli` does not import `net/http`. Architecture tests enumerate allowed internal edges and fail on every unlisted dependency.
+The combined `approval.DecodeAndValidateIPCResponse` decoder is the sole response-acceptance path: it binds both response arms to the request challenge and binds a success to the exact snapshot and enrolled signing key before exposing a verified receipt. The interfaces contain at most one to three methods. `internal/youtrack` is a fixed-origin transport/model boundary and imports neither profile nor auth. `internal/cli` does not import `net/http`. Architecture tests enumerate allowed internal edges and fail on every unlisted dependency.
 
 ## Journal transaction and lock contract
 
