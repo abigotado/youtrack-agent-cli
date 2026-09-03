@@ -14,7 +14,7 @@ enroll itself. A mode-`0600` file is also not an authority boundary against an
 agent running as the same user.
 
 The native helper, approval-key registry, code-signing identity, bundle layout,
-upgrade path, and future Homebrew artifact therefore form one trust topology.
+release-rollover boundary, and future Homebrew artifact therefore form one trust topology.
 They must be fixed before native implementation and must fail closed while the
 operator-controlled signing identity is unavailable.
 
@@ -52,12 +52,13 @@ the installed application bundle. A future Homebrew Cask may install the app
 and link that contained executable into Homebrew's binary directory; it may not
 rebuild, replace, re-sign, or extract the helper.
 
-The Apple Developer Team ID is a required immutable release input named
-`TEAM_ID`. The repository has no default or fallback value. Empty, wildcard,
-ad-hoc, Apple Development, and locally self-signed identities are rejected for
-production evidence. At the acceptance date no Developer ID Application
-identity is installed on the development machine, so this ADR does not pass
-Gate 1A.
+The Apple Developer Team ID and positive decimal bundle build number are
+required immutable release inputs named `TEAM_ID` and `RELEASE_BUILD`. The
+repository has no default or fallback value for either. Empty, wildcard,
+non-decimal build, ad-hoc, Apple Development, and locally self-signed inputs
+are rejected for production evidence. At the acceptance
+date no Developer ID Application identity is installed on the development
+machine, so this ADR does not pass Gate 1A.
 
 After substituting the operator-owned `TEAM_ID`, both peers compile and pin the
 following Developer ID Application requirements. The exact identifier differs
@@ -69,6 +70,7 @@ and certificate 1[field.1.2.840.113635.100.6.2.6] exists
 and certificate leaf[field.1.2.840.113635.100.6.1.13] exists
 and certificate leaf[subject.OU] = "${TEAM_ID}"
 and identifier "io.github.abigotado.youtrack-agent"
+and info[CFBundleVersion] = "${RELEASE_BUILD}"
 ```
 
 ```text
@@ -77,11 +79,14 @@ and certificate 1[field.1.2.840.113635.100.6.2.6] exists
 and certificate leaf[field.1.2.840.113635.100.6.1.13] exists
 and certificate leaf[subject.OU] = "${TEAM_ID}"
 and identifier "io.github.abigotado.youtrack-agent.approval"
+and info[CFBundleVersion] = "${RELEASE_BUILD}"
 ```
 
 The shipped requirements are compiled from a release manifest containing the
-literal Team ID; production code never expands an environment variable at
-runtime. Both sides validate the connection-bound audit token with
+literal Team ID and build number; production code never expands an environment
+variable at runtime. This prevents mixed-version peers but not an older matched
+CLI/helper pair from trusting itself. Both sides validate the connection-bound
+audit token with
 `SecCodeCopyGuestWithAttributes` and the pinned opposite requirement before
 accepting protocol bytes. They repeat peer validation after enrollment or
 rotation and before committing new trust state. PID and filesystem paths are
@@ -268,11 +273,11 @@ before Gate 1A. The dedicated non-writing Gate self-test constructs that
 adapter inside the production CLI, but `application.NewDefault` remains wired
 to `approval.Unsupported` until the operator Gate is recorded as passed.
 
-### Upgrade, rollback, and uninstall
+### First-release, rollover, rollback, and uninstall
 
 Every release manifest binds the outer/helper identifiers, Team ID,
 requirements, entitlements, access-group name, item identifiers, architecture
-set, version, hashes of both executables, and the helper's embedded Developer
+set, version/build number, hashes of both executables, and the helper's embedded Developer
 ID provisioning-profile hash. The profile must authorize the helper App ID,
 Team ID, and exact `keychain-access-groups` entitlement. It must be valid for
 Developer ID distribution and unexpired at signing and Gate execution. The
@@ -280,16 +285,29 @@ nested helper is signed with the profile at
 `Contents/embedded.provisionprofile`; the outer bundle is signed afterward.
 The exact distribution is notarized and stapled.
 
-An upgrade may retain registry and signing-key state only when the new bundle
-satisfies the pinned continuity policy and the helper confirms the unchanged
-trust manifest or completes explicit rotation. A different Team ID, bundle ID,
-access group, designated requirement, malformed current ledger, or transition
-that does not extend the current ledger fails closed. The helper can validate
-only the complete ledger presented by Keychain; without an external monotonic
-authority it cannot detect restoration of an older complete ledger snapshot,
-even when the current binary remains installed. That restoration is explicitly
-outside the first release threat model. An unsigned or differently signed
-binary/helper replacement breaks peer validation before approval.
+The first production release has no supported predecessor and no supported
+write-capable in-place upgrade. Exact-build requirements make a current
+CLI/helper reject a mixed-version peer. They do not prevent a side-loaded older
+matched pair from trusting itself and accessing a stable entitlement group.
+Package downgrade refusal is therefore an operational guard, not release
+freshness enforcement.
+
+A second write-capable release is prohibited until a separate accepted ADR and
+Gate define release rollover for approval keys, registry state, every YouTrack
+credential, stale access-token expiry/revocation, side-loaded old binaries, and
+crash recovery. A future design may use release-specific entitlement groups and
+explicit user-authorized migration or an external monotonic authority; this ADR
+does not choose one. Reinstalling the identical first-release artifact is
+allowed, but no Cask update may cross to a different build before that rollover
+gate passes.
+
+The helper can validate only the complete ledger presented by Keychain;
+without an external monotonic authority it cannot detect restoration of an
+older complete ledger snapshot, even when the current binary remains installed.
+That restoration and execution of a hypothetical older matched signed pair are
+explicitly outside the first-release claim. An unsigned, differently signed,
+or mixed-build binary/helper replacement breaks peer validation before
+approval.
 
 Uninstall removes the application bundle but does not silently delete or
 migrate approval keys, registry state, credentials, or journals. Destructive
@@ -306,8 +324,14 @@ entitlements. A dedicated non-writing self-test surface in the same CLI may
 exercise the native adapter and test journal while all remote executors remain
 disabled. Against that exact artifact, the harness exercises enrollment,
 approval, durable journal CAS, cancellation, timeout, process crash, production
-peer replacement, rotation, revocation, recovery, upgrade, and accidental
-rollback on a supported clean Mac. `codesign`, `spctl`, notarization, stapling,
+peer replacement, rotation, revocation, recovery, identical reinstall, and
+accidental package rollback on a supported clean Mac. A separately signed,
+never-shipped old-build fixture with the production IDs proves both current
+peers reject mixed-build connections; the report also records that a matched
+old pair is not prevented by this first-release topology. The fixture is
+created only inside the disposable Gate environment, is not notarized or
+archived, and is destroyed with that environment. `codesign`, `spctl`,
+notarization, stapling,
 entitlements, Team ID, architecture, requirement, and embedded-profile
 CMS/App ID/Team ID/expiry/entitlement checks all refer to that same artifact.
 
@@ -347,6 +371,9 @@ identity.
   authority.
 - A real Team ID is absent from source and cannot be guessed; an unset release
   configuration fails before signing, enrollment, or approval.
+- The first release can be evaluated and installed, but publishing a second
+  write-capable build is blocked on an explicit key-and-credential rollover
+  design.
 - Enrollment, rotation, recovery, approval, and mutation execution are distinct
   authority transitions with distinct domains and journal effects.
 - The native bundle is macOS-only. Unsupported platforms and unsigned local

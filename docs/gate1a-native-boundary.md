@@ -140,11 +140,13 @@ The pinned production requirements are exact, not caller-configurable. Their
 full Developer ID Application expressions and identifiers are frozen in the
 [trust-root ADR](gate1a-trust-root.md#signed-bundle-and-identifiers).
 
-`TEAM_ID` is a required immutable operator-supplied build/Gate input with no
-repository default. The developer-only Gate runner has exact identifier
+`TEAM_ID` and positive decimal `RELEASE_BUILD` are required immutable
+operator-supplied build/Gate inputs with no repository defaults. Each peer
+requirement pins the other's exact signed `CFBundleVersion` in addition to its
+Team ID and identifier. The developer-only Gate runner has exact identifier
 `io.github.abigotado.youtrack-agent.gate1a` under a separate Gate policy and
-must never ship or be accepted by the production helper. Unset, wildcard, and
-ad-hoc identities fail closed.
+must never ship or be accepted by the production helper. Unset, wildcard,
+non-decimal, and ad-hoc inputs fail closed.
 
 The helper-only permanent key is P-256 Secure Enclave material stored through
 the data-protection Keychain with `kSecAttrAccessControl`. A new `LAContext`
@@ -215,4 +217,4 @@ generation before UI and revalidates them afterward.
 - high-S ECDSA acceptance: permits a second wire representation of one
   signature;
 - source-built or ad-hoc helper as Gate evidence: does not prove the production
-  designated requirement, entitlements, notarization, or upgrade boundary.
+  designated requirement, entitlements, notarization, or release boundary.

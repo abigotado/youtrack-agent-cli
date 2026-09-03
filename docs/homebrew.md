@@ -23,14 +23,16 @@ delivery shape before helper implementation:
   contained CLI, never a source Formula that rebuilds the helper;
 - immutable release inputs and provenance for the CLI and helper;
 - preservation and verification of helper identity and entitlements through
-  install, upgrade, rollback, and uninstall;
-- behavior when a Homebrew Cellar upgrade changes the executable path; and
-- an explicit, credential-safe Keychain ACL migration flow after upgrade.
+  first install, identical reinstall, rollback refusal, and uninstall;
+- explicit prohibition of a second write-capable build until release rollover;
+  and
+- an explicit, credential-safe Keychain ACL migration flow into the first
+  signed app.
 
 No installer or post-install hook may silently migrate Keychain authorization.
 The operator must run the explicit `auth migrate-keychain --profile NAME --yes`
 flow, which rebinds the existing item without printing or returning its secret.
-The release gate must prove successful upgrades as well as cancellation,
+The first-release gate must prove identical reinstall, cancellation,
 interruption, binary replacement, helper replacement, and failed migration.
 
 ## Missing release provenance
@@ -44,3 +46,9 @@ Homebrew may be activated only after Gate 1A and live Gate 1B pass and the
 fail-closed release-policy guard is deliberately updated in the same reviewed
 change. Until then, use a local source build for development and do not publish
 or install a Homebrew package.
+
+The accepted trust topology permits only the first signed Cask build and an
+identical-artifact reinstall. Publishing a later write-capable Cask version is
+blocked until a separate release-rollover ADR proves migration/revocation for
+approval keys, registry state, YouTrack credentials, and stale access tokens;
+package downgrade refusal alone does not stop a side-loaded older signed pair.

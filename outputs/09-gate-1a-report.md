@@ -85,8 +85,10 @@ Keychain or Secure Enclave state.
   `get-task-allow`.
 - The bundle is notarized and stapled; `codesign`, `spctl`, and stapler checks
   pass against the exact designated requirement, Team ID, and architecture set.
-- Clean-machine install, upgrade, rollback, binary/helper replacement, key
-  rotation, and application-update cases preserve the boundary or fail closed.
+- Clean-machine first install, identical reinstall, accidental package
+  rollback, binary/helper replacement, and key rotation cases preserve the
+  stated first-release boundary or fail closed. A mixed-build fixture is
+  rejected; a matched older pair is recorded as an unsolved rollover case.
 - The CLI locally verifies receipt DER signatures against an explicitly
   enrolled public key and stores the full signed receipt only after a
   revision-bound compare-and-swap.
@@ -120,6 +122,12 @@ Homebrew remains blocked. The trust-root ADR selects a future Cask/private-tap
 shape, but this work does not authorize a Formula, Cask, tap, release workflow,
 source rebuild of the helper, or package publication. Gate 1A must prove that
 the signed and notarized nested helper retains its identity and entitlements
-across install, upgrade, rollback, replacement, and uninstall. Gate 1B must
+across first install, identical reinstall, rollback refusal, replacement, and
+uninstall. Gate 1B must
 then prove the live one-shot YouTrack write path. The existing offline module
 manifest and checker remain readiness inputs only.
+
+Only the first signed Cask build may follow these gates. A second
+write-capable release remains blocked until its separate rollover decision and
+evidence cover side-loaded old pairs, approval state, credentials, and stale
+access tokens.

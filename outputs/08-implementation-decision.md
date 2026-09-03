@@ -23,9 +23,14 @@ Before implementing an enabled `mutation confirm` or `mutation apply`, a macOS f
 1. A separately signed native helper displays the complete bounded canonical snapshot from one immutable in-memory byte buffer.
 2. Only after a fresh LocalAuthentication success, the helper stores the digest of exactly those displayed bytes in `receipt.plan_sha256` and signs the deterministic unsigned receipt from `approval.SigningBytes`, including SHA-256 of the fresh IPC challenge; authentication reuse is disabled.
 3. The on-device P-256 private key is non-exportable, has a documented tag and public-key fingerprint, and cannot be used by an unrelated same-user process.
-4. Cancellation, timeout, helper crash, binary replacement, key rotation, and application upgrade fail closed.
+4. Cancellation, timeout, helper crash, binary replacement, key rotation,
+   mixed-build peers, and identical reinstall fail closed or preserve the
+   first-release boundary. A second write-capable release is blocked on a
+   separate rollover design.
 5. The CLI verifies the helper code identity, enrolled key, receipt signature, signed request challenge, plan digest, TTL, nonce, profile identity, and key generation.
-6. Packaging and update paths preserve the required code-signing identity and entitlements. Development or ad-hoc signing is not accepted as production evidence.
+6. First-install, identical-reinstall, and rollback-refusal paths preserve the
+   required code-signing identity and entitlements. Development or ad-hoc
+   signing is not accepted as production evidence.
 
 ## Homebrew activation gate
 
@@ -38,16 +43,21 @@ The accepted [trust-root topology](../docs/gate1a-trust-root.md) now chooses one
 signed/notarized `YouTrackAgent.app` delivered later by Cask or private tap.
 Homebrew may link the contained CLI but may not build, replace, extract, or
 re-sign the helper. Gate 1A must prove immutable CLI/helper provenance and that
-install, upgrade, rollback, and replacement preserve identity or fail closed.
+first install, identical reinstall, rollback refusal, and replacement preserve
+identity or fail closed. It does not authorize a second write-capable build.
 
-The same gate must test Homebrew Cellar path changes against the application-
-bound Keychain ACL. Upgrade hooks must not silently reauthorize credentials;
-the only permitted migration is the operator-invoked
+The same gate must test the first Cask install path against the application-
+bound Keychain ACL. Install hooks must not silently reauthorize credentials;
+the only permitted initial migration is the operator-invoked
 `auth migrate-keychain --profile NAME --yes` flow, with cancellation and
 partial failure covered. The repository now has committed source and a remote,
 but no immutable release tag, signed archive checksum, installed Developer ID
 Application identity, or notarization evidence, so it cannot provide release
 provenance for an active Cask.
+
+A later write-capable Cask version is prohibited until a separate rollover ADR
+and Gate cover side-loaded older matched pairs, approval keys and registry,
+credential migration, and stale access-token expiry or revocation.
 
 If Gate 1A cannot be proven without access to an operator-controlled signing identity, the first coherent release includes profile/auth/inspect, the Remote MCP skill/configuration, offline prepare/export/status, and the complete fail-closed journal schema. `confirm` and `apply` return `USER_PRESENCE_UNAVAILABLE`; no PTY, stdin, environment, Keychain-password, or `--yes` fallback exists.
 

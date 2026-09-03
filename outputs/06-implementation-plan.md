@@ -199,6 +199,9 @@ Exit criteria:
 4. Document incident response for leaked credentials and unresolved ambiguous writes.
 5. Add telemetry that contains only non-secret IDs, state transitions, timings, and status codes.
 6. Run an independent security review and threat-model update before production use.
+7. Publish only the first write-capable build; keep any second build blocked
+   until its release-rollover ADR and Gate cover old signed pairs, approval
+   state, credentials, and stale tokens.
 
 ## Phase 8 — custom MCP app RFC or hardening
 
