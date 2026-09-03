@@ -1,4 +1,4 @@
-import Foundation
+import struct Foundation.Data
 
 public enum ApprovalPlanRenderer {
     public static func render(_ snapshot: ValidatedPlanSnapshot) -> String {

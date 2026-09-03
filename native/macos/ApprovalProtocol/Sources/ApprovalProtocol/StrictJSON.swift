@@ -1,4 +1,4 @@
-import Foundation
+import struct Foundation.Data
 
 enum StrictJSONValue: Equatable {
     case integer(Int)

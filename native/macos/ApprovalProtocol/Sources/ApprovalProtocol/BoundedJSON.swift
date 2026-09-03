@@ -1,4 +1,4 @@
-import Foundation
+import struct Foundation.Data
 
 struct JSONMember {
     let name: String

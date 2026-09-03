@@ -1,4 +1,9 @@
-import Foundation
+import func Foundation.floor
+import struct Foundation.Calendar
+import struct Foundation.Data
+import struct Foundation.Date
+import struct Foundation.TimeZone
+import typealias Foundation.TimeInterval
 
 public struct EnrolledSigningKey: Equatable, Sendable {
     public let generation: String

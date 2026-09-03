@@ -1,4 +1,4 @@
-import Foundation
+import struct Foundation.Data
 
 public struct UnsignedApprovalReceipt: Equatable, Sendable {
     public static let schemaVersion = 2

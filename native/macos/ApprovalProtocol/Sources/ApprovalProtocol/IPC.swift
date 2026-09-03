@@ -1,4 +1,6 @@
-import Foundation
+import func Foundation.floor
+import struct Foundation.Data
+import struct Foundation.Date
 
 public struct ApprovalIPCChallenge: Equatable, Sendable {
     public static let byteCount = 32

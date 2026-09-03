@@ -62,9 +62,10 @@ application -> {profile, auth, oauth, writepolicy, intent, mutation,
                 approval, journal, skills, youtrack, restexec, reconcile}
 
 mutation -> {intent, errx}
+intent -> {endpoint, protocolvalue}
 restexec -> {mutation, youtrack, errx}
 reconcile -> {mutation, youtrack, errx}
-approval -> {intent, errx}
+approval -> {intent, protocolvalue, errx}
 journal -> {intent, lockfile, errx}
 auth -> {profile, lockfile, errx}
 oauth -> {endpoint, errx}
@@ -73,7 +74,8 @@ writepolicy -> {profile, lockfile, errx}
 profile -> {endpoint, lockfile, errx}
 skills -> {assets, lockfile, errx}
 output -> errx
-endpoint -> errx
+endpoint -> protocolvalue
+protocolvalue -> standard library only
 lockfile -> errx
 errx -> standard library only
 ```
@@ -82,11 +84,11 @@ errx -> standard library only
 
 - `Executor`: preflight plus exactly one typed execute operation;
 - `Reconciler`: bounded read-only evidence collection;
-- `Approver`: display/sign or verify a receipt, with no journal access;
+- `Approver`: invoke the display/sign boundary for one exact canonical snapshot, with no receipt-verification or journal access;
 - `Journal`: compare-and-swap transitions under one transaction API;
 - `CredentialProvider` and `PolicyChecker`: minimum operations needed by the application service.
 
-The interfaces contain at most one to three methods. `internal/youtrack` is a fixed-origin transport/model boundary and imports neither profile nor auth. `internal/cli` does not import `net/http`. Architecture tests enumerate allowed internal edges and fail on every unlisted dependency.
+The combined `approval.DecodeAndValidateIPCResponse` decoder is the sole response-acceptance path: it binds both response arms to the request challenge and binds a success to the exact snapshot and enrolled signing key before exposing a verified receipt. The interfaces contain at most one to three methods. `internal/youtrack` is a fixed-origin transport/model boundary and imports neither profile nor auth. `internal/cli` does not import `net/http`. Architecture tests enumerate allowed internal edges and fail on every unlisted dependency.
 
 ## Journal transaction and lock contract
 

@@ -1,5 +1,5 @@
-import CryptoKit
-import Foundation
+import struct CryptoKit.SHA256
+import struct Foundation.Data
 
 enum ProtocolGrammar {
     private static let base32Alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".utf8)

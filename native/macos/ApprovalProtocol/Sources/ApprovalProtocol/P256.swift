@@ -1,5 +1,6 @@
-import CryptoKit
-import Foundation
+import enum CryptoKit.P256
+import struct CryptoKit.SHA256
+import struct Foundation.Data
 
 public enum P256PublicKeyCodec {
     public static let x963ByteCount = 65
