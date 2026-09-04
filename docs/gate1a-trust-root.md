@@ -18,6 +18,13 @@ release-rollover boundary, and future Homebrew artifact therefore form one trust
 They must be fixed before native implementation and must fail closed while the
 operator-controlled signing identity is unavailable.
 
+Two companion specifications are normative parts of this decision:
+
+- [Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md) freezes
+  every authority-bearing ledger and ceremony byte; and
+- [Gate artifact authorization](gate1a-artifact-authorization.md) freezes the
+  independent exact-code authorization and two-pass Gate ceremony.
+
 ## Decision
 
 ### Signed bundle and identifiers
@@ -37,6 +44,12 @@ YouTrackAgent.app/
         Contents/embedded.provisionprofile
         Contents/MacOS/YouTrackAgentApproval
 ```
+
+The delivery archive additionally carries the detached authorization files at
+the fixed archive-root paths defined by the artifact-authorization protocol.
+They remain outside the sealed application bundle and are installed at fixed
+installation-root sibling paths. This detached shape lets an authorization bind the
+final signed CodeDirectory identities without a self-reference.
 
 The identifiers are immutable protocol and packaging inputs:
 
@@ -82,15 +95,23 @@ and identifier "io.github.abigotado.youtrack-agent.approval"
 and info[CFBundleVersion] = "${RELEASE_BUILD}"
 ```
 
-The shipped requirements are compiled from a release manifest containing the
-literal Team ID and build number; production code never expands an environment
-variable at runtime. This prevents mixed-version peers but not an older matched
-CLI/helper pair from trusting itself. Both sides validate the connection-bound
-audit token with
-`SecCodeCopyGuestWithAttributes` and the pinned opposite requirement before
-accepting protocol bytes. They repeat peer validation after enrollment or
-rotation and before committing new trust state. PID and filesystem paths are
-diagnostic only.
+The shipped baseline requirements contain the literal Team ID and build
+number; production code never expands an environment variable at runtime.
+Those requirements establish publisher and coarse build identity, but they are
+not exact-artifact authority. Both sides additionally require authorization
+from the separately pinned offline Ed25519 root and compare the running self
+and connection-bound peer `kSecCodeInfoUnique` / `kSecCodeInfoCdHashes` values
+with its exact per-architecture allowlist. The peer is resolved from the audit
+token with `SecCodeCopyGuestWithAttributes`; PID and filesystem paths are
+diagnostic only. Missing, expired, wrong-domain, wrong-capability,
+wrong-artifact, or differently signed authorization fails before protocol
+bytes or registry state are accepted.
+
+The root public key, key ID, signature domains, canonical sidecar bytes,
+safe-read rules, and candidate-to-production lifecycle are fixed in
+[Gate artifact authorization](gate1a-artifact-authorization.md). The private
+root remains offline and absent from build and Gate hosts. The first release
+has no in-band root replacement, revocation, or rollover path.
 
 ### Entitlements and Keychain namespace
 
@@ -136,11 +157,15 @@ private keys. Hitting the key-enumeration bound fails closed pending explicit
 operator cleanup through trusted helper UI.
 
 The approval-key registry is not a profile file or one mutable item. It is a
-bounded append-only ledger in the helper-private data-protection Keychain
-group. Each canonical transition contains its schema version, monotonic
-revision, predecessor-record SHA-256, active generation, exact DER SPKI, SPKI
-SHA-256, trust-manifest SHA-256, status, transition evidence, and retained
-verification generations. The
+bounded append-only, event-sourced ledger in the helper-private data-protection
+Keychain group. Each canonical transition contains its schema version,
+monotonic revision, predecessor-record SHA-256, artifact-descriptor SHA-256,
+exact old/new key fields, accepted proposal/transcript digests, derived status,
+and role-separated signatures. Retained and revoked generations are derived by
+replaying the complete gap-free chain; a record never embeds a growing mutable
+generation array. The exact JSON field order, grammars, limits, signature
+domains, transition table, state derivation, and vectors are normative in
+[Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md). The
 public CLI surface can request an exact active/retained record through one
 bounded, peer-authenticated helper operation but cannot address Keychain items
 directly. Only the helper's
@@ -173,15 +198,18 @@ The ceremony is:
    fingerprint, and the fact that a new trust root is being created.
 4. Fresh user presence authorizes generation or use of the helper-only Secure
    Enclave key.
-5. The helper returns generation, exact DER SPKI, fingerprint, challenge
-   digest, trust-manifest digest, issuance time, and a self-signature over the
-   enrollment domain and all those fields.
+5. The helper returns the exact canonical proposal and key-possession proof
+   defined by the registry protocol. They bind the generation, exact DER SPKI,
+   fingerprint, challenge, artifact descriptor, expected state, and time.
 6. The CLI revalidates helper identity on the same connection, verifies the
-   self-signature with the returned SPKI, checks every binding, then returns an
-   exact challenge-bound acceptance message. It has no direct registry-write
-   primitive.
+   proof and every binding, then returns the canonical challenge-bound
+   acceptance message. Acceptance is live peer-authenticated ceremony evidence,
+   not a CLI signature, and binds the proposal digest. It has no direct
+   registry-write primitive.
 7. The helper revalidates the peer and re-reads the exact empty state. It
-   creates revision 1 with `SecItemAdd` under account
+   includes the acceptance digest in the final transition signing view, signs
+   that complete view under the enrollment-activation domain, and creates
+   revision 1 with `SecItemAdd` under account
    `revision/00000000000000000001`; `errSecDuplicateItem` is a conflict.
 8. The CLI reads the committed record through the helper's bounded read-only
    operation and compares its exact bytes before reporting success.
@@ -192,8 +220,9 @@ continues to fail closed; it never retries enrollment implicitly.
 ### Rotation, revocation, and recovery
 
 Rotation is a separate fresh-presence ceremony bound to both the old and new
-generations. When the old key remains usable, it signs continuity into the
-rotation record; the new key signs acceptance. The next immutable registry
+generations. After live CLI acceptance, the old key signs continuity and the
+new key signs activation over separate domains and the same complete final
+transition view, including the acceptance digest. The next immutable registry
 transition commits both signatures and the new active generation.
 
 Old public verification keys remain retained while any unexpired or unresolved
@@ -205,8 +234,12 @@ the safer default: rotation or revocation cancels outstanding confirmed plans
 and requires fresh preparation and approval.
 
 Key loss has no continuity signature and therefore cannot be rotation.
-Recovery is an explicit operator ceremony that displays the loss of
-continuity, revalidates the signed bundle, uses fresh user presence, creates a
+Recovery is an explicit operator ceremony allowed only over an already valid,
+gap-free ledger. It displays the loss of continuity, revalidates the signed
+bundle, uses fresh user presence, and admits only the registry protocol's exact
+disabled-ledger or `errSecItemNotFound` eligibility evidence. A returned key,
+user cancellation, authentication/key-use failure, transient status, or unknown
+OSStatus fails closed instead of being treated as loss. Recovery creates a
 new generation, revokes all prior generations, and invalidates every existing
 confirmed receipt. Recovery never silently reauthorizes a plan. Within the
 current signed helper and retained current registry, an older generation
@@ -286,11 +319,15 @@ before Gate 1A. The current repository remains wired to
 `approval.Unsupported`, but the exact signed Gate candidate must wire the
 native adapter through `application.NewDefault` and exercise the ordinary
 production `mutation confirm` entry point while every remote executor remains
-disabled. If Gate 1A fails, that candidate is discarded. If it passes, the
-recorded executable hashes become the only eligible first-release approval
-artifact; no post-Gate rebuild or wiring change inherits that evidence. Any
-later candidate with different hashes, including the Gate 1B candidate, must
-rerun and pass the complete Gate 1A suite.
+disabled. If either complete Gate pass fails, that candidate is discarded. The
+first complete run is E1 evidence only, not production authority. A distinct
+runner/session-bound E2 token then drives the complete suite again after a
+clean reset. Only after both runs pass may the offline root sign a
+capability-specific production authorization. A final network-disabled
+black-box activation smoke exercises that production-only branch. The exact
+sequence and failure quarantine are normative in
+[Gate artifact authorization](gate1a-artifact-authorization.md). No post-Gate
+rebuild or wiring change inherits this evidence.
 
 The existing pre-Gate receipt schema v2 does not carry registry revision and is
 therefore not activation-eligible. Before durable confirmation, the shared Go
@@ -301,15 +338,19 @@ vector. No v2 receipt has been released, so there is no compatibility fallback.
 
 ### First-release, rollover, rollback, and uninstall
 
-Every release manifest binds the outer/helper identifiers, Team ID,
-requirements, entitlements, access-group name, item identifiers, architecture
-set, version/build number, hashes of both executables, and the helper's embedded Developer
+The canonical artifact descriptor binds the outer/helper identifiers, Team ID,
+semantic requirements and entitlements, access-group name, item identifiers,
+architecture set, version/build number, every architecture's exact Apple code
+identity, hashes of both executable files, and the helper's embedded Developer
 ID provisioning-profile hash. The profile must authorize the helper App ID,
 Team ID, and exact `keychain-access-groups` entitlement. It must be valid for
-Developer ID distribution and unexpired at signing and Gate execution. The
+Developer ID distribution and unexpired at signing and both Gate executions. The
 nested helper is signed with the profile at
 `Contents/embedded.provisionprofile`; the outer bundle is signed afterward.
-The exact distribution is notarized and stapled.
+The exact application payload is notarized and stapled before descriptor
+creation. Executable/resource hashes are evidence; runtime authority comes
+from Security.framework validity plus exact signed code identities and the
+offline-root authorization.
 
 The first production release has no supported predecessor and no supported
 write-capable in-place upgrade. Exact-build requirements make a current
@@ -343,7 +384,9 @@ new Keychain access or run enrollment.
 ## Required evidence and activation order
 
 Before Gate 1A can pass, an operator-controlled Developer ID Application
-identity must produce an exact hardened-runtime bundle. A black-box Gate
+identity must produce an exact hardened-runtime bundle and the offline root
+must authorize only a bounded Gate-runner session for that descriptor. A
+black-box Gate
 harness must launch and drive the CLI contained in that bundle; it never links
 the adapter, injects a peer, changes a requirement, or receives Keychain
 entitlements. The candidate's normal production factory already wires the
@@ -361,8 +404,11 @@ old pair is not prevented by this first-release topology. The fixture is
 created only inside the disposable Gate environment, is not notarized or
 archived, and is destroyed with that environment. `codesign`, `spctl`,
 notarization, stapling,
-entitlements, Team ID, architecture, requirement, and embedded-profile
-CMS/App ID/Team ID/expiry/entitlement checks all refer to that same artifact.
+entitlements, Team ID, architecture, requirement, Apple CodeDirectory
+identities, and embedded-profile CMS/App ID/Team ID/expiry/entitlement checks
+all refer to that same artifact. E1 and clean-reset E2 each run the complete
+suite with independent fresh runner sessions; neither Gate-only token is valid
+for a production peer.
 
 Registry corruption, fork/gap/duplicate parsing, crash-ambiguous `SecItemAdd`,
 orphan-key cleanup, and active-key loss require access that the black-box
@@ -382,21 +428,32 @@ The separate Gate runner identity is diagnostic orchestration only and is
 never accepted as the production helper's protocol peer. A Gate run uses a
 disposable macOS user or VM and destroys its fixture Keychain state afterward.
 
-Gate 1A qualifies only the exact native-approval candidate. The current REST
+Gate 1A production authorization has only `confirm`; its final smoke drives the
+ordinary `mutation confirm` command and proves every apply path remains
+disabled. Gate 1A qualifies only the exact native-approval candidate. The
+current REST
 executor stays disabled. A later exact signed candidate must wire the ordinary
 production `mutation apply` entry point for only `issue.create` and pass live
 Gate 1B on a disposable YouTrack 2026.2 project. Because wiring the executor
 changes the artifact, that same candidate must first rerun and pass Gate 1A.
-Gate 1B then proves exact
-identity/preconditions, one-shot execution, rotation/revocation ordering, and
-bounded ambiguous-outcome reconciliation. A failed candidate is discarded; a
-passing candidate is published byte-for-byte with its recorded hashes and no
-post-Gate activation edit. `issue.update` and `comment.add` remain subject to
-their own executor decision.
+Gate 1B then proves exact identity/preconditions, one-shot execution,
+rotation/revocation ordering, and bounded ambiguous-outcome reconciliation.
+After its two complete Gate passes, the final `issue.create` authorization is
+smoked with the ordinary `youtrack-agent-cli --profile work mutation apply
+--plan-id <issue-create-plan-id>` path on a network-isolated host. Only the
+expected loopback read-only preflight is allowed; an instrumented mutating
+dispatch boundary returns the unique post-authorization hard-deny result and
+records zero mutating-request bytes. Wrong capability, tampered authorization,
+wrong artifact, `issue.update`, and `comment.add` fail before dispatch. A failed
+candidate is discarded; a passing candidate is published byte-for-byte with no
+post-Gate activation edit.
 
 Public Homebrew distribution is last. The accepted shape is a Cask or private
-tap that installs the already signed/notarized app and links its contained CLI.
-A source Formula cannot rebuild the helper or establish its production code
+tap whose SHA-256 pins the outer delivery archive containing the immutable app
+payload plus detached authorization. Publication also requires the external
+root-signed envelope binding the payload, authorization, E1/E2 evidence, and
+outer archive. The Cask installs those exact bytes and links the contained CLI;
+a source Formula cannot rebuild the helper or establish its production code
 identity.
 
 ## Consequences
@@ -423,6 +480,8 @@ identity.
 - Apple: [Generating new cryptographic keys](https://developer.apple.com/documentation/security/generating-new-cryptographic-keys)
 - Apple: [Protecting keys with the Secure Enclave](https://developer.apple.com/documentation/security/protecting-keys-with-the-secure-enclave)
 - Apple: [TN3127: Inside Code Signing: Requirements](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+- Apple: [TN3126: Inside Code Signing: Hashes](https://developer.apple.com/documentation/technotes/tn3126-inside-code-signing-hashes)
+- Apple: [`kSecCodeInfoUnique`](https://developer.apple.com/documentation/security/kseccodeinfounique) and [`kSecCodeInfoCdHashes`](https://developer.apple.com/documentation/security/kseccodeinfocdhashes)
 - Apple: [`SecCodeCopyGuestWithAttributes`](https://developer.apple.com/documentation/security/seccodecopyguestwithattributes(_:_:_:_:)) and [guest attribute keys](https://developer.apple.com/documentation/security/guest-attribute-dictionary-keys)
 - Apple XNU: [`LOCAL_PEERTOKEN` in `sys/un.h`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/un.h)
 - Apple: [Notarizing macOS software before distribution](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)

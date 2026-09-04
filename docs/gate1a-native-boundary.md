@@ -8,7 +8,10 @@
 The complementary [trust-root and package-topology
 ADR](gate1a-trust-root.md) freezes the production bundle identifiers, nested
 layout, Team ID input, Keychain registry, enrollment lifecycle, and clean-host
-evidence required to instantiate this protocol.
+evidence required to instantiate this protocol. The normative
+[registry/ceremony codec](gate1a-registry-protocol.md) and
+[exact-artifact authorization](gate1a-artifact-authorization.md) remove the
+remaining implementation choices from those authority boundaries.
 
 ## Context
 
@@ -139,6 +142,11 @@ and [`SecCodeCopyGuestWithAttributes`](https://developer.apple.com/documentation
 The pinned production requirements are exact, not caller-configurable. Their
 full Developer ID Application expressions and identifiers are frozen in the
 [trust-root ADR](gate1a-trust-root.md#signed-bundle-and-identifiers).
+They are only the coarse publisher/build predicate. Exact authority also
+requires the offline-root-signed descriptor and capability authorization, plus
+Security.framework validity and a match between the running self and
+connection-bound peer `kSecCodeInfoUnique` / `kSecCodeInfoCdHashes` values and
+the authorized per-architecture set.
 
 `TEAM_ID` and positive decimal `RELEASE_BUILD` are required immutable
 operator-supplied build/Gate inputs with no repository defaults. Each peer
@@ -175,16 +183,21 @@ the exact tag, generation, SPKI, and fingerprint. The append-only versioned
 registry uses service
 `io.github.abigotado.youtrack-agent.approval.registry.v1` and immutable accounts
 formed as `revision/` plus a 20-digit decimal revision.
+The exact event records, proposal/acceptance transcript, final signing views,
+state derivation, bounds, and vectors are frozen in the
+[registry/ceremony protocol](gate1a-registry-protocol.md); no native
+implementation may infer a different codec.
 The helper entitlement requires compatible code signing and its own embedded
 Developer ID provisioning profile. The helper owns the key and registry; its
 CLI-facing API is read-only and bounded. Mutual peer identity and removal of
 arbitrary write/enrollment surfaces remain mandatory.
 
 Ordinary approval never enrolls. Enrollment has a distinct challenge and
-self-signature domain, fresh trusted UI/user presence, peer verification before
-and after the response, and an atomic helper-owned registry commit. Its response
-binds generation, SPKI, fingerprint, and self-signature. Rotation, revocation,
-recovery, retained verification keys, downgrade behavior, and the CLI
+proposal and activation domains, fresh trusted UI/user presence, peer
+verification before and after the response, and an atomic helper-owned registry
+commit. Its final key signature covers the live CLI-acceptance digest together
+with the complete transition state. Rotation, revocation, recovery, retained
+verification keys, downgrade behavior, and the CLI
 `profile -> policy -> journal` lock order are defined by the
 [trust-root ADR](gate1a-trust-root.md). Confirmation snapshots key revision and
 generation before UI and revalidates them afterward.

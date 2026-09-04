@@ -85,6 +85,7 @@ signing identity and entitlements. Linux/Windows and unsigned portable archives
 are not a supported credential-bearing release path. The repository's Homebrew
 manifest and checker are readiness inputs, not an installable Formula; see
 [the trust-root topology](docs/gate1a-trust-root.md) and
+[exact-artifact authorization](docs/gate1a-artifact-authorization.md), plus
 [Homebrew readiness](docs/homebrew.md).
 
 ## Agent Skill

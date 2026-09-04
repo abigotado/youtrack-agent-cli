@@ -37,10 +37,15 @@ unsigned-receipt encoding. The [Gate 1A protocol](gate1a-protocol.md) records
 the implemented pre-Gate v2 contract and the mandatory activation-eligible v3
 registry-revision delta; neither constitutes a trusted helper or a passed Gate
 1A.
+The activation boundary also requires the exact event-ledger codec in
+[Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md) and a
+capability-specific, offline-root-signed exact-code authorization from
+[Gate artifact authorization](gate1a-artifact-authorization.md).
 4. `mutation apply` validates the receipt signature, expiry, nonce, plan/payload
    and schema hashes, current identity, project policy, and preconditions. It
    additionally requires the signed registry revision, generation, exact SPKI,
-   and fingerprint to equal the current active registry entry. Retained public
+   fingerprint, artifact descriptor, and authorized capability to equal the
+   current active registry and running exact code identities. Retained public
    keys verify historical audit/reconciliation evidence only. Any intervening
    registry transition cancels confirmation rather than authorizing apply. An
    eligible plan records `in_flight`, sends at most one mutating request, and

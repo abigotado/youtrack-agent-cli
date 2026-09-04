@@ -21,7 +21,11 @@ delivery shape before helper implementation:
 - one signed and notarized `YouTrackAgent.app` with its nested helper;
 - a Cask or private tap that installs the finished bundle and links its
   contained CLI, never a source Formula that rebuilds the helper;
-- immutable release inputs and provenance for the CLI and helper;
+- the detached exact-artifact descriptor, capability authorization, and
+  publication envelope from
+  [Gate artifact authorization](gate1a-artifact-authorization.md);
+- immutable release inputs and Apple CodeDirectory identities for the CLI and
+  helper, independently authorized by the pinned offline root;
 - preservation and verification of helper identity and entitlements through
   first install, identical reinstall, rollback refusal, and uninstall;
 - explicit prohibition of a second write-capable build until release rollover;
@@ -39,13 +43,23 @@ interruption, binary replacement, helper replacement, and failed migration.
 
 This repository has committed source and a remote, but it still has no immutable
 release tag, signed release archive checksum, notarization record, installed
-Developer ID Application identity, or operator-controlled signing evidence.
+Developer ID Application identity, offline-root-signed descriptor/Gate
+authorization/publication envelope, or operator-controlled signing evidence.
 Consequently, no correct Cask can be materialized from the repository today.
 
 Homebrew may be activated only after Gate 1A and live Gate 1B pass and the
 fail-closed release-policy guard is deliberately updated in the same reviewed
 change. Until then, use a local source build for development and do not publish
 or install a Homebrew package.
+
+The future Cask must use the exact outer delivery-archive SHA-256 recorded by
+the root-signed publication envelope and may not use `sha256 :no_check`. That
+outer archive contains the immutable signed/stapled app payload and the
+detached production authorization at the protocol's fixed archive-root paths.
+Installation copies them to the fixed app/support paths without rebuilding,
+re-signing, or rewriting either byte sequence. Homebrew's checksum detects a
+changed download; the offline-root signature and runtime Security.framework
+checks remain the authenticity and execution boundary.
 
 The accepted trust topology permits only the first signed Cask build and an
 identical-artifact reinstall. Publishing a later write-capable Cask version is

@@ -27,10 +27,21 @@ Before implementing an enabled `mutation confirm` or `mutation apply`, a macOS f
    mixed-build peers, and identical reinstall fail closed or preserve the
    first-release boundary. A second write-capable release is blocked on a
    separate rollover design.
-5. The CLI verifies the helper code identity, enrolled key, receipt signature, signed request challenge, plan digest, TTL, nonce, profile identity, and key generation.
+5. The CLI verifies the helper code identity, enrolled key, receipt signature,
+   signed request challenge, plan digest, TTL, nonce, profile identity, and key
+   generation. Exact code identity means Security.framework validity plus the
+   offline-root-authorized per-architecture `kSecCodeInfoUnique` /
+   `kSecCodeInfoCdHashes` set, not Team ID/build alone.
 6. First-install, identical-reinstall, and rollback-refusal paths preserve the
    required code-signing identity and entitlements. Development or ad-hoc
    signing is not accepted as production evidence.
+
+The [registry/ceremony protocol](../docs/gate1a-registry-protocol.md) freezes
+every authority-bearing transition byte. The
+[artifact-authorization protocol](../docs/gate1a-artifact-authorization.md)
+freezes the pinned Ed25519 root, exact descriptor, runner/session-bound E1 and
+E2 full Gate runs, post-E2 capability authorization, and final black-box
+production-path smoke. A Gate token is never production authority.
 
 ## Homebrew activation gate
 
@@ -44,7 +55,10 @@ signed/notarized `YouTrackAgent.app` delivered later by Cask or private tap.
 Homebrew may link the contained CLI but may not build, replace, extract, or
 re-sign the helper. Gate 1A must prove immutable CLI/helper provenance and that
 first install, identical reinstall, rollback refusal, and replacement preserve
-identity or fail closed. It does not authorize a second write-capable build.
+identity or fail closed. The future Cask pins the root-signed publication
+envelope's outer archive SHA-256, installs the detached authorization at its
+fixed support path, and never uses `sha256 :no_check`. It does not authorize a
+second write-capable build.
 
 The same gate must test the first Cask install path against the application-
 bound Keychain ACL. Install hooks must not silently reauthorize credentials;
@@ -52,7 +66,7 @@ the only permitted initial migration is the operator-invoked
 `auth migrate-keychain --profile NAME --yes` flow, with cancellation and
 partial failure covered. The repository now has committed source and a remote,
 but no immutable release tag, signed archive checksum, installed Developer ID
-Application identity, or notarization evidence, so it cannot provide release
+Application identity, pinned-root authorization, or notarization evidence, so it cannot provide release
 provenance for an active Cask.
 
 A later write-capable Cask version is prohibited until a separate rollover ADR
@@ -145,15 +159,18 @@ A verified remote success followed by stdout failure or journal-finalization fai
 7. Implement durable two-phase confirmation and its native adapter behind
    dependency injection while the current repository remains disabled.
 8. Build an unpublished signed/notarized candidate whose default production
-   factory wires confirmation, then run Gate 1A through its ordinary command.
-   A PASS qualifies those exact bytes; no post-Gate wiring or rebuild occurs.
+   factory wires confirmation, sign its exact descriptor, run complete Gate 1A
+   E1 and clean-reset E2, then issue the confirm-only production authorization
+   and pass its ordinary-command black-box smoke. No post-Gate wiring or rebuild
+   occurs.
 9. Implement the typed one-shot `issue.create` engine and reconciliation behind
    the disabled executor boundary.
 10. Build an unpublished exact candidate whose ordinary production factory
-    wires only `issue.create`, rerun Gate 1A against those changed hashes, then
-    run live Gate 1B on a disposable YouTrack 2026.2 project. Both PASS results
-    qualify those exact bytes for publication; there is no post-Gate activation
-    edit.
+    wires only `issue.create`, repeat the two-pass Gate 1A sequence against its
+    new descriptor, then run two-pass live Gate 1B on a disposable YouTrack
+    2026.2 project. Only after E2 issue production authorization and run the
+    exact loopback-preflight/hard-deny dispatch smoke before publication; there
+    is no post-Gate activation edit.
 11. Keep `issue.update` and `comment.add` disabled until their separate
     REST-TOCTOU acceptance or strict custom-MCP transaction decision.
 12. Run contract, security, primary, and independent adversarial review gates

@@ -21,6 +21,9 @@ contract change:
   unsigned and signed canonical JSON;
 - `registry_revision` is a JSON integer in `1..256`, matching the bounded
   append-only helper ledger, with no alternate string or floating encoding;
+- `key_generation` is exactly `YTAG-` followed by the 20-digit decimal ledger
+  revision that introduced the key (`00000000000000000001` through
+  `00000000000000000256`), replacing the broader pre-Gate v2 label grammar;
 - the signature, receipt digest, IPC success response, Go/Swift parsers, and
   golden vectors bind that added field;
 - candidate decoders reject schema v2 rather than inferring a revision.
@@ -31,6 +34,10 @@ fields by one.
 
 The native trust boundary, canonical URL/plan-ID grammar, and exact future IPC
 frame are specified in [Gate 1A native approval boundary](gate1a-native-boundary.md).
+The registry generation and transition authority are specified by the
+[Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md), and
+`registry_revision` is accepted only with the descriptor authorized by
+[Gate artifact authorization](gate1a-artifact-authorization.md).
 
 ## Authority and limits
 

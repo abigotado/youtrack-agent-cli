@@ -10,6 +10,10 @@ freezes the identifiers, Team ID input, Keychain namespace, enrollment,
 rotation/recovery, signed layout, and evidence order. It is a design result,
 not Gate evidence.
 
+The normative [registry/ceremony codec](../docs/gate1a-registry-protocol.md)
+and [exact-artifact authorization](../docs/gate1a-artifact-authorization.md)
+are also design inputs only. Their presence does not advance this report.
+
 This report is deliberately fail-closed. Protocol code, shared Go/Swift golden
 vectors, parser tests, and ad-hoc development builds are preparation evidence;
 they do not prove the signed native approval boundary required by Gate 1A.
@@ -20,6 +24,8 @@ they do not prove the signed native approval boundary required by Gate 1A.
 | --- | --- | --- |
 | Pre-Gate v2 canonical receipt/signature byte contract | Passed for slice 1 only | `docs/gate1a-protocol.md` and `testdata/gate1a` |
 | Activation-eligible v3 registry-revision binding | Not implemented | Required v3 delta in `docs/gate1a-protocol.md` |
+| Complete registry/ceremony codec and cross-language vectors | Specified, not implemented | `docs/gate1a-registry-protocol.md` |
+| Offline-root exact-artifact descriptor/authorization | Specified, not instantiated | `docs/gate1a-artifact-authorization.md`; no production root/signatures exist |
 | Strict bounded Go receipt codec | Passed for slice 1 | `go test -race ./internal/approval` |
 | Independent Swift parser/encoder agreement | Passed for slice 1 | 39 tests through `swift test` on macOS |
 | Reversible inert rendering of every displayed byte | Passed for slice 1 | all-byte, empty, maximum-size, and round-trip Swift tests |
@@ -53,7 +59,8 @@ PASSED**.
 - Accepted AF_UNIX connections expose `LOCAL_PEERTOKEN` audit tokens.
 - Each side validates the connection-bound audit token with
   `SecCodeCopyGuestWithAttributes(kSecGuestAttributeAudit)` and its pinned
-  designated requirement.
+  designated requirement, then matches the running code's Security.framework
+  identity with the offline-root-authorized per-architecture set.
 - PID and filesystem-path checks are diagnostic only.
 - Replacement, exec, PID reuse, malformed framing, timeout, EOF, and trailing
   data all fail before approval.
@@ -86,6 +93,10 @@ Keychain or Secure Enclave state.
   `get-task-allow`.
 - The bundle is notarized and stapled; `codesign`, `spctl`, and stapler checks
   pass against the exact designated requirement, Team ID, and architecture set.
+- The offline root signs only runner/session-bound E1 and E2 tokens until two
+  complete clean-host Gate passes succeed. Production authorization is issued
+  afterward and its ordinary-command branch passes the mandatory
+  network-disabled black-box smoke.
 - Clean-machine first install, identical reinstall, accidental package
   rollback, binary/helper replacement, and key rotation cases preserve the
   stated first-release boundary or fail closed. A mixed-build fixture is
@@ -116,11 +127,15 @@ entry point; it does not inject an adapter, gain Keychain access, or become an
 accepted helper peer. The current repository remains wired to
 `approval.Unsupported`, but the unpublished Gate candidate's default factory
 must wire the native adapter before signing. Gate success qualifies those exact
-hashes; it is not followed by a wiring commit or rebuild. `apply` and
+Apple code identities only through the descriptor and the post-E2 confirm-only
+production authorization; it is not followed by a wiring commit or rebuild. `apply` and
 `reconcile` remain disabled until a separate exact Gate 1B candidate proves
 their one-shot and ambiguous-outcome behavior on a disposable YouTrack project.
-Because that wiring changes executable hashes, the same candidate must rerun
-and pass Gate 1A before Gate 1B evidence can qualify it.
+Because that wiring changes exact code identities, the same candidate must run
+the complete E1/E2 Gate 1A sequence before the two-pass Gate 1B evidence can
+qualify it. The final `issue.create` production authorization then undergoes
+the exact CLI/loopback-preflight/hard-deny dispatch smoke with zero mutating
+request bytes before publication.
 
 ## Homebrew decision
 
@@ -132,6 +147,11 @@ across first install, identical reinstall, rollback refusal, replacement, and
 uninstall. Gate 1B must
 then prove the live one-shot YouTrack write path. The existing offline module
 manifest and checker remain readiness inputs only.
+
+The eventual Cask must pin the publication envelope's exact outer archive
+SHA-256, install the immutable app payload and detached authorization without
+rewriting either, and reject `sha256 :no_check`. Homebrew checksum validation is
+not a substitute for the pinned-root signature or runtime code-identity checks.
 
 Only the first signed Cask build may follow these gates. A second
 write-capable release remains blocked until its separate rollover decision and

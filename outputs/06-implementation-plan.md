@@ -8,32 +8,43 @@ The trust and activation dependencies are now fixed:
 
 1. Freeze the signed bundle, Team ID parameter, peer requirements,
    data-protection Keychain namespace, enrollment/rotation/recovery, and package
-   topology in `docs/gate1a-trust-root.md`.
+   topology in `docs/gate1a-trust-root.md`, with complete normative codecs in
+   `docs/gate1a-registry-protocol.md` and
+   `docs/gate1a-artifact-authorization.md`.
 2. Implement full durable receipt verification and two-phase confirmation behind
    dependency injection while the current repository remains
    `approval.Unsupported`.
 3. Implement the signed native helper, OS-protected approval-key registry,
    bounded Go client, and non-distributed operator runner.
 4. Produce one unpublished signed/notarized artifact with the ordinary
-   production confirmation path wired and pass external Gate 1A on a clean
-   supported Mac; qualify those exact bytes without rebuilding.
+   production confirmation path wired; bind its exact Apple code identities in
+   the offline-root-signed descriptor; pass complete runner/session-bound E1
+   and clean-reset E2 Gate 1A runs; only then issue the confirm-only production
+   authorization and pass its network-disabled ordinary-command smoke.
 5. Implement canonical fingerprints, typed `issue.create`, one-shot execution,
    and bounded reconciliation while the current repository apply remains
    disabled.
 6. Produce an unpublished exact candidate with ordinary `issue.create` apply
-   wired, rerun Gate 1A against those changed hashes, then pass live Gate 1B on
-   a disposable YouTrack 2026.2 project, including Remote MCP/OAuth host tests,
-   rotation/revocation races, and ambiguous-write fault injection.
-7. Qualify that exact Gate 1B candidate for publication without an activation
-   edit; keep update/comment best-effort or require the strict custom-MCP
-   transaction gate.
-8. Publish signed artifacts and an audited Cask/private tap last.
+   wired, rerun the two-pass Gate 1A sequence for its new descriptor, then run
+   two-pass live Gate 1B on a disposable YouTrack 2026.2 project, including
+   Remote MCP/OAuth host tests, rotation/revocation races, and ambiguous-write
+   fault injection. Issue the `issue.create` production authorization only
+   after E2 and run the exact network-isolated dispatch-boundary smoke.
+7. Build the immutable app-only payload archive, outer delivery archive, and
+   detached root-signed publication envelope without changing the app bytes;
+   keep update/comment disabled or require the strict custom-MCP transaction
+   gate.
+8. Publish those exact signed artifacts and an audited SHA-pinned Cask/private
+   tap last.
 
 Gate 1A cannot pass before durable confirmation exists in the candidate's
 ordinary production entry point. The unpublished candidate is the object under
-test; failure discards it, while PASS qualifies its exact hashes without a
-post-Gate code change. Gate 1B applies the same rule to the first remote
-mutation.
+test; failure discards it, while PASS qualifies its exact descriptor/code
+identities without a
+post-Gate code change. Neither Gate token is production authority. The offline
+root signs a capability-specific production authorization only after E2, and a
+separate black-box smoke must exercise that production-only branch before
+publication. Gate 1B applies the same rule to the first remote mutation.
 
 ## Gate 0 — operator architecture decision
 
@@ -247,15 +258,18 @@ The shortest safe path from the current repository is:
 
 ```text
 trust/storage/package topology
+  -> exact registry codec + pinned artifact-authorization root
   -> durable confirmation, injected and unwired
   -> native helper + protected key registry + operator runner
-  -> signed candidate with production confirm wiring
-  -> clean-host Gate 1A qualifies those exact bytes
+  -> signed candidate descriptor with production confirm wiring
+  -> complete Gate 1A E1 + clean-reset E2
+  -> confirm-only production authorization + black-box smoke
   -> fingerprints + disabled issue.create engine
-  -> signed candidate with production issue.create wiring
-  -> Gate 1A rerun + live YouTrack Gate 1B qualify those exact bytes
+  -> new exact descriptor with production issue.create wiring
+  -> two-pass Gate 1A rerun + two-pass live YouTrack Gate 1B
+  -> issue.create production authorization + dispatch-boundary smoke
   -> update/comment risk decision or strict custom MCP
-  -> signed Cask/private tap
+  -> publication envelope + SHA-pinned signed Cask/private tap
 ```
 
 The custom YouTrack app is outside the critical path only when the operator explicitly accepts the REST executor's project-move TOCTOU residual risk. It is on the critical path for strict atomic project allowlisting.
