@@ -352,7 +352,10 @@ set permits the offline root to sign the production activation grant. The
 exact artifact then loads that grant and provisional authorization and repeats
 the ordinary capability path on every architecture under separate deny-only
 post-grant runner tokens. Only the publication envelope may bind that later
-evidence without a hash cycle. The exact sequence and failure quarantine are normative in
+evidence. The envelope is then packaged with the bound plan and complete
+evidence tree; because it does not hash its containing delivery archive, this
+creates no hash cycle. The exact sequence and failure quarantine are normative
+in
 [Gate artifact authorization](gate1a-artifact-authorization.md). No post-Gate
 rebuild or wiring change inherits this evidence.
 
@@ -488,11 +491,14 @@ any failure. A passing candidate is published byte-for-byte with no post-Gate
 activation edit.
 
 Public Homebrew distribution is last. The accepted shape is a Cask or private
-tap whose SHA-256 pins the outer delivery archive containing the immutable app
-payload plus detached provisional authorization and production activation
-grant. Publication also requires the external root-signed envelope binding the
-payload, both authority objects, E1/E2 evidence sets, activation-smoke evidence
-set, complete post-grant verification evidence set, and outer archive. The Cask installs those exact bytes and links the contained CLI;
+tap whose literal SHA-256 pins the outer delivery archive containing the
+immutable app payload, detached provisional authorization and production
+activation grant, root-signed publication envelope, exact post-grant plan, and
+complete closed evidence-set tree. The envelope binds the payload, both
+authority objects, E1/E2 evidence sets, activation-smoke evidence set, and
+complete post-grant verification evidence set; the Cask checksum separately
+pins the containing archive bytes without a recursive hash cycle. The Cask
+installs those exact bytes under one versioned root and links the contained CLI;
 a source Formula cannot rebuild the helper or establish its production code
 identity.
 

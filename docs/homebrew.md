@@ -55,15 +55,24 @@ fail-closed release-policy guard is deliberately updated in the same reviewed
 change. Until then, use a local source build for development and do not publish
 or install a Homebrew package.
 
-The future Cask must use the exact outer delivery-archive SHA-256 recorded by
-the root-signed publication envelope and may not use `sha256 :no_check`. That
-outer archive contains the immutable signed/stapled app payload and the
-detached provisional authorization plus production activation grant at the
-protocol's fixed archive-root paths.
-Installation copies them to the fixed app/support paths without rebuilding,
-re-signing, or rewriting any byte sequence. Homebrew's checksum detects a
-changed download; the offline-root signature and runtime Security.framework
-checks remain the authenticity and execution boundary.
+The future Cask must use a versioned immutable URL and the literal SHA-256 of
+the exact outer delivery archive; it may not use `sha256 :no_check`. That
+archive contains the immutable signed/stapled app payload, detached provisional
+authorization and production activation grant, root-signed publication
+envelope, exact post-grant plan, and the complete closed evidence-set tree at
+the protocol's fixed archive-root paths. The envelope does not hash its
+containing archive; the reviewed Cask pins the archive bytes, while the root
+signature binds every security-relevant contained object without a recursive
+hash cycle.
+
+Installation copies this complete tree to one versioned Caskroom root without
+rebuilding, re-signing, fetching auxiliary assets, or rewriting any byte
+sequence. Before guarded mutations are enabled, the installed verifier reads
+the envelope, plan, index, and referenced evidence only from that root and
+fails closed on missing, extra, linked, escaping, or digest-mismatched files.
+Homebrew's checksum detects a changed download; the offline-root signature and
+runtime Security.framework checks remain the authenticity and execution
+boundary.
 
 The accepted trust topology permits only the first signed Cask build and an
 identical-artifact reinstall. Publishing a later write-capable Cask version is

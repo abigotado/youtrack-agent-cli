@@ -156,11 +156,12 @@ uninstall. Gate 1B must
 then prove the live one-shot YouTrack write path. The existing offline module
 manifest and checker remain readiness inputs only.
 
-The eventual Cask must pin the publication envelope's exact outer archive
-SHA-256, install the immutable app payload, detached provisional authorization,
-and activation grant without rewriting them, bind the complete post-grant
-verification evidence in the publication envelope, and reject
-`sha256 :no_check`.
+The eventual Cask must pin the exact outer archive SHA-256, install the
+immutable app payload, detached provisional authorization, activation grant,
+root-signed publication envelope, exact post-grant plan, and complete closed
+evidence tree without fetching or rewriting them, and reject `sha256
+:no_check`. The envelope binds the complete post-grant verification inputs;
+the Cask separately pins its containing archive so no recursive hash is needed.
 Homebrew checksum validation is
 not a substitute for the pinned-root signature or runtime code-identity checks.
 

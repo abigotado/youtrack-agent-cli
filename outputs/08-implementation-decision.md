@@ -58,11 +58,14 @@ signed/notarized `YouTrackAgent.app` delivered later by Cask or private tap.
 Homebrew may link the contained CLI but may not build, replace, extract, or
 re-sign the helper. Gate 1A must prove immutable CLI/helper provenance and that
 first install, identical reinstall, rollback refusal, and replacement preserve
-identity or fail closed. The future Cask pins the root-signed publication
-envelope's outer archive SHA-256, installs the detached descriptor,
-provisional authorization, and activation grant at their fixed support paths,
-and never uses `sha256 :no_check`. It does not authorize a
-second write-capable build.
+identity or fail closed. The future Cask pins the exact outer archive SHA-256
+and installs the detached descriptor, provisional authorization, activation
+grant, root-signed publication envelope, exact post-grant plan, and complete
+evidence tree at their fixed support paths. It never fetches verification
+assets after extraction and never uses `sha256 :no_check`. The root envelope
+binds the security-relevant contents while the Cask separately pins its
+containing archive without a recursive hash. It does not authorize a second
+write-capable build.
 
 The same gate must test the first Cask install path against the application-
 bound Keychain ACL. Install hooks must not silently reauthorize credentials;

@@ -431,8 +431,8 @@ It is produced exactly once from the final stapled and revalidated app, and its
 opaque bytes and digest are retained before the descriptor is canonicalized
 and before any E1 token can be issued. No later Gate, smoke, grant, post-grant
 verification, or publication step rebuilds or repacks it. After E1 begins, the
-only archives created later are the outer delivery archive and its separately
-signed publication envelope.
+only archive created later is the outer delivery archive. The publication
+envelope is signed first and then included in that archive at its fixed path.
 
 A production delivery archive contains:
 
@@ -441,25 +441,38 @@ YouTrackAgent.app/
 authorization/artifact-descriptor.json
 authorization/provisional-production-authorization.json
 authorization/production-activation-grant.json
+authorization/publication-envelope.json
+authorization/post-grant-verification-plan.json
+authorization/post-grant-verification-evidence-set/index.json
+authorization/post-grant-verification-evidence-set/files/...
 ```
 
 The descriptor, provisional authorization, and activation grant are outside
 the signed app and outside the app-only payload archive. The publication
-envelope is a separate release asset and is never placed in either archive.
-The outer archive is likewise an opaque release file capped at 1 GiB; its
-SHA-256 covers its exact downloaded bytes. Thus no object contains a hash of
-bytes that recursively contain that object.
+envelope, exact post-grant plan, canonical complete evidence-set index, and
+every file listed in its `install_evidence_files` manifest are also outside
+the app-only payload archive but inside the outer delivery archive at the
+literal paths above. The
+`files/` tree is the index's closed, relative-path namespace; missing, extra,
+duplicate, absolute, dot-segment, symlink, hard-link, or escaping entries fail
+closed. The outer archive is an opaque release file capped at 1 GiB and the
+Cask pins the SHA-256 of its exact downloaded bytes. The envelope deliberately
+does not contain the delivery-archive hash, so including the envelope and its
+verification assets creates no recursive hash cycle.
 
-Archive hashes are pre-extraction publication/download evidence only. They are
-verified against the retained release assets and, for the outer archive, by the
-Cask before extraction. They are not runtime authority and are not recomputed
-from an installed tree. Before packaging, the release verifier validates the
+Archive hashes are pre-extraction publication/download evidence only. The
+app-only archive hash is verified against the descriptor and retained release
+asset; the outer archive hash is a literal Cask checksum verified before
+extraction. Neither is runtime authority and neither is recomputed from an
+installed tree. Before packaging, the release verifier validates the
 app-only archive and the app selected for the outer archive against the same
 descriptor, Developer ID signatures, all-architecture code identities,
 profile, notarization, and staple evidence. After extraction, installation and
 runtime validation use those signed-code checks plus the exact root-signed
-sidecar bytes. The code signature's sealed resources, not a home-grown tree
-manifest or archive reconstruction, protect the installed app contents.
+sidecar bytes and the envelope-bound post-grant verification assets available
+under the same installation root. The code signature's sealed resources, not
+a home-grown tree manifest or archive reconstruction, protect the installed
+app contents.
 
 For a direct installation, the app and its sibling `authorization/` directory
 remain under one installation root. For Homebrew, both remain in the same
@@ -1537,18 +1550,44 @@ exactly `post_grant_verification`, `descriptor_sha256`,
 `provisional_authorization_sha256`, `production_activation_grant_sha256`,
 `authorization_context_sha256`, `gate_plan_sha256`, `approved_capability`,
 `fixture_set_sha256`, `evidence_scopes` exactly the one-element array
-`exact_artifact`, `architectures`, `indexes`, and `result` exactly `pass`.
+`exact_artifact`, `architectures`, `indexes`, `install_evidence_files`, and
+`result` exactly `pass`.
 `architectures` exactly equals the descriptor array. `indexes` has one entry
 per architecture in that order, with fields `architecture`,
 `evidence_index_sha256`, `post_grant_verification_token_sha256`,
 `gate_session_id`, `terminal_journal_evidence_sha256`, and
 `cleanup_evidence_sha256`, in that order. Every value must equal its token,
-plan, index, authority pair, context, and retained file. All referenced
-fixtures, transcripts, assertions, result manifests, terminal records, cleanup
-objects, and inventory/probe objects are part of the closed evidence set; a
-missing, additional, reordered, mismatched, or secret-bearing file fails the
+plan, index, authority pair, context, and retained file.
+
+`install_evidence_files` is the complete manifest for the archive's
+`authorization/post-grant-verification-evidence-set/files/` tree. It is sorted
+by the raw UTF-8 bytes of `path` and contains one entry for every regular file
+under that directory, with fields `path`, `size`, and `sha256` in that order.
+`path` is a non-empty NFC UTF-8 relative path of slash-separated components;
+empty, dot, dot-dot, control-character, backslash, leading-slash, duplicate,
+case-fold-colliding, or normalization-colliding paths are invalid. `size` is a
+non-negative JSON integer no greater than the file-type cap, and `sha256` is
+the digest of the exact file bytes. The list includes every per-architecture
+evidence index and every referenced fixture, transcript, assertion, result
+manifest, terminal record, cleanup object, and inventory/probe object. The
+evidence-set manifest itself is not self-listed: its fixed `index.json` path is
+authenticated by the publication envelope's
+`post_grant_verification_evidence_set_sha256`. A missing, additional,
+reordered, mismatched, linked, escaping, or secret-bearing file fails the
 entire set. `post_grant_verification_evidence_set_sha256` is SHA-256 of these
-exact manifest bytes.
+exact manifest bytes, so it authenticates both evidence bytes and their
+installed path/multiplicity mapping.
+
+Post-grant verification token bytes are deliberately absent from
+`install_evidence_files` and from the delivery archive. Before publication,
+the Gate and release verifiers validate each root signature, token/session
+binding, and expiry and then record its exact digest in both the
+per-architecture index and evidence-set manifest. At installation time that
+matching digest is an envelope-authenticated historical cross-reference, not
+a request to reconstruct or revalidate an expired session token. The installer
+must not fetch token bytes. This preserves the rule that a session-bound token
+is never installed, shipped, or accepted outside its authenticated Gate
+session while still making token substitution in retained evidence detectable.
 
 Until that complete set passes, the app-only archive, canonical descriptor,
 provisional authorization, and activation grant remain in trusted
@@ -1565,9 +1604,8 @@ the access-controlled release incident record.
 
 ## Publication envelope
 
-After the complete post-grant verification set passes, release packaging
-creates the outer delivery archive without changing its four contained inputs.
-The separate publication envelope has these unsigned fields:
+After the complete post-grant verification set passes, the offline root signs
+the publication envelope. It has these unsigned fields:
 
 1. `schema_version`, integer `1`
 2. `envelope_type`, exactly `youtrack_agent_publication`
@@ -1583,33 +1621,41 @@ The separate publication envelope has these unsigned fields:
 12. `post_grant_verification_gate_plan_sha256`
 13. `post_grant_verification_evidence_set_sha256`
 14. `app_payload_archive_sha256`
-15. `delivery_archive_sha256`
-16. `delivery_archive_size`, positive JSON integer, maximum 1,073,741,824
-17. `homebrew_cask_sha256`, exactly equal to `delivery_archive_sha256`
-18. `published_at`, UTC RFC 3339 whole seconds
+15. `published_at`, UTC RFC 3339 whole seconds
 
 The two post-grant fields must equal the plan and complete evidence set whose
 descriptor, authority pair, final context, capability, architecture order, and
 fixture set equal this envelope and its other authority fields. The release
-pipeline verifies all contained hashes and signatures, signs this envelope
-offline, uploads the delivery archive, provisional authorization, activation
-grant, descriptor, envelope, Gate/smoke/post-grant plans, the Gate 1A fixture-
-executable manifest, and complete evidence sets with every referenced file as
-distinct assets to a draft GitHub release, verifies remote asset
-digests, and only then publishes an immutable release. A mutable release,
-replaceable asset, moved tag, or mismatched remote digest is not eligible for
-the Cask.
+pipeline verifies all contained hashes and signatures, then creates the outer
+delivery archive exactly once from the app, descriptor, provisional
+authorization, activation grant, signed envelope, exact post-grant plan, and
+complete closed evidence-set tree shown above. It records the archive's exact
+byte length and SHA-256 in the release record and as literal `url` and `sha256`
+values in the reviewed Cask. It uploads that archive plus the descriptor,
+authority objects, envelope, Gate/smoke/post-grant plans, Gate 1A fixture-
+executable manifest, and complete evidence sets as distinct audit assets to a
+draft GitHub release, verifies every remote digest, and only then publishes an
+immutable release. The Cask URL names that immutable version/tag and exact
+archive filename; it may not use a latest, redirect-selected, mutable, or
+replaceable asset. A moved tag, remote digest mismatch, or Cask/archive
+checksum mismatch is not eligible for installation.
 
-The Cask uses the literal delivery-archive SHA-256, never `:no_check`, installs
-the complete signed app plus detached authorization directory without
-re-signing or rebuilding, and links the contained CLI. Installation validation
-must verify the root-signed publication envelope, matching provisional
-authorization and activation grant, authorization context, descriptor, archive
-hash, post-grant plan and complete evidence-set binding, Developer ID
-signatures, notarization, and exact app code identities before guarded
-mutations are enabled. It never reconstructs an archive hash from the installed
-tree. Homebrew's checksum is a useful download-integrity check, but it is not a
-substitute for root authorization or runtime peer verification.
+The Cask uses the literal outer-delivery-archive SHA-256, never `:no_check`,
+installs the complete signed app and detached `authorization/` tree without
+re-signing, rebuilding, fetching, or rewriting any byte, and links the
+contained CLI. Installation validation reads the root-signed publication
+envelope, exact post-grant plan, evidence-set index, and every file listed in
+`install_evidence_files` only from their fixed paths under that same versioned
+installation root. It must verify the envelope signature, matching provisional
+authorization and
+activation grant, authorization context, descriptor, post-grant plan and
+complete evidence-set binding, Developer ID signatures, notarization, and
+exact app code identities before guarded mutations are enabled. Missing or
+extra evidence, a path/link violation, or any digest mismatch disables guarded
+mutations. It never reconstructs an archive hash from the installed tree or
+retrieves verification material after extraction. Homebrew's checksum is a
+download-integrity check, not a substitute for root authorization or runtime
+peer verification.
 
 ## Cross-language conformance evidence
 
@@ -1704,6 +1750,10 @@ independently covers:
 - app-payload, provisional-authorization, activation-smoke evidence set,
   activation-grant, post-grant plan/evidence set, delivery-archive,
   publication-envelope, remote-asset, and Homebrew checksum mismatch; and
+- missing, additional, duplicate, reordered, case/normalization-colliding, or
+  digest/size/path-mismatched `install_evidence_files` entries; unlisted files;
+  a shipped or post-install-fetched post-grant token; and treating a retained
+  token digest as an install-time authority object; and
 - app-only archive creation or replacement after descriptor canonicalization
   or E1 issuance, quarantined grant reuse, publication before every native
   architecture passes post-grant verification, and a publication envelope

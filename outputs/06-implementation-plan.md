@@ -38,9 +38,10 @@ The trust and activation dependencies are now fixed:
    smoke, and issue the production activation grant only after that complete
    evidence set passes. Run the grant-bound per-architecture ordinary-command
    verification and quarantine any failure.
-7. Reuse the exact retained app-only payload archive to build only the outer
-   delivery archive and detached root-signed publication envelope, binding the
-   complete post-grant verification evidence set without changing app bytes;
+7. Sign the root publication envelope over the exact post-grant plan and
+   complete evidence set, then reuse the retained app-only payload to build one
+   outer delivery archive containing the app, authority objects, envelope,
+   plan, and closed evidence tree without changing app bytes;
    keep update/comment disabled or require the strict custom-MCP transaction
    gate.
 8. Publish those exact signed artifacts and an audited SHA-pinned Cask/private
@@ -57,7 +58,9 @@ must exercise that deny-only branch on every declared architecture before the
 root signs a production activation grant. The exact grant-bound production
 context must then pass a separate per-architecture ordinary-command
 verification in the trusted disposable pre-publication environment; only the
-later publication envelope binds that evidence, avoiding a hash cycle. Gate 1B
+later publication envelope binds that evidence. Packaging the envelope and
+bound evidence in an archive whose checksum is pinned by the Cask avoids a
+recursive hash cycle. Gate 1B
 applies the same rule to the first remote mutation.
 
 ## Gate 0 — operator architecture decision
@@ -288,7 +291,8 @@ trust/storage/package topology
   -> issue.create production activation grant
   -> per-architecture post-grant production-context verification
   -> update/comment risk decision or strict custom MCP
-  -> publication envelope + SHA-pinned signed Cask/private tap
+  -> publication envelope + complete verification tree inside a SHA-pinned
+     Cask archive/private tap
 ```
 
 The custom YouTrack app is outside the critical path only when the operator explicitly accepts the REST executor's project-move TOCTOU residual risk. It is on the critical path for strict atomic project allowlisting.
