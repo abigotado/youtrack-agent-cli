@@ -2,7 +2,7 @@
 
 Status: **NOT ACTIVATED**. The authority key is not enrolled, no Gate token is
 issued, and no production artifact is activated. `approval.Unsupported`
-remains the only production adapter.
+remains the only production adapter. Gate 1A and Gate 1B are **NOT PASSED**.
 
 Developer ID identity, Team ID, bundle identifiers, and build number establish
 publisher and release identity, but they do not distinguish a Gate-tested
@@ -116,14 +116,16 @@ The descriptor fields are:
 11. `outer_peer_requirement_source_sha256`
 12. `helper_peer_requirement_source_sha256`
 13. `helper_profile_raw_sha256`
-14. `helper_profile_signer_policy_sha256`
-15. `helper_profile_cms_evidence_sha256`
-16. `outer_code_validation_evidence_sha256`
-17. `helper_code_validation_evidence_sha256`
-18. `app_payload_archive_sha256`
-19. `notary_evidence_sha256`
-20. `staple_evidence_sha256`
-21. `created_at`, UTC RFC 3339 whole seconds
+14. `helper_profile_expires_at`, UTC RFC 3339 whole seconds copied from the
+    verified profile semantic object
+15. `helper_profile_signer_policy_sha256`
+16. `helper_profile_cms_evidence_sha256`
+17. `outer_code_validation_evidence_sha256`
+18. `helper_code_validation_evidence_sha256`
+19. `app_payload_archive_sha256`
+20. `notary_evidence_sha256`
+21. `staple_evidence_sha256`
+22. `created_at`, UTC RFC 3339 whole seconds
 
 The structured arrays have no extension points. `architectures` has the order
 above. `code_slices` entries are ordered first by role `outer`, `helper`, then
@@ -141,6 +143,14 @@ by the descriptor architecture order. Every entry has these fields in order:
    algorithm number
 9. `entitlements_semantic_sha256`
 10. `actual_designated_requirement_data_sha256`
+
+The launchd job label is not an additional caller-selected descriptor field:
+it is the protocol constant equal to `helper_identifier`. Static validation
+requires the signed app's packaged service declaration to register exactly one
+per-user launchd job for that label and one fixed endpoint, with no alternate
+server mode, second label/listener, or directly spawnable server entry. Runtime
+evidence binds the one launchd-owned helper PID and endpoint to the descriptor's
+helper code slice before authority traffic.
 
 Each `cdhashes` entry contains `digest_algorithm` as a JSON integer in
 `1..255` and `value` as exactly 40 lowercase hexadecimal characters encoding
@@ -174,6 +184,92 @@ The descriptor is created only after signing nested code first, signing the
 outer app last, notarization, ticket stapling, and final signature validation.
 Adding a descriptor inside the app afterward would change its resource seal.
 It therefore remains detached.
+
+`helper_profile_expires_at` must equal the profile-semantic `expires_at`
+recovered from the CMS-validated embedded profile. There is no grace period,
+clock-skew extension, cached-success window, or online refresh. Descriptor
+creation, each E1/E2/smoke/post-grant token issuance and observation, activation
+grant signing, publication-envelope signing, remote publication verification,
+installation validation, helper launch, peer authentication, confirmation,
+coordinator acquisition, registry proposal signing, registry final signing,
+registry commit, permit issuance, and the final pre-send fence all
+require their trusted current UTC instant to be strictly earlier than
+this value. A stage that begins before expiry but reaches any listed boundary
+at or after expiry fails closed; prior Gate evidence cannot authorize a later
+expired install or apply. Replacing the profile changes signed code and starts
+again from the app-only archive and descriptor at E1.
+Trusted current time is sampled from the host realtime clock at each boundary,
+compared as an instant before truncation or display formatting, and is never
+accepted from argv, environment, plan, profile, server response, cached prior
+check, or Gate fixture. An unavailable or unrepresentable clock result fails
+the current operation; administrator/OS clock rollback or compromise remains
+outside this local verifier's claim.
+
+The conformance fixture set names the following complete boundary IDs; this is
+a closed list for the profile-expiry claim:
+
+| Boundary ID | `.just-before` | `.equal` | `.after` | `.expiry-between-checks` | Side effect forbidden by each denial |
+| --- | --- | --- | --- | --- | --- |
+| `profile-expiry.descriptor-create` | accept | deny | deny | deny after CMS parse | descriptor canonicalization/signing input acceptance |
+| `profile-expiry.gate-e1-token-issue` | accept | deny | deny | deny after descriptor acceptance | E1 token signature |
+| `profile-expiry.gate-e1-observation` | accept | deny | deny | deny after token acceptance | next Gate observation |
+| `profile-expiry.gate-e2-token-issue` | accept | deny | deny | deny after E1 evidence validation | E2 token signature |
+| `profile-expiry.gate-e2-observation` | accept | deny | deny | deny after token acceptance | next Gate observation |
+| `profile-expiry.smoke-token-issue` | accept | deny | deny | deny after provisional validation | smoke token signature |
+| `profile-expiry.smoke-observation` | accept | deny | deny | deny after token acceptance | next smoke observation |
+| `profile-expiry.post-grant-token-issue` | accept | deny | deny | deny after activation-grant validation | post-grant token signature |
+| `profile-expiry.post-grant-observation` | accept | deny | deny | deny after token acceptance | next post-grant observation |
+| `profile-expiry.activation-grant-sign` | accept | deny | deny | deny after smoke evidence validation | activation-grant signature |
+| `profile-expiry.publication-envelope-sign` | accept | deny | deny | deny after post-grant evidence validation | publication-envelope signature |
+| `profile-expiry.publication-remote-verify` | accept | deny | deny | deny after envelope validation | release eligibility/publication continuation |
+| `profile-expiry.installation-validate` | accept | deny | deny | deny after archive authentication | installation acceptance or link creation |
+| `profile-expiry.helper-launch` | accept | deny | deny | deny after installation validation | helper session establishment |
+| `profile-expiry.peer-authenticate` | accept | deny | deny | deny after helper launch | peer session authentication or authority read |
+| `profile-expiry.mutation-confirm` | accept | deny | deny | deny after peer authentication | user-presence request or signed receipt |
+| `profile-expiry.coordinator-acquire` | accept | deny | deny | deny after confirmation validation | coordinator active add |
+| `profile-expiry.registry-proposal-sign` | accept | deny | deny | deny after leased ledger/candidate validation | proposal signing lookup or signature |
+| `profile-expiry.registry-final-sign` | accept | deny | deny | deny after accepted proposal validation | final registry signing lookup or signature |
+| `profile-expiry.registry-commit` | accept | deny | deny | deny after final signature validation | registry revision add |
+| `profile-expiry.coordinator-permit` | accept | deny | deny | deny after `in_flight` CAS | permit add |
+| `profile-expiry.mutation-pre-send` | accept | deny | deny | deny after permit add | socket creation or mutating request byte |
+
+Every boundary ID has four mandatory vectors, with no sampled-time tolerance:
+`.just-before` supplies a trusted instant exactly one nanosecond before expiry
+and must accept that boundary; `.equal` supplies the expiry instant and must
+reject with reason `HELPER_PROFILE_EXPIRED`; `.after` supplies one nanosecond
+after expiry and must reject with the same reason; `.expiry-between-checks`
+lets the immediately preceding named check complete one nanosecond before
+expiry, then samples this boundary exactly at expiry and must reject before the
+side effect in the table. For descriptor creation, the preceding check is CMS
+profile parsing. For E1 issue it is descriptor acceptance. The final peer-auth
+vector specifically proves a helper launched just before expiry cannot
+authenticate a peer at equality. The coordinator-permit and mutation-pre-send
+vectors prove that an acquired lease and existing permit respectively cannot
+extend authority. The registry-sign/commit vectors prove the same under a
+registry lease after proposal construction. All 88 vector IDs are the boundary
+ID plus one of those four
+suffixes, and the fixture manifest must contain exactly that Cartesian product.
+Missing, duplicate, differently rounded, reordered, cached-time, or
+caller-controlled-time variants fail both language implementations and every
+Gate plan that relies on the expiry claim.
+
+The only post-expiry runtime exception is a recovery-only launch of the exact
+launchd-managed helper and recovery-only authentication of the exact CLI. It
+is accepted only to perform bounded startup/status classification under the
+serialized authority-executor fence. If no unresolved active record exists,
+it returns bounded `authority_status=clear` with the expired profile field and
+closes without another operation.
+Trusted recovery proceeds only when classification finds one unresolved active
+record for the same descriptor and retained evidence. That session may perform
+only `mutation authority status`, trusted-UI recovery
+authorization, terminal journal v2 CAS, exact-read-first closed-record
+reconciliation, and executor-guarded byte-equal active cleanup. It cannot
+enter an ordinary helper session, confirmation, registry ceremony,
+coordinator acquisition, signing lookup, permit, transport construction, or
+send. The ordinary `profile-expiry.helper-launch` and
+`profile-expiry.peer-authenticate` vectors therefore still deny at equality;
+separate recovery negatives prove that an expired session is accepted only in
+this cleanup subset and is closed after classification/cleanup.
 
 ### Code, entitlement, profile, notary, and staple evidence
 
@@ -676,16 +772,18 @@ An assertion-set manifest has fields `schema_version` integer `1`,
 `assertion_id`, `evaluator`, and `expected_sha256`, in that order. Evaluator is
 exactly `json_envelope`, `exit_code`, `filesystem_state`, `keychain_state`,
 `code_identity`, `network_transcript`, `byte_equality`, `ui_observation`, or
-`cleanup_state`; its expected object is one canonical fixture in the fixture
-set. The verifier, not the plan, implements these evaluators.
+`cleanup_state`, or `concurrency_trace`; its expected object is one canonical
+fixture in the fixture set. The verifier, not the plan, implements these
+evaluators.
 
 A transcript-set manifest has fields `schema_version` integer `1`,
 `manifest_type` exactly `transcript_set`, and `entries`. Each entry has
 `transcript_id`, `transcript_kind`, `maximum_bytes`, and `redaction_policy`, in
 that order. Kind is exactly `stdout`, `stderr`, `ipc`, `network`, `ui`, or
-`security_framework`; maximum is `1..8,388,608`; redaction policy is exactly
-`reject_secret_then_hash`. A detected credential, token, private key, or
-unredacted secret fails the run instead of being replaced.
+`security_framework`, or `concurrency_trace`; maximum is `1..8,388,608`;
+redaction policy is exactly `reject_secret_then_hash`. A detected credential,
+token, private key, or unredacted secret fails the run instead of being
+replaced.
 
 A command-contract manifest is compact canonical JSON capped at 131,072 bytes.
 Its fields are `schema_version` integer `1`, `manifest_type` exactly
@@ -717,12 +815,19 @@ unregistered digest, empty step, changed command field, or validly hashed but
 uncompiled manifest fails before token acceptance. Changing a contract requires
 a protocol revision and new Gate.
 
-All IDs match `^[a-z0-9][a-z0-9._-]{0,127}$`, are strictly increasing within
-each manifest, and are globally unique by manifest type. A set digest is
-SHA-256 over its exact canonical bytes. The plan validator loads each manifest
-by digest, rejects missing/extra entries, and requires every step reference to
-resolve with the declared kind and evaluator. An unreferenced manifest entry or
-a referenced ID absent from the plan is invalid.
+All IDs match `^[a-z0-9][a-z0-9._-]{0,127}$` and are globally unique by
+manifest type. Only set-like fixture, assertion, and transcript manifest entry
+arrays are sorted by increasing unsigned UTF-8 ID bytes and must already be in
+that order on input. Order-bearing arrays are never sorted: command-contract
+entries, plan `cases`, case `steps`, step `argv`, `assertion_ids`,
+`transcript_ids`, observations, evidence scopes, and concurrency trace events
+must occur in the exact normative order declared below. A producer cannot use
+map iteration or byte sorting to replace that order. A set digest is SHA-256
+over the exact canonical bytes of the explicitly set-like manifest. The plan
+validator loads each manifest by digest, rejects missing/extra entries, and
+requires every step reference to resolve with the declared kind and evaluator.
+An unreferenced manifest entry or a referenced ID absent from the plan is
+invalid.
 
 There are no optional fields, user extensions, ignored metadata, default
 steps, or wildcard case IDs. `evidence_scope` is exactly `exact_artifact` or
@@ -753,6 +858,16 @@ exact Gate 1A case order is:
 14. `gate1a.confirm.untrusted-display`
 15. `gate1a.network.hard-deny`
 16. `gate1a.authority.fail-closed-matrix`
+17. `gate1a.install.first-install-validation`
+18. `gate1a.install.identical-reinstall`
+19. `gate1a.install.rollback-and-replacement-deny`
+20. `gate1a.install.uninstall-cleanup`
+21. `gate1a.migration.cancel`
+22. `gate1a.migration.interruption`
+23. `gate1a.migration.partial-failure`
+
+This closed Gate 1A list contains exactly 23 cases; the compiled case table
+below must contain the same IDs once each in this exact order.
 
 The exact Gate 1B case order is:
 
@@ -762,10 +877,28 @@ The exact Gate 1B case order is:
 4. `gate1b.issue-create.timeout-reconcile-absent`
 5. `gate1b.issue-create.timeout-reconcile-conflict`
 6. `gate1b.issue-create.one-shot-no-retry`
-7. `gate1b.capability.update-comment-other-deny`
-8. `gate1b.target.origin-account-project-deny`
-9. `gate1b.receipt.context-and-replay-deny`
-10. `gate1b.authority.fail-closed-matrix`
+7. `gate1b.coordinator.apply-vs-rotate-linearization`
+8. `gate1b.coordinator.apply-vs-revoke-linearization`
+9. `gate1b.coordinator.apply-vs-recovery-linearization`
+10. `gate1b.coordinator.invalid-enrollment-contention`
+11. `gate1b.coordinator.crash-before-permit`
+12. `gate1b.coordinator.crash-after-permit-before-send`
+13. `gate1b.coordinator.crash-after-send-before-outcome`
+14. `gate1b.coordinator.crash-after-durable-outcome-before-closed-add`
+15. `gate1b.coordinator.closed-add-ambiguity`
+16. `gate1b.coordinator.crash-after-closed-before-active-delete`
+17. `gate1b.coordinator.active-delete-ambiguity`
+18. `gate1b.coordinator.active-cleanup-aba-deny`
+19. `gate1b.coordinator.restart-fence-and-close-recovery`
+20. `gate1b.authority.status-recover-contract`
+21. `gate1b.journal.v1-v2-migration-and-quarantine`
+22. `gate1b.capability.update-comment-other-deny`
+23. `gate1b.target.origin-account-project-deny`
+24. `gate1b.receipt.context-and-replay-deny`
+25. `gate1b.authority.fail-closed-matrix`
+
+This closed Gate 1B list contains exactly 25 cases; the compiled case table
+below must contain the same IDs once each in this exact order.
 
 For activation smoke, `confirm_only` has exactly these cases:
 
@@ -805,22 +938,58 @@ directly appending it to the case ID. Every step always records `stdout` and
 
 | Gate 1A case | Exact step IDs | Assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
-| `gate1a.artifact.static-validation` | `validate` | `.primary`, `.all-architectures` | `security_framework` |
+| `gate1a.artifact.static-validation` | `validate` | `.primary`, `.all-architectures`, `.launchd-single-helper-server` | `security_framework` |
 | `gate1a.artifact.runtime-peer-validation` | `launch`, `handshake`, `launch-negative-outer`, `reject-negative-outer`, `launch-negative-helper`, `reject-negative-helper` | `.primary`, `.mixed-cli-peer-deny`, `.mixed-helper-peer-deny`, `.negative-peer-no-authority` | `ipc`, `security_framework` |
 | `gate1a.protocol.positive-vectors` | `verify` | `.primary` | `ipc` |
 | `gate1a.protocol.negative-vectors` | `verify` | `.primary`, `.all-negatives-rejected` | `ipc` |
-| `gate1a.registry.enroll-rotate-revoke-recover` | `enroll`, `rotate`, `revoke`, `recover` | `.primary`, `.final-state` | `ipc`, `ui`, `security_framework` |
+| `gate1a.registry.enroll-rotate-revoke-recover` | `enroll`, `rotate`, `revoke`, `recover` | `.primary`, `.final-state`, `.coordinator-serialized`, `.all-leases-closed` | `ipc`, `ui`, `security_framework` |
 | `gate1a.registry.corruption-deny` | `seed`, `corrupt`, `parse-deny` | `.primary`, `.no-transition` | `ipc`, `security_framework` |
 | `gate1a.registry.fork-gap-duplicate-deny` | `seed`, `parse-fork`, `parse-gap`, `parse-duplicate` | `.primary`, `.all-malformed-denied` | `ipc`, `security_framework` |
 | `gate1a.registry.crash-ambiguous-secitemadd` | `seed`, `arm-crash`, `secitemadd`, `reconcile` | `.primary`, `.one-shot`, `.ambiguous-reconciled` | `ipc`, `security_framework` |
-| `gate1a.registry.orphan-cleanup` | `seed-orphan`, `cleanup`, `verify` | `.primary`, `.only-orphan-removed` | `ipc`, `security_framework` |
+| `gate1a.registry.orphan-cleanup` | `seed-orphan`, `cleanup`, `verify` | `.primary`, `.only-orphan-removed`, `.delete-ambiguity-code-exit1` | `ipc`, `security_framework` |
 | `gate1a.registry.active-key-loss` | `seed`, `remove-active`, `recover`, `verify` | `.primary`, `.recovery-required`, `.final-state` | `ipc`, `ui`, `security_framework` |
 | `gate1a.confirm.ordinary-success` | `prepare`, `confirm` | `.primary`, `.receipt-context` | `ipc`, `ui` |
 | `gate1a.confirm.cancel-and-expire` | `prepare`, `cancel`, `expire` | `.primary`, `.no-confirmed-plan` | `ipc`, `ui` |
 | `gate1a.confirm.restart-and-replay-deny` | `prepare`, `confirm`, `restart`, `replay` | `.primary`, `.replay-denied` | `ipc`, `ui` |
 | `gate1a.confirm.untrusted-display` | `prepare`, `confirm` | `.primary`, `.bytes-inert` | `ipc`, `ui` |
 | `gate1a.network.hard-deny` | `confirm`, `audit` | `.primary`, `.zero-network-bytes` | `network`, `ipc`, `ui` |
-| `gate1a.authority.fail-closed-matrix` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `ipc`, `security_framework` |
+| `gate1a.authority.fail-closed-matrix` | `verify-matrix` | `.primary`, `.all-negatives-rejected`, `.profile-expiry-code-exit12` | `ipc`, `security_framework` |
+| `gate1a.install.first-install-validation` | `stage`, `install`, `validate`, `launch` | `.primary`, `.exact-tree`, `.profile-valid`, `.ordinary-launch` | `ipc`, `security_framework` |
+| `gate1a.install.identical-reinstall` | `install`, `reinstall-identical`, `validate`, `launch` | `.primary`, `.byte-identical`, `.keychain-preserved`, `.ordinary-launch` | `ipc`, `security_framework` |
+| `gate1a.install.rollback-and-replacement-deny` | `install`, `attempt-rollback`, `replace-cli`, `replace-helper`, `validate-denials` | `.primary`, `.rollback-denied`, `.cli-replacement-denied`, `.helper-replacement-denied`, `.zero-authority` | `ipc`, `security_framework` |
+| `gate1a.install.uninstall-cleanup` | `install`, `seed-gate-state`, `uninstall`, `audit` | `.primary`, `.app-removed`, `.no-silent-keychain-delete`, `.no-post-uninstall-authority` | `ipc`, `security_framework` |
+| `gate1a.migration.cancel` | `seed-legacy-sentinel`, `start-migration`, `cancel-presence`, `verify-source`, `verify-destination-absent` | `.primary`, `.source-intact`, `.destination-absent`, `.no-secret-transcript` | `ipc`, `ui`, `security_framework` |
+| `gate1a.migration.interruption` | `seed-legacy-sentinel`, `start-migration`, `interrupt-before-commit`, `restart`, `reconcile`, `verify` | `.primary`, `.source-intact-or-exact-destination`, `.no-duplicate`, `.no-secret-transcript` | `ipc`, `ui`, `security_framework` |
+| `gate1a.migration.partial-failure` | `seed-legacy-sentinel`, `arm-destination-write-failure`, `migrate`, `reconcile`, `verify` | `.primary`, `.source-intact`, `.partial-destination-ineligible`, `.no-secret-transcript` | `ipc`, `ui`, `security_framework` |
+
+The seven install/migration cases above are a closed Gate 1A set, not examples.
+They run on the clean-reset exact-artifact host in E1 and E2 and use the same
+descriptor-bound archive retained before descriptor creation. First install
+must reproduce the descriptor's installation tree and profile expiry;
+identical reinstall must leave the exact code bytes and every preexisting
+Keychain item unchanged. Rollback and either-component replacement must fail
+peer/artifact validation before authority access. Uninstall must remove the app
+and link while leaving approval, credential, registry, coordinator, and journal
+state untouched and unusable until an equal authorized artifact is installed.
+
+Migration uses a Gate-owned non-secret sentinel value generated from a fixed
+fixture, never a real credential. It drives the ordinary existing
+`auth migrate-keychain --profile gate-migration --yes` command through direct
+spawn; `--yes` authorizes only this explicit Gate fixture and is not an
+installer hook. Cancellation occurs at the native user-presence prompt before
+any destination commit. Interruption terminates the process after destination
+staging but before source deletion/commit. Partial failure injects exactly one
+destination `SecItemAdd` failure through the authenticated Gate fixture
+boundary. In all three cases the source remains intact unless an exact,
+readable, byte-equal destination has durably committed; partial destination
+state is ineligible, never selected as a credential, and is reconciled without
+repeating an ambiguous add. Transcripts contain only item identifiers,
+OSStatus/reason classes, digests, and bounded projections—not `kSecValueData`
+or the sentinel bytes. Cancellation, interruption at every durable boundary,
+source-read failure, destination-add success/error/ambiguity, exact-winner,
+different-winner, source-delete success/error/ambiguity, restart, and cleanup
+partial failure are mandatory schedule fixtures for these cases. Missing any
+one is a Gate failure.
 
 | Gate 1B case | Exact step IDs | Assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
@@ -830,6 +999,21 @@ directly appending it to the case ID. Every step always records `stdout` and
 | `gate1b.issue-create.timeout-reconcile-absent` | `prepare`, `confirm`, `apply-timeout`, `reconcile` | `.primary`, `.zero-create` | `network`, `ipc`, `ui` |
 | `gate1b.issue-create.timeout-reconcile-conflict` | `prepare`, `confirm`, `apply-timeout`, `reconcile` | `.primary`, `.conflict-closed` | `network`, `ipc`, `ui` |
 | `gate1b.issue-create.one-shot-no-retry` | `prepare`, `confirm`, `apply`, `audit` | `.primary`, `.one-mutation-dispatch` | `network`, `ipc`, `ui` |
+| `gate1b.coordinator.apply-vs-rotate-linearization` | `apply-first`, `rotate-after-close`, `reset`, `rotate-first`, `apply-after-rotation` | `.primary`, `.pre-read-registry-intent-bound`, `.candidate-validated-under-lease`, `.apply-first-serialized`, `.rotation-first-cancels`, `.zero-overlap` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.apply-vs-revoke-linearization` | `apply-first`, `revoke-after-close`, `reset`, `revoke-first`, `apply-after-revocation` | `.primary`, `.pre-read-registry-intent-bound`, `.candidate-validated-under-lease`, `.apply-first-serialized`, `.revocation-first-cancels`, `.zero-overlap` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.apply-vs-recovery-linearization` | `apply-first`, `recover-after-close`, `reset`, `recover-first`, `apply-after-recovery` | `.primary`, `.pre-read-registry-intent-bound`, `.candidate-validated-under-lease`, `.apply-first-serialized`, `.recovery-first-cancels`, `.zero-overlap` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.invalid-enrollment-contention` | `acquire-apply`, `attempt-enrollment`, `verify-busy-before-ledger-read`, `close-apply` | `.primary`, `.one-losing-active-add`, `.busy-before-enrollment-validation`, `.zero-later-authority-read-or-write`, `.closed-and-fenced`, `.busy-code-exit10` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.crash-before-permit` | `prepare`, `confirm`, `acquire`, `crash-before-in-flight`, `recover-before-in-flight`, `reset`, `prepare-again`, `confirm-again`, `acquire-again`, `mark-in-flight`, `crash-before-permit`, `recover-after-in-flight`, `audit` | `.primary`, `.both-pre-permit-states-failed_before_mutation`, `.both-receipts-burned`, `.zero-mutation-dispatch`, `.closed-and-fenced`, `.pre-permit-code-exit13` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.crash-after-permit-before-send` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `crash`, `recover`, `reconcile`, `audit` | `.primary`, `.ambiguous-no-retry`, `.zero-mutation-dispatch`, `.closed-and-fenced` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.crash-after-send-before-outcome` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `send`, `crash`, `recover`, `reconcile`, `audit` | `.primary`, `.ambiguous-no-retry`, `.at-most-one-created-issue`, `.closed-and-fenced` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.crash-after-durable-outcome-before-closed-add` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `send`, `record-outcome-and-normal-close-bytes`, `crash`, `recover-close`, `audit` | `.primary`, `.outcome-and-normal-close-atomic`, `.new-recovery-actor-bound`, `.no-retry`, `.closed-and-fenced`, `.at-most-one-created-issue` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.closed-add-ambiguity` | `run-equal-winner`, `reset`, `run-not-found-then-recover`, `reset-again`, `run-conflicting-winner`, `audit` | `.primary`, `.read-first`, `.equal-reconciled-success`, `.not-found-code-exit11-then-one-identical-add`, `.conflict-code-exit1`, `.no-blind-add`, `.no-resend` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.crash-after-closed-before-active-delete` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `send`, `record-outcome`, `add-closed`, `crash`, `recover-delete`, `audit` | `.primary`, `.closed-fence-survives`, `.no-resend`, `.single-active-delete`, `.at-most-one-created-issue` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.active-delete-ambiguity` | `run-not-found`, `reset`, `run-equal-active-then-recover`, `reset-again`, `run-different-active`, `reset-third`, `run-malformed-active`, `audit` | `.primary`, `.read-first`, `.not-found-reconciled-success`, `.equal-code-exit11-then-one-matching-delete`, `.different-active-stale-noop`, `.malformed-code-exit1`, `.no-blind-delete`, `.closed-fence-survives`, `.no-resend` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.active-cleanup-aba-deny` | `seed-closed-active`, `start-recovery`, `pause-after-equal-read`, `attempt-competing-acquisition`, `delete-active`, `release-guard`, `acquire-competitor`, `close-competitor`, `audit` | `.primary`, `.single-launchd-helper`, `.executor-guard-held`, `.competitor-zero-keychain-before-release`, `.no-aba-replacement`, `.post-release-acquisition`, `.fixed-active-lock` | `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.restart-fence-and-close-recovery` | `acquire`, `restart`, `stale-permit`, `recover-close`, `reacquire`, `close`, `audit` | `.primary`, `.new-actor-authenticated`, `.old-token-session-historical`, `.stale-session-denied`, `.single-active`, `.recovery-close-binds-actor-session`, `.durable-close-before-delete`, `.no-retry`, `.recovery-code-exit11` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.authority.status-recover-contract` | `status-clear`, `status-expired-clear`, `seed-unresolved`, `status-recovery`, `reject-flags`, `recover-cancel`, `recover-confirm`, `seed-expired-unresolved`, `recover-expired-cleanup`, `status-after` | `.primary`, `.required-invocation-meta`, `.exact-json-v1-shapes`, `.exact-exits-10-through-13-and-corruption-exit1`, `.explicit-profile`, `.closed-inherited-flags`, `.no-plan-id-or-force-clear`, `.expired-clear-status-closes`, `.cancel-no-change`, `.fresh-presence`, `.new-actor-session-bound`, `.expired-recovery-only`, `.recovery-only-capabilities`, `.zero-network-bytes` | `network`, `ipc`, `ui`, `security_framework` |
+| `gate1b.journal.v1-v2-migration-and-quarantine` | `seed-v1-prepared`, `migrate-prepared`, `seed-v1-canceled`, `quarantine-canceled`, `seed-v1-expired`, `quarantine-expired`, `seed-v1-failed_before_mutation`, `quarantine-failed_before_mutation`, `seed-v1-confirmed`, `quarantine-confirmed`, `seed-v1-in-flight`, `quarantine-in-flight`, `seed-v1-remote-state`, `quarantine-remote-state`, `interrupt-before-rename`, `interrupt-after-rename`, `audit` | `.primary`, `.exact-v2-schema`, `.prepared-only-migration-atomic`, `.all-other-valid-v1-byte-preserved`, `.failed_before_mutation-quarantined`, `.quarantine-code-exit1`, `.ambiguous-write-readback`, `.no-authority-from-v1` | `ipc` |
 | `gate1b.capability.update-comment-other-deny` | `prepare-negatives`, `apply-negatives` | `.primary`, `.zero-mutation-dispatch` | `network`, `ipc` |
 | `gate1b.target.origin-account-project-deny` | `prepare-negatives`, `apply-negatives` | `.primary`, `.zero-target-bytes` | `network`, `ipc` |
 | `gate1b.receipt.context-and-replay-deny` | `prepare`, `confirm`, `copy-context`, `replay` | `.primary`, `.zero-mutation-dispatch` | `network`, `ipc`, `ui` |
@@ -915,6 +1099,166 @@ and substituted as one argv element. Execution uses direct process spawning
 with the declared argv, closed stdin, empty environment, no shell, no current-
 directory inheritance, and an independent hard timeout. The runner rejects an
 undeclared file access, transcript, assertion, network origin, or subprocess.
+
+### Deterministic two-party coordinator schedules
+
+Every Gate 1B coordinator case uses a content-addressed schedule fixture; no
+sleep, scheduler luck, polling race, shell, environment variable, inherited
+working directory, or caller-selected event may determine its ordering. The
+runner creates two unidirectional anonymous pipes per child before direct
+spawn, maps only the child release-read end to file descriptor 3 and its
+arrival-write end to descriptor 4 with `posix_spawn_file_actions`, closes every
+other inherited descriptor, and retains the complementary ends. These four
+ends are the only extra descriptors admitted by the sandbox for such a step.
+The exact artifact recognizes them only over the already authenticated Gate 1B
+runner session bound by E1/E2; an ordinary production invocation, Gate 1A,
+smoke, or post-grant token cannot enter a barrier. A crash phase directly
+spawns a recovery child only after the crashed child has exited; there are
+never more than two live candidate children in one phase.
+
+Each pipe message is exactly 16 bytes: bytes 0..7 are ASCII `YTABARR` followed
+by NUL; byte 8 is version `0x01`; byte 9 is kind `0x01` for runner release or
+`0x02` for child arrival; byte 10 is actor `0x01` apply, `0x02` registry, or
+`0x03` recovery; byte 11 is the event code below; bytes 12..15 are the unsigned
+big-endian sequence number starting at one. No short frame, trailing byte,
+unknown value, repeated/out-of-order sequence, arrival before release, or
+arrival with fields unequal to its release is accepted. The runner releases
+one event and waits for that exact arrival within the step timeout before
+releasing the next. For `process.crash`, arrival means the child reached the
+declared crash boundary; the runner then sends `SIGKILL` to that exact PID and
+requires `waitpid` to report that signal before releasing `recovery.start`.
+
+| Code | Event | Required durable observation after arrival |
+| ---: | --- | --- |
+| `0x01` | `apply.acquire` | exact apply active exists; no permit or close exists |
+| `0x02` | `coordinator.acquire-busy` | exactly one losing active `SecItemAdd` returns duplicate/`APPLY_COORDINATOR_BUSY`; zero later ledger/key/journal/permit/closed read or state write follows |
+| `0x03` | `apply.in-flight` | journal is durably `in_flight`; no permit exists |
+| `0x04` | `apply.permit` | exactly one equal permit exists |
+| `0x05` | `apply.send` | exactly one mutating request begins; no second dispatch exists |
+| `0x06` | `apply.outcome` | one terminal/non-replayable journal outcome is durable |
+| `0x07` | `coordinator.close` | exactly one equal closed record exists |
+| `0x08` | `coordinator.delete-active` | active is absent after the one delete or is classified ambiguous |
+| `0x09` | `registry.acquire` | exact registry-commit active binds pre-read `registry_intent_sha256`; zero ledger/proposal work preceded it |
+| `0x0a` | `registry.commit` | candidate matches that intent under the same lease and exactly one revision winner or deterministic absence exists |
+| `0x0b` | `registry.close` | exact registry closed record exists |
+| `0x0c` | `registry.delete-active` | active is absent after the one delete |
+| `0x0d` | `apply.cancel-stale` | no permit/send; journal and lease are terminal before close |
+| `0x0e` | `enrollment.busy-before-ledger` | invalid enrollment loses acquisition before ledger validation or mutation |
+| `0x0f` | `process.crash` | selected child reached the boundary; runner then proves its `SIGKILL` exit |
+| `0x10` | `recovery.start` | new CLI audit token/helper session pass exact code-identity, descriptor, retained-evidence, trusted-UI, and recovery-fence checks; old token/session are historical; zero sign/acquire/permit/send/commit |
+| `0x11` | `coordinator.close-ambiguous-return` | one close add occurred; exact read classifies equal, absent, or conflict |
+| `0x12` | `coordinator.delete-ambiguous-return` | one active delete occurred; exact read classifies not-found, equal, or conflict |
+| `0x13` | `stale.send-probe` | recovery actor presents the stale permit/session tuple and receives a pre-network denial |
+| `0x14` | `helper.restart` | old exact helper connection is invalidated; a newly authenticated exact helper has a different session ID and zero send |
+| `0x15` | `coordinator.stale-active-noop` | active contains a different well-formed newer lease; recovery succeeds without delete, close, permit, or send |
+| `0x16` | `coordinator.active-equality-read` | under the held authority-executor guard, exact active bytes equal the retained recovery bytes and no delete has begun |
+| `0x17` | `coordinator.acquisition-guard-blocked` | a competing authenticated acquisition request is queued between equality read and delete; it performs zero `SecItemAdd`, coordinator reads, or state changes |
+| `0x18` | `authority.guard-release` | byte-equal active cleanup and its reconciliation are complete, old active is absent, recovery close is durable, and the executor guard is released exactly once |
+
+The event registry contains exactly 24 codes, `0x01` through `0x18`, without
+aliases or extension slots in this protocol version.
+
+`A`, `R`, and `H` below mean actor bytes apply, registry, and recovery. Every
+arrow is one release/arrival pair in the shown order. Rotate, revoke, and
+recovery use the same two schedules with the transition fixed by their case ID:
+
+The `reset` and `reset-again` steps in multi-phase ambiguity cases are runner-
+controlled reversions to the case's clean disposable VM snapshot after every
+actor exits. They are not candidate commands, do not delete a production
+Keychain item, reuse no receipt/lease/target data, and revalidate the same
+descriptor and artifact before the next direct spawn.
+
+| Case/phase | Exact released event sequence |
+| --- | --- |
+| apply-first rotate/revoke/recovery | `A:apply.acquire -> R:coordinator.acquire-busy -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-active -> R:registry.acquire -> R:registry.commit -> R:registry.close -> R:registry.delete-active` |
+| registry-first rotate/revoke/recovery | `R:registry.acquire -> A:coordinator.acquire-busy -> R:registry.commit -> R:registry.close -> R:registry.delete-active -> A:apply.acquire -> A:apply.cancel-stale -> A:coordinator.close -> A:coordinator.delete-active` |
+| invalid enrollment contention | `A:apply.acquire -> R:enrollment.busy-before-ledger -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-active` |
+| crash while confirmed after acquire | `A:apply.acquire -> A:process.crash -> H:recovery.start -> H:coordinator.close -> H:coordinator.delete-active` |
+| crash while in-flight before permit | `A:apply.acquire -> A:apply.in-flight -> A:process.crash -> H:recovery.start -> H:coordinator.close -> H:coordinator.delete-active` |
+| crash after permit before send | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:process.crash -> H:recovery.start -> H:apply.outcome -> H:coordinator.close -> H:coordinator.delete-active` |
+| crash after send before outcome | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:process.crash -> H:recovery.start -> H:apply.outcome -> H:coordinator.close -> H:coordinator.delete-active` |
+| crash after durable outcome before closed add | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:process.crash -> H:recovery.start -> H:coordinator.close -> H:coordinator.delete-active` |
+| closed-add ambiguity / equal winner | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close-ambiguous-return -> A:coordinator.delete-active` |
+| closed-add ambiguity / not found | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close-ambiguous-return -> H:recovery.start -> H:coordinator.close -> H:coordinator.delete-active` |
+| closed-add ambiguity / conflicting winner | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close-ambiguous-return -> H:recovery.start` |
+| crash after closed before active delete | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:process.crash -> H:recovery.start -> H:coordinator.delete-active` |
+| active-delete ambiguity / not found | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-ambiguous-return` |
+| active-delete ambiguity / equal active | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-ambiguous-return -> H:recovery.start -> H:coordinator.delete-active` |
+| active-delete ambiguity / different active | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-ambiguous-return -> H:recovery.start -> H:coordinator.stale-active-noop` |
+| active-delete ambiguity / malformed active | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-ambiguous-return -> H:recovery.start` |
+| active-cleanup ABA denial | `H:recovery.start -> H:coordinator.active-equality-read -> R:coordinator.acquisition-guard-blocked -> H:coordinator.delete-active -> H:authority.guard-release -> R:registry.acquire -> R:registry.commit -> R:registry.close -> R:registry.delete-active` |
+| restart fence and close recovery | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:helper.restart -> H:recovery.start -> H:apply.outcome -> H:coordinator.close -> H:coordinator.delete-active -> H:stale.send-probe` |
+
+This schedule table contains exactly 18 phases. Each Gate 1B coordinator case
+selects only its named phase or phases; an extra, missing, or reordered phase
+invalidates the plan digest.
+
+The schedule fixture is a compact canonical object capped at 32,768 bytes with
+fields, in order, `schema_version`, `schedule_type` exactly
+`gate1b_coordinator`, `case_id`, `phase_id`, `actors`, and `events`; every event
+contains `sequence`, `actor`, `event_code`, and `expected_state_sha256` in that
+order. `actors` is order-bearing by direct-spawn ordinal and every entry
+contains `actor`, `spawn_sequence`, `executable_role`, `executable_component`,
+`code_slice_sha256`, and `expected_termination` exactly `exit_zero`,
+`exit_nonzero`, or `crash_signal`; it names exactly the children required by
+the phase and no supervisor shell. Apply, registry, and recovery actors are
+separately direct-spawned outer-CLI processes; they connect to the same already
+validated exact helper. `code_slice_sha256` is SHA-256 of the matching compact
+canonical descriptor code-slice object. It is one ordinary fixture entry and its bytes are therefore covered by
+the Gate fixture-set digest; no digest is invented in this document. The
+runner emits one compact canonical `concurrency_trace` transcript with fields
+`schema_version`, `case_id`, `phase_id`, `schedule_fixture_sha256`,
+`runner_session_id`, `actor_processes`, and ordered `events`.
+`actor_processes` exactly equals the schedule's actor order. Each entry has
+`actor`, `spawn_sequence`, positive `pid`, connection-bound
+`audit_token_sha256`, `executable_sha256`, `ksec_code_info_unique`,
+`started_monotonic_ns`, `termination_kind`, and `exit_status` in that order;
+code identity must equal the schedule/descriptor and each actor's events must
+come from that one authenticated process. Each trace event contains
+`sequence`, `actor`, `event_code`, `release_monotonic_ns`,
+`arrival_monotonic_ns`, `pre_state_sha256`, `post_state_sha256`,
+`mutating_request_count`, and `mutating_request_sha256` in that order. Time is
+diagnostic only; the exact frame order and state hashes are authoritative.
+For comparison, the verifier projects every trace event to `sequence`,
+`actor`, `event_code`, and `expected_state_sha256` (the trace
+`post_state_sha256`) in that order; that canonical projected array must equal
+the schedule's `events` bytes exactly. Assertions also require every pre-state
+to equal the preceding post-state within a phase, the mutating count to remain zero before
+`apply.send` and never exceed one, no registry commit between `apply.in-flight`
+and `coordinator.close`, and no event from a crashed/stale actor except the
+explicit recovery-side stale-session rejection probe. The process assertion also requires exactly
+the scheduled child count, direct parent PID equal to the runner, no
+intermediate process, one unique PID/audit token per spawn ordinal, and the
+scheduled termination classification. Missing, extra, reordered, duplicated,
+or unacknowledged events or processes fail the case.
+
+For `active-cleanup ABA denial`, the registry child sends its authenticated
+acquisition request only after the recovery child has acknowledged
+`coordinator.active-equality-read`. The single helper's Gate-only executor
+instrumentation acknowledges `coordinator.acquisition-guard-blocked` when that
+request is queued behind the still-held guard, before any acquisition
+Keychain call. The runner then releases recovery's delete and guard-release
+events; only after the exact guard-release arrival may the queued registry
+request execute its one active add. The trace must show the old active digest
+until delete, absence at guard release, the new active digest only afterward,
+one helper PID throughout, and zero `SecItemAdd` or coordinator read from the
+competitor between the equality read and guard release. A replacement active,
+a second helper PID/listener, or an acquisition event before release fails the
+case.
+
+`helper.restart` is available only to the authenticated Gate 1B schedule. The
+apply child requests the exact helper's compiled terminate-at-boundary action,
+observes its XPC invalidation, and acknowledges only after the old helper PID
+has exited and launchd reports no running instance for the per-user job label.
+The runner then asks launchd to activate the normal signed helper service
+through its fixed service endpoint—never a shell, direct server spawn, second
+listener, or substitute binary—and the
+recovery child's authentication records the new PID, audit-token digest, code
+identity, and coordinator session in the IPC/Security.framework transcripts.
+The old and new code identities must equal the descriptor, while PID and
+session must differ; the new helper's serialized authority executor completes
+startup classification under its guard before ordinary work; no permit/send
+capability or in-process guard crosses that restart.
 
 The positive issue-create workflow contains three distinct ordered steps:
 `prepare`, `confirm`, then `apply`. `confirm` obtains `plan_id` only from the
@@ -1111,7 +1455,9 @@ digest referring to a different observation is invalid.
 
 Gate 1A observations include every approval-protocol, code-identity, Keychain,
 UI-presence, fail-closed, restart, and clean-host test. Gate 1B observations
-include its ordinary CLI live-write, ordering, fault, and reconciliation cases.
+include its ordinary CLI live-write, helper-owned coordinator, apply-versus-
+registry linearization, lease fencing, every pre/post-permit crash boundary,
+one-shot send, fault, and reconciliation cases.
 E2 contains the complete repeated observation set for its Gate ID. Missing,
 duplicated, reordered, or additional observations are a failure against the
 content-addressed Gate plan.
@@ -1704,6 +2050,9 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
   identity/code slice;
 - Gate 1A and Gate 1B per-architecture E1/E2 tokens, evidence indexes, and
   complete evidence-set manifests;
+- every exact Security.framework key/registry/coordinator dictionary
+  projection, coordinator active/permit/closed record, apply-first and
+  registry-first linearization, and pre/post-permit restart outcome;
 - code/entitlement, profile CMS, certificate-chain/policy, notary, and
   non-circular staple evidence wrappers, including exact tool find/version
   captures, retained output digests, and CMS-certificate multiset framing with
@@ -1735,6 +2084,10 @@ independently covers:
   actual designated requirement, certificate chain/policy,
   `SecStaticCodeCheckValidity` result, profile raw/CMS sequence, notarization,
   or staple evidence;
+- descriptor/profile expiry mismatch and the exact 88-vector Cartesian product
+  of all 22 named profile-expiry boundaries with just-before, equality, after,
+  and expiry-between-checks variants—including peer authentication—and exact
+  no-side-effect assertions;
 - raw-entitlement-present/dictionary-absent, dictionary-present/raw-absent,
   raw/dictionary semantic disagreement, unknown entitlement, and both values
   absent for a helper that requires its fixed entitlements;
@@ -1772,6 +2125,26 @@ independently covers:
 - Gate-token use on the production path, missing Gate 1A prerequisite for Gate
   1B, null/non-null Gate 1B evidence errors, capability widening, and
   `issue.update` / `comment.add` substitution;
+- missing, reordered, or additional Gate 1B coordinator cases/steps,
+  schedule fixture, barrier release/arrival, or concurrency-trace event;
+  sleep/timing-based orchestration; apply/registry or enrollment overlap; two
+  launchd helper instances/listeners; direct helper-server spawn; authority
+  Keychain access outside the single serialized executor; acquisition before
+  its guard or between active equality-read and delete; competitor Keychain
+  work before guard release; active ABA replacement; two active leases; permit before `in_flight`; send without or after a permit;
+  second permit/send; registry-first stale receipt; stale session/audit-token/
+  journal fence; durable-outcome downgrade; repeated ambiguous close add or
+  active delete; active deletion before durable close; restart resume; and any
+  post-permit automatic retry;
+- authority status/recover without explicit profile or required invocation
+  `meta`; any plan/lease/force selector, positional input, `--yes`, `--dry-run`,
+  `--fields`, raw output, stdin/environment override, or changed accepted-flag
+  semantics; authority corruption mapped anywhere but exit 1; and any future
+  authority exit outside 10 through 13;
+- migration of any valid v1 state other than `prepared`, especially
+  `failed_before_mutation`; mutation/deletion of quarantined source bytes;
+  missing quarantine marker attempt; or treating current fail-closed code as
+  proof that an unrepresentable v1 authority state is safe;
 - provisional-only or grant-only use, mismatched provisional/grant/context,
   two valid grants for one provisional context, peer disagreement on grant or
   final context, smoke-plan or post-grant-plan substitution, smoke receipt
@@ -1832,6 +2205,13 @@ invalidates prior E1/E2 evidence.
   protocol bytes. The approval registry records that same digest as
   `artifact_descriptor_sha256`; any mismatch or artifact change invalidates the
   ceremony or receipt.
+- One launchd-managed helper server and its single serialized authority
+  executor mediate every coordinator operation. The executor guard spans each
+  active acquisition and the complete exact-read/delete cleanup interval;
+  Keychain `active` remains the durable cross-client/restart lock. A competing
+  acquisition cannot replace active between equality read and delete, and a
+  helper restart cannot expose ordinary work before guarded recovery
+  classification.
 - Gate evidence, a provisional authorization, and smoke evidence cannot
   authorize ordinary production. Only a matching, separately domain-separated
   activation grant plus its provisional authorization can do so.
@@ -1845,6 +2225,10 @@ invalidates prior E1/E2 evidence.
   root-signed publication envelope must bind that exact plan and complete set.
   Failure quarantines the entire candidate and cannot be repaired by rerunning
   only the missing case or by reusing the grant.
+- The embedded helper profile expiry is an absolute write cutoff bound by the
+  descriptor. Gate or publication evidence created earlier never waives a
+  current expiry check, and apply checks it again under the helper coordinator
+  immediately before the sole permit and immediately before the sole send.
 - No production artifact is activated by this document. The root key, signed
   binaries, complete semantic signing evidence, notarization evidence,
   per-architecture clean-host E1/E2 passes, provisional authorization,

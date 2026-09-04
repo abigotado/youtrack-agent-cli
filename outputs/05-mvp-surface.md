@@ -90,6 +90,26 @@ The implemented first slice enables only `prepare`, `export`, and `status`. `con
 `apply`, and `reconcile` are present as stable fail-closed commands while Gate
 1A and the executor compatibility gate remain open.
 
+The future native-authority slice adds exactly these local commands:
+
+```text
+youtrack-agent-cli --profile <name> mutation authority status
+youtrack-agent-cli --profile <name> mutation authority recover
+```
+
+Both require explicit `--profile`. They accept only text/JSON output (including
+the retained `--json` alias), timeout, and verbose inherited flags; they reject
+`--yes`, `--dry-run`, `--fields`, raw output, plan/lease/force selectors,
+positional/stdin input, and environment overrides. Authority status is
+bounded/read-only; recovery requires trusted UI, applies only to the sole
+unresolved active record, and has no YouTrack network capability. Their exact
+JSON v1 data plus required invocation `meta`, errors, distinct future exits
+10..13, and corruption mapping to existing exit 1 are frozen in the registry
+protocol and are not implemented by the current command tree.
+They require journal record v2. Only a valid v1 `prepared` record migrates;
+every other v1 state, including `failed_before_mutation`, is retained unchanged
+and quarantined.
+
 ### `prepare --offline`
 
 Guarantees zero DNS, socket, browser, or OAuth activity. It:
@@ -111,7 +131,7 @@ Launches a trusted approval UI that loads canonical plan bytes once and displays
 
 ### `apply`
 
-Validates receipt signature/TTL/nonce, plan ID, payload/schema hashes, resolves the exact current target/project/account, checks the expected-state fingerprint, and requires the signed registry revision plus generation/SPKI/fingerprint to equal the current active registry entry. It also requires the exact provisional authorization plus matching post-smoke production activation grant for the running artifact and operation capability. Their canonical authorization-context digest must equal the receipt through the atomic `confirmed -> in_flight` transition. The journal retains the exact descriptor, signed provisional authorization, signed activation grant, derived context, and their digests with the receipt before dispatch. Retained keys and historical authority objects are audit/reconciliation-only; any pre-dispatch registry or activation transition cancels the confirmation. It then sends at most one mutation request through the configured executor and reconciles with reads.
+Validates receipt signature/TTL/nonce, plan ID, payload/schema hashes, resolves the exact current target/project/account, checks the expected-state fingerprint, and requires the signed registry revision plus generation/SPKI/fingerprint to equal the current active registry entry. It also requires the exact provisional authorization plus matching post-smoke production activation grant for the running artifact and operation capability. Their canonical authorization-context digest must equal the receipt through the atomic `confirmed -> in_flight` transition. The journal retains the exact descriptor, signed provisional authorization, signed activation grant, derived context, and their digests with the receipt before dispatch. Retained keys and historical authority objects are audit/reconciliation-only; any pre-dispatch registry or activation transition cancels the confirmation. Apply enters the sole launchd-managed helper's serialized authority executor and acquires its fixed-active Keychain coordinator shared with every registry commit, requires trusted time strictly before descriptor `helper_profile_expires_at`, persists `in_flight`, receives one permit bound to the exact request, sends once, records the outcome, durably closes, and performs guarded exact-read/delete cleanup before releasing the executor guard. Registry-first cancels the stale receipt; apply-first excludes registry commits until close. Crash before permit is `failed_before_mutation`; any uncertainty at or after permit is ambiguous and never retried. Gate 1B uses exact binary barrier/event traces for rotate/revoke/recovery and invalid-enrollment contention plus crash/ambiguity at outcome, close, active-delete, and the acquisition-between-read/delete ABA boundary. The future JSON v1 authority contract adds distinct exits 10..13 for wait, trusted recovery, artifact replacement, and reconfirmation, maps corruption to existing exit 1, and never emits exit 9; remote-uncertain reconciliation may retain it.
 
 ### `reconcile`
 
@@ -195,7 +215,7 @@ Reliable create/comment reconciliation benefits from a stable marker. Recommende
 ## One-shot and reconciliation rules
 
 - Preflight GETs and postflight GETs are allowed; “one-shot” means exactly one mutating request.
-- A definitive HTTP validation/auth/policy failure before server acceptance is `failed-before-mutation`.
+- A definitive HTTP validation/auth/policy failure before server acceptance is `failed_before_mutation`.
 - A success response containing the created/updated entity is followed by exact verification.
 - Timeout, connection reset, invalid/truncated response, proxy 5xx after send, or process crash after `in_flight` is `ambiguous`.
 - The CLI never resends the mutation for the same receipt.

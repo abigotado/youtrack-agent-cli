@@ -103,7 +103,7 @@ These rules are normative:
 5. Show one immutable canonical snapshot: endpoints/issuer identity, account, project, target, exact field diff/comment, notifications behavior, plan ID, and reconciliation marker.
 6. A human uses a trusted approval UI outside agent-controlled input, with OS user-presence verification, to mint a short-lived receipt.
 7. Run CLI `mutation apply` once through the configured executor. The CLI verifies the current state, project policy, receipt, schema, and payload hash. A REST executor carries an explicit issue-move TOCTOU warning; a strict profile requires the custom MCP executor to recheck policy and mutate atomically.
-8. Report `reconciled`, `failed-before-mutation`, or `ambiguous/operator-resolution-required`. Never soften `ambiguous` into success.
+8. Report `reconciled`, `failed_before_mutation`, or `ambiguous/operator_resolution_required`. A provable post-`in_flight`, pre-permit failure is `failed_before_mutation`; uncertainty at or after permit is ambiguous. Never soften `ambiguous` into success.
 
 ## Result envelope
 
@@ -125,7 +125,7 @@ Instance/account/project: <verified values>
 Receipt: <non-secret receipt ID>
 Operation: <kind and exact target>
 Mutation attempts: 0 or 1
-Outcome: reconciled | failed-before-mutation | ambiguous
+Outcome: reconciled | failed_before_mutation | ambiguous
 ```
 
 ## Error behavior

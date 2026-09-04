@@ -1,6 +1,8 @@
 # Implementation plan and decision gates
 
-Status: In progress; phases 2-4 are implemented through the fail-closed Gate 1A boundary
+Status: In progress; existing phases 2-4 reach the fail-closed Gate 1A
+boundary, while the native coordinator, profile-expiry enforcement, Gates, and
+writes described below are not implemented
 
 ## Accepted remaining order
 
@@ -15,25 +17,51 @@ The trust and activation dependencies are now fixed:
    dependency injection while the current repository remains
    `approval.Unsupported`.
 3. Implement the signed native helper, OS-protected approval-key registry,
-   bounded Go client, and non-distributed operator runner.
+   bounded Go client, and non-distributed operator runner. Keep the fresh-
+   `LAContext` UI-allow signing lookup separate from UI-fail/no-context
+   existence and delete queries, with disjoint vectors.
 4. Produce one unpublished signed/notarized/stapled artifact with the ordinary
    production confirmation path wired; create and retain its exact app-only
    payload archive, then bind that archive and the exact Apple code identities
    in the descriptor before E1; pass complete runner/session-bound E1
-   and clean-reset E2 Gate 1A evidence sets on every declared architecture;
+   and clean-reset E2 Gate 1A evidence sets on every declared architecture,
+   including the closed first-install/reinstall/rollback/replacement/uninstall
+   set, Keychain-migration cancellation/interruption/partial-failure set, and
+   all 88 profile-expiry boundary vectors;
    only then issue the confirm-only provisional authorization, pass its
    network-disabled ordinary-command smoke set, and issue the production
    activation grant. Run the grant-bound ordinary-command verification on every
    architecture under its deny-only runner token; failed evidence quarantines
    the unpublished grant and candidate.
-5. Implement canonical fingerprints, typed `issue.create`, one-shot execution,
-   and bounded reconciliation while the current repository apply remains
-   disabled.
+5. Implement canonical fingerprints, typed `issue.create`, bounded
+   reconciliation, and the sole launchd-managed helper's serialized
+   apply-authority executor plus fixed-active cross-client Keychain coordinator
+   while the current repository apply remains disabled. The executor guard
+   spans every acquisition and exact read/delete cleanup interval. Freeze the
+   exact Keychain dictionaries/projections and active/permit/closed records;
+   add canonical journal v2 with strict atomic prepared-only v1 migration and
+   quarantine; add only `mutation authority status` and trusted-UI
+   `mutation authority recover`; update `.agents/rules/cli-contract.md`, extend
+   the authoritative `internal/errx` reason/exit registry and both
+   contract/command reference generators, regenerate the tracked
+   `.cursor/rules` mirror through `.agents/scripts/sync-rules.py`, and pass the
+   rule-sync and machine-local provider-compiler checks;
+   require `confirmed -> in_flight` before the sole request-bound permit and
+   durable close before releasing registry serialization.
 6. Produce an unpublished exact candidate with ordinary `issue.create` apply
    wired, rerun the two-pass Gate 1A sequence for its new descriptor, then run
-   two-pass live Gate 1B on a disposable YouTrack 2026.2 project, including
-   Remote MCP/OAuth host tests, rotation/revocation races, and ambiguous-write
-   fault injection. Issue only the `issue.create` provisional authorization
+   the closed 25-case two-pass live Gate 1B on a disposable YouTrack 2026.2
+   project, including
+   Remote MCP/OAuth host tests, both apply-first and registry-first
+   rotation/revocation/recovery orderings, invalid-enrollment contention before
+   ledger read, crash before permit, crash after permit before send, crash after
+   send before outcome, crash after durable outcome before close, close-add
+   ambiguity, crash after close before active deletion, active-delete ambiguity,
+   acquisition attempted between active equality read and delete with zero
+   competing Keychain work before executor-guard release, restart
+   fencing/durable close, exact binary barrier/trace assertions, exact
+   authority status/recover envelopes/exits, and v1-to-v2 migration/quarantine.
+   Issue only the `issue.create` provisional authorization
    after E2, run the exact per-architecture network-isolated dispatch-boundary
    smoke, and issue the production activation grant only after that complete
    evidence set passes. Run the grant-bound per-architecture ordinary-command
@@ -156,7 +184,15 @@ Exit criteria:
 5. Generate a signing key whose use is protected by OS user-presence policy (macOS Keychain/Secure Enclave + LocalAuthentication for the first adapter).
 6. Implement a trusted approval UI that loads, displays, and signs one immutable in-memory snapshot, outside agent-controlled terminal input, with no noninteractive bypass.
 7. Implement short-lived signed receipts and atomic nonce journal states.
-8. Add crash-consistency tests at every state transition.
+8. Implement the helper-owned coordinator shared by apply and every registry
+   commit: fixed active-account acquisition, exact-request permit after
+   `in_flight`, same-connection fences, durable closed record, narrow active
+   cleanup, and restart recovery that never resumes a send.
+9. Bind the CMS-validated helper profile expiry into the descriptor and enforce
+   the strict cutoff at Gate/publication/install/runtime and twice around
+   permit/send.
+10. Add crash-consistency tests at every journal, active, permit, send,
+    outcome, close, and cleanup boundary.
 
 Exit criteria:
 
@@ -183,7 +219,9 @@ For each operation:
 - bind project ID+key, field/value IDs/types, and schema hash into the plan;
 - enforce project policy according to the selected executor assurance level;
 - verify expected state before send;
-- send one mutation;
+- acquire the helper coordinator, persist `in_flight`, issue one permit for the
+  exact request, send one mutation, persist outcome and durable close, then
+  release active;
 - reconcile exact touched state;
 - inject failures before send, during send, after server commit, and before journal commit;
 - require a fresh plan after any state mismatch.
@@ -266,6 +304,7 @@ Do not copy built-in mutation scripts and call them “guarded” without these 
 | Receipt | Tamper, expiry, replay, wrong profile/account/project/payload/schema/precondition, display-to-sign swap |
 | Mutation | Pre-send failure, server rejection, timeout before/after commit, process crash |
 | Reconciliation | Unique success, zero match, multiple match, unspecified comment order, unrelated concurrent update |
+| Local authority | Single launchd helper; serialized guard; acquisition-between-read/delete ABA denial; exact status/recover JSON + invocation meta/flags/exits; prepared-only v1 migration and all-other-state quarantine |
 | Secrets | Config/argv/log/error/crash-output scan |
 | Portability | Same skill scenarios in Codex and Claude Code |
 
@@ -278,6 +317,7 @@ trust/storage/package topology
   -> exact registry codec + pinned artifact-authorization root
   -> durable confirmation, injected and unwired
   -> native helper + protected key registry + operator runner
+  -> exact Keychain dictionaries/projections + apply-authority coordinator
   -> signed/stapled candidate + retained app-only archive
   -> descriptor with production confirm wiring and archive digest
   -> complete per-architecture Gate 1A E1 + clean-reset E2 evidence sets
@@ -287,6 +327,7 @@ trust/storage/package topology
   -> fingerprints + disabled issue.create engine
   -> new exact descriptor with production issue.create wiring
   -> per-architecture two-pass Gate 1A rerun + live YouTrack Gate 1B sets
+  -> Gate 1B apply/registry ordering + permit/crash/restart/ABA fencing cases
   -> issue.create provisional authorization + dispatch-boundary smoke set
   -> issue.create production activation grant
   -> per-architecture post-grant production-context verification

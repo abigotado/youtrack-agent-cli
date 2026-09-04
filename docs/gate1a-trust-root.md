@@ -136,6 +136,9 @@ group. The following identifiers are fixed:
 | Secure Enclave signing key tag prefix | `io.github.abigotado.youtrack-agent.approval.signing.v1/` |
 | approval registry service | `io.github.abigotado.youtrack-agent.approval.registry.v1` |
 | approval registry account prefix | `revision/` plus a 20-digit decimal revision |
+| apply-authority coordinator service | `io.github.abigotado.youtrack-agent.approval.apply-authority.v1` |
+| coordinator accounts | `active`, `permit/<lease-id>`, `closed/<lease-id>` |
+| per-user launchd helper job label | `io.github.abigotado.youtrack-agent.approval` |
 
 The signing key is helper-owned P-256 Secure Enclave material. Every generation
 uses a fresh 128-bit random key ID encoded as 32 lowercase hexadecimal
@@ -144,7 +147,9 @@ fixed prefix. The logical generation, key ID, full tag, DER SPKI, and
 fingerprint are bound into the registry transition. Its private key
 is non-exportable and requires `.privateKeyUsage` together with the accepted
 fresh-presence policy. A new `LAContext` with zero reuse is bound to the actual
-key lookup/sign operation, used once, and invalidated. A separate Gate decision
+signing-key lookup and its one sign operation, used once, and invalidated.
+Noninteractive existence and orphan-delete queries instead require
+`kSecUseAuthenticationUIFail`, carry no `LAContext`, and can never sign. A separate Gate decision
 must record whether the release uses `userPresence` or
 `biometryCurrentSet`; there is no silent fallback between them.
 
@@ -174,6 +179,10 @@ bounded, peer-authenticated helper operation but cannot address Keychain items
 directly. Only the helper's
 challenge-bound enrollment, rotation, revocation, and recovery ceremonies may
 mutate the record after trusted UI and fresh user presence.
+The registry protocol also freezes every complete Security.framework call
+dictionary and bounded result projection for keys, revisions, and coordinator
+records. No convenience query, broad delete, legacy-Keychain fallback, or
+caller-selected predicate is permitted.
 
 The private group is an authority boundary for key use and registry mutation;
 mutual peer validation and a bounded protocol are still required to prevent a
@@ -268,8 +277,19 @@ The CLI filesystem lock order is:
 profile -> policy -> one plan journal
 ```
 
-Registry transitions do not use a user-owned lock or `SecItemUpdate`. The
-helper enumerates only the fixed service and private access group with
+Registry transitions do not use a user-owned lock or `SecItemUpdate`. Every
+registry commit and mutation apply first acquires the same helper-private
+coordinator through a one-shot add to its fixed `active` account. The helper
+binds a canonical registry-intent digest available before any ledger/proposal
+work; the eventual candidate is validated later under that lease. It
+holds it through the registry commit or apply's exact
+`confirmed -> in_flight -> one permit -> one send/outcome -> durable close`
+sequence; only then may it remove the active item. The active, permit, closed,
+restart, fencing, and result-projection codecs are normative in the registry
+protocol. CLI filesystem locks never substitute for this cross-process
+boundary. Crash recovery authenticates a new exact-code actor/helper session;
+old tokens are historical, and read-first close/active cleanup is fenced and
+idempotent. The helper enumerates only the fixed service and private access group with
 match-limit-all, caps the result at 256 revisions, sorts and validates every
 canonical account and record, and requires one gap-free hash chain beginning at
 revision 1. Missing, duplicate, malformed, forked, out-of-range, or trailing
@@ -297,8 +317,8 @@ every snapshot and the signed receipt, and performs one revision CAS from
 held. Any later registry transition invalidates the receipt at the next helper
 validation. No remote executor may be distributed or used outside its
 controlled unpublished Gate candidate until Gate 1B selects and proves the
-exact ordering between apply and a concurrent rotation or revocation; Gate 1A
-does not claim that cross-boundary guarantee.
+exact coordinator ordering between apply and concurrent enrollment, rotation,
+revocation, or recovery; Gate 1A does not claim that cross-boundary guarantee.
 
 The journal stores the complete canonical signed receipt, an exact copy of the
 verification SPKI, and one closed stage-tagged authority set with all exact
@@ -328,12 +348,30 @@ digest must equal the currently active provisional-authorization/activation-
 grant pair. The current status must explicitly permit apply. Any intervening
 registry or activation transition makes a still-confirmed receipt ineligible;
 status/apply cancels the plan rather than falling back to retained authority.
-After the durable `confirmed -> in_flight` transition, reconciliation verifies
+The single per-user launchd-managed helper admits all authority work through
+one non-reentrant serialized executor. Its guard spans active acquisition,
+the complete leased operation, durable close, and exact-read/delete cleanup;
+the fixed Keychain active record remains the cross-client and cross-restart
+lock. The helper retains that guard and coordinator, revalidates the unexpired embedded profile
+and every authority value, observes the durable `confirmed -> in_flight` CAS,
+then creates exactly one request-bound permit. That permit is the sole send
+linearization point. A registry transition that acquires first closes before
+apply revalidation and cancels the stale receipt; an apply that acquires first
+excludes registry commits until its durable closed record exists. Crash before
+permit is provably `failed_before_mutation`; crash at or after permit is
+ambiguous and never retried. Profile expiry before acquisition closes
+`confirmed -> expired`; expiry after acquisition with no permit burns the
+receipt and closes `failed_before_mutation` with zero dispatch. After the durable `confirmed -> in_flight`
+transition, reconciliation verifies
 the persisted historical key and authorization context but does not require
 either to remain active. Rotation/revocation races before confirmation,
-between confirmation and apply, and at the future in-flight boundary are Gate
-tests. Gate 1B must settle the last ordering before the executor candidate is
-qualified for any use beyond that controlled Gate run.
+between confirmation and apply, at the in-flight/permit boundary, during send,
+and across helper restart are closed Gate 1B cases. A dedicated ABA case queues
+a competing acquisition between cleanup's byte-equality read and delete and
+proves it performs no Keychain call or replacement until the executor guard is
+released. Gate 1B must pass them
+before the executor candidate is qualified for any use beyond that controlled
+Gate run.
 
 This durable confirmation implementation and the native adapter must exist
 before Gate 1A. The current repository remains wired to
@@ -372,7 +410,7 @@ The canonical artifact descriptor binds the outer/helper identifiers, Team ID,
 semantic requirements and entitlements, access-group name, item identifiers,
 architecture set, version/build number, every architecture's exact Apple code
 identity, hashes of both executable files, and the helper's embedded Developer
-ID provisioning-profile hash. The profile must authorize the helper App ID,
+ID provisioning-profile hash and exact expiry. The profile must authorize the helper App ID,
 Team ID, and exact `keychain-access-groups` entitlement. It must be valid for
 Developer ID distribution and unexpired at signing and both Gate executions. The
 nested helper is signed with the profile at
@@ -381,6 +419,24 @@ The exact application payload is notarized and stapled before descriptor
 creation. Executable/resource hashes are evidence; runtime authority comes
 from Security.framework validity plus exact signed code identities and the
 offline-root authorization.
+The descriptor's `helper_profile_expires_at` is an absolute cutoff with no
+grace or cached-success exception. Gate token use, grant/envelope signing,
+publication, installation, peer acceptance, confirmation, coordinator
+acquisition, registry proposal signing, registry final signing, registry
+commit, permit issuance, and the final pre-send fence each require the trusted
+current time to be strictly earlier. Evidence captured before expiry
+cannot authorize an operation at or after it.
+
+The sole exception is launch/peer authentication into an explicitly
+recovery-only helper session for bounded startup/status classification. If no
+unresolved active record exists, it returns `authority_status=clear` with the
+expired profile field and closes.
+Trusted recovery continues only for one unresolved active record matching the
+same exact descriptor and retained evidence. Under its serialized executor
+fence that session may expose only authority status, trusted-UI recovery,
+terminal journal CAS, closed reconciliation, and byte-equal guarded active cleanup. It cannot
+enter ordinary confirmation/registry/apply authority, sign, acquire, permit,
+construct transport, or send; it closes when classification/cleanup finishes.
 
 The first production release has no supported predecessor and no supported
 write-capable in-place upgrade. Exact-build requirements make a current
@@ -425,9 +481,12 @@ entry point while all remote executors remain disabled. A dedicated
 non-writing self-test surface may cover additional local faults but is not a
 substitute for that production path. Against that exact artifact, the harness
 exercises enrollment, approval, durable journal CAS, cancellation, timeout,
-process crash, production
-peer replacement, rotation, revocation, recovery, identical reinstall, and
-accidental package rollback on a supported clean Mac. A separately signed,
+process crash, production peer replacement, rotation, revocation, recovery,
+the closed first-install/identical-reinstall/rollback/replacement/uninstall
+case set, and the closed Keychain-migration cancellation/interruption/partial-
+failure case set on a supported clean Mac. The app-only payload archive used by
+every install case is produced and retained before descriptor creation and E1;
+no install or reinstall case may reconstruct it. A separately signed,
 never-shipped old-build fixture with the production IDs proves both current
 peers reject mixed-build connections; the report also records that a matched
 old pair is not prevented by this first-release topology. The fixture is
@@ -469,8 +528,14 @@ executor stays disabled. A later exact signed candidate must wire the ordinary
 production `mutation apply` entry point for only `issue.create` and pass live
 Gate 1B on a disposable YouTrack 2026.2 project. Because wiring the executor
 changes the artifact, that same candidate must first rerun and pass Gate 1A.
-Gate 1B then proves exact identity/preconditions, one-shot execution,
-rotation/revocation ordering, and bounded ambiguous-outcome reconciliation.
+Gate 1B then proves exact identity/preconditions, one-shot execution, the
+helper-owned coordinator's apply-versus-rotate/revoke/recovery linearization, every
+before/after-permit crash boundary, invalid-enrollment contention before any
+ledger read, crash after durable outcome but before close, ambiguous close add,
+crash after close but before active deletion, ambiguous active deletion,
+restart fencing and durable close, and bounded ambiguous-outcome
+reconciliation. Its content-addressed two-party schedules and traces use exact
+barrier events rather than wall-clock sleeps.
 After its two complete Gate evidence sets, the root signs only a provisional
 `issue_create` authorization. The per-architecture smoke workflow then drives
 the ordinary prepare, confirm, and `youtrack-agent-cli --profile work mutation

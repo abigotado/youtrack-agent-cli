@@ -72,8 +72,10 @@ PASSED**.
   group; only a committed active registry transition may select it.
 - The item uses `kSecAttrAccessControl`; it does not combine that contract with
   legacy `kSecAttrAccess` ACL configuration.
-- One new `LAContext` is bound to the actual private-key sign operation, has no
-  authentication reuse window, is used once, and is then invalidated.
+- One new zero-reuse `LAContext` appears only in the exact signing-key lookup,
+  is bound to its one private-key sign operation, and is then invalidated.
+  Separate existence/delete queries contain no context, force authentication
+  UI to fail, and can never sign.
 - The selected `userPresence` password-fallback or `biometryCurrentSet` policy
   is explicit and tested.
 - The separately signed UI displays the complete bounded immutable plan through
@@ -101,10 +103,12 @@ Keychain or Secure Enclave state.
   grant. The exact artifact must then load that grant, derive the final
   production context, and pass a separate per-architecture ordinary-command
   verification before publication.
-- Clean-machine first install, identical reinstall, accidental package
-  rollback, binary/helper replacement, and key rotation cases preserve the
-  stated first-release boundary or fail closed. A mixed-build fixture is
-  rejected; a matched older pair is recorded as an unsolved rollover case.
+- The closed clean-machine Gate 1A set covers first install, identical
+  reinstall, accidental rollback, binary/helper replacement, uninstall, and
+  Keychain-migration cancellation, interruption, and partial failure. It uses
+  the app-only archive retained before descriptor/E1 and a non-secret sentinel;
+  any missing case fails Gate. A mixed-build fixture is rejected; a matched
+  older pair remains an unsolved rollover case.
 - The CLI locally verifies receipt DER signatures against an explicitly
   enrolled public key and stores the full signed receipt only after a
   revision-bound compare-and-swap.
@@ -136,6 +140,33 @@ provisional authorization plus post-smoke activation grant; it is not followed
 by a wiring commit or rebuild. `apply` and
 `reconcile` remain disabled until a separate exact Gate 1B candidate proves
 their one-shot and ambiguous-outcome behavior on a disposable YouTrack project.
+That candidate must first introduce journal v2; only a valid v1 `prepared`
+record migrates atomically, while every other valid v1 state—including
+`failed_before_mutation`—remains unchanged and quarantined. It adds exactly `mutation authority status` and
+trusted-UI `mutation authority recover`, no plan-ID or force-clear recovery,
+and the explicit future exit 10..13 contract, with corruption on existing exit
+1, rooted in `internal/errx` and regenerated into both documentation and
+embedded-skill references. The implementation change also updates
+`.agents/rules/cli-contract.md`, regenerates its tracked Cursor mirror, and
+passes rule-sync/provider-compiler checks.
+That candidate must implement one launchd-managed helper, its serialized
+authority executor, and the fixed-active Keychain coordinator shared by all
+registry commits and apply: the guard spans acquisition through close/read-
+delete cleanup, the Keychain lease survives restarts, durable
+`confirmed -> in_flight`, one exact-request permit, one send/outcome, durable
+closed record, restart fencing, and no retry after permit. Gate 1B's closed
+plan must exercise both apply-first and registry-first rotation/revocation/recovery,
+concurrent invalid enrollment before ledger read, crash before permit, crash
+after permit before send, crash after send before outcome, crash after durable
+outcome before close, close-add ambiguity, crash after close before active
+delete, active-delete ambiguity, an acquisition queued between equality read
+and delete with zero competing Keychain work until guard release, and exact Security.framework dictionary and
+bounded-projection vectors. Those concurrency cases use the signed plan's exact
+two-party binary barrier schedule and content-addressed event trace, never
+sleeps or scheduler timing. The closed 25-case Gate 1B set also exercises exact
+authority status/recover JSON v1 shapes with required invocation `meta`, exits
+10..13 plus corruption exit 1, closed inherited flags, trusted recovery UI, and
+journal v1-to-v2 migration/quarantine interruptions.
 Because that wiring changes exact code identities, the same candidate must run
 the complete E1/E2 Gate 1A sequence before the two-pass Gate 1B evidence can
 qualify it. The final `issue.create` provisional authorization then undergoes
@@ -144,6 +175,11 @@ zero mutating request bytes. Only the complete passing smoke evidence set
 permits the production activation grant. A second exact-artifact verification
 then exercises the real grant-bound context and schema-v3 receipts on every
 architecture under deny-only runner restrictions before publication.
+The same descriptor must bind CMS-validated `helper_profile_expires_at`;
+the closed 88-vector matrix proves just-before/equality/after/between-checks at
+all 22 Gate, publication, install, runtime, peer-authentication, coordinator,
+registry-sign/commit, permit, and final pre-send boundaries. Equality and later
+fail without grace or evidence carry-forward.
 
 ## Homebrew decision
 

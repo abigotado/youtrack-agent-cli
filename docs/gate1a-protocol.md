@@ -61,6 +61,26 @@ grant-bound context, receipt, and digests. Historical verification rebuilds
 the matching pinned-root signature/hash chain; the receipt digest alone is not
 sufficient, and fields from different stage types cannot be mixed.
 
+Schema v3 receipts are consumed only through the helper-owned apply-authority
+coordinator defined by the registry protocol. The receipt's revision, active
+generation, final context, exact request digest, plan ID, journal revision, and
+connected CLI audit token are copied into the active/permit chain. The durable
+`confirmed -> in_flight` CAS precedes the sole permit; the permit precedes the
+sole send; the helper excludes every registry commit until a durable closed
+record exists. Crash before permit is `failed_before_mutation`. Any uncertainty
+at or after permit is ambiguous, non-replayable, and read-only reconcile only.
+Neither a receipt signature nor an `in_flight` state alone authorizes network
+I/O. The helper also requires trusted current time strictly before the
+descriptor's `helper_profile_expires_at` at confirmation, coordinator
+acquisition, permit issuance, and immediately before send.
+The registry protocol's future command/exit contract preserves the JSON v1
+envelope but deliberately adds exits 10..13 for wait, trusted recovery,
+artifact replacement, and reconfirmation; corruption/operator escalation uses
+existing exit 1. The future
+authority surface never emits exit 9; remote-uncertain reconciliation may
+retain it. The four additive exits do not exist in the current disabled
+production slice and never authorize retry.
+
 ## Authority and limits
 
 Go remains the authority for mutation-plan validation and canonical receipt

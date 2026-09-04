@@ -13,6 +13,22 @@ Adopt a split architecture:
 3. Package the operating policy as one provider-neutral `youtrack-agent` Agent Skill. Keep its portable core to common `SKILL.md` semantics; install the same folder into Codex and Claude Code by symlink or copy.
 4. Make execution pluggable: a REST executor is acceptable only with an explicit TOCTOU residual-risk decision; a reviewed custom MCP app is required when project allowlisting must be enforced atomically in the same YouTrack transaction as the mutation.
 
+The future local apply boundary is now fixed independently of that executor
+choice: one launchd-managed helper and serialized authority executor own one
+fixed-active Keychain coordinator that serializes every registry commit
+with `confirmed -> in_flight -> one exact-request permit -> one send/outcome ->
+durable close`, and the descriptor-bound helper-profile expiry is checked
+strictly through the final pre-send fence. The closed Gate contract adds exact
+closed 23-case Gate 1A including install/migration fault cases, an 88-vector
+expiry matrix, and a closed 25-case Gate 1B with deterministic schedules through
+enrollment, close, active-delete ambiguity, and a
+competing-acquisition ABA attempt between equality read and delete. Future
+authority commands retain JSON v1 but deliberately add distinct exits 10..13,
+map corruption to existing exit 1, and never emit exit 9; remote-uncertain
+reconciliation may retain it. Journal v2 and prepared-only v1
+migration/quarantine precede activation. These are unimplemented Gate
+requirements; all writes remain disabled.
+
 ```text
 Codex / Claude Code
         |

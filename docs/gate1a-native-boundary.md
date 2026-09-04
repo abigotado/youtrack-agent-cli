@@ -162,8 +162,10 @@ non-decimal, and ad-hoc inputs fail closed.
 
 The helper-only permanent key is P-256 Secure Enclave material stored through
 the data-protection Keychain with `kSecAttrAccessControl`. A new `LAContext`
-with zero reuse is bound to the actual private-key signing operation, used
-once, and invalidated. Password-fallback versus `biometryCurrentSet` remains an
+with zero reuse is present in the exact signing-key lookup and bound to the
+actual one private-key signing operation, used once, and invalidated. Separate
+existence/delete queries carry no context and force authentication UI to fail.
+Password-fallback versus `biometryCurrentSet` remains an
 explicit operator-reviewed policy. PR A does not create this key or access any
 Keychain item.
 
@@ -193,8 +195,55 @@ state derivation, bounds, and vectors are frozen in the
 implementation may infer a different codec.
 The helper entitlement requires compatible code signing and its own embedded
 Developer ID provisioning profile. The helper owns the key and registry; its
-CLI-facing API is read-only and bounded. Mutual peer identity and removal of
-arbitrary write/enrollment surfaces remain mandatory.
+ordinary registry-introspection API is read-only and bounded. Only the closed
+ceremony and coordinator protocols below may mutate helper-private state or
+issue a transport permit. Mutual peer identity and removal of arbitrary
+write/enrollment surfaces remain mandatory.
+
+The helper also owns the only write-capable transport permit. Every process
+that could apply a mutation or commit a registry revision must acquire the one
+fixed Keychain-backed coordinator `active` account through the sole per-user
+launchd-managed helper server. One non-reentrant serialized authority executor
+owns every coordinator call; its guard spans active acquisition through close
+and exact read/delete cleanup, and after restart it spans recovery
+classification through cleanup. The Keychain active record remains the
+cross-client/restart lock. The
+registry peer supplies a canonical intent digest before any ledger/proposal
+work; the candidate is validated only after acquisition. The
+same authenticated connection is fenced by audit token, runner/session where
+applicable, lease ID, coordinator session, descriptor, final context, registry
+revision, plan, and journal revision. Apply may receive one exact-request
+permit only after durable `confirmed -> in_flight`; the helper retains the
+coordinator across the one send/outcome and durable close. Registry ceremonies
+use the same coordinator and cannot interleave. Restart never resumes a
+permit: pre-permit state closes `failed_before_mutation`, while any post-permit
+uncertainty closes ambiguous with no retry. The exact dictionaries, projections,
+records, linearization points, and recovery rules live in the registry
+protocol and are part of the Gate 1B conformance surface. That closed surface
+includes invalid enrollment before ledger read, durable-outcome-before-close,
+close-add ambiguity, post-close/pre-delete crash, active-delete ambiguity, and
+an ABA schedule that queues acquisition between equality read and delete and
+proves zero competing Keychain calls until the executor guard is released,
+all driven by exact binary barrier schedules and event traces. Future failures
+use the additive JSON v1 commands and distinct future exits 10..13 frozen
+there; corruption remains existing exit 1 and no native status creates retry
+authority.
+Recovery is a separate trusted-UI handshake: a new exact-code CLI and helper
+session validate the descriptor and retained evidence, while old audit-token/
+session values are historical only. Its fence can classify/CAS, close, and
+read-first clean a byte-equal active record, but cannot sign, acquire, permit,
+send, or commit.
+
+The helper validates its CMS profile and requires trusted current time to be
+strictly before the descriptor-bound `helper_profile_expires_at` at ordinary launch,
+peer acceptance, signing, coordinator acquisition, each registry proposal/final
+signature, registry commit, permit issuance, and the last pre-send fence. No
+existing connection, cached validation, Gate evidence, or already confirmed
+receipt survives that cutoff. Only the exact launchd-managed recovery-only
+launch and peer authentication may proceed after expiry, and only for status,
+trusted-UI fencing, terminal journal CAS, close reconciliation, and
+executor-guarded byte-equal active cleanup; it cannot enter ordinary auth,
+sign, acquire, commit, permit, construct transport, or send.
 
 Ordinary approval never enrolls. Enrollment has a distinct challenge and
 proposal and activation domains, fresh trusted UI/user presence, peer

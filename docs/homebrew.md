@@ -37,8 +37,12 @@ delivery shape before helper implementation:
 No installer or post-install hook may silently migrate Keychain authorization.
 The operator must run the explicit `auth migrate-keychain --profile NAME --yes`
 flow, which rebinds the existing item without printing or returning its secret.
-The first-release gate must prove identical reinstall, cancellation,
-interruption, binary replacement, helper replacement, and failed migration.
+The closed Gate 1A case set in
+[Gate artifact authorization](gate1a-artifact-authorization.md) proves first
+install, identical reinstall, rollback refusal, CLI/helper replacement,
+uninstall cleanup, migration cancellation, interruption at durable boundaries,
+and partial destination/source failure with a non-secret sentinel. A missing
+case or transcript is a Gate failure; these are not informal packaging tests.
 
 ## Missing release provenance
 
@@ -71,6 +75,18 @@ sequence. Before guarded mutations are enabled, the installed verifier reads
 the envelope, plan, evidence-set index, digest-bound install-evidence manifest,
 and listed evidence only from that root and fails closed on missing, extra,
 linked, escaping, or digest-mismatched files.
+It also CMS-validates the embedded helper profile, requires its semantic expiry
+to equal descriptor `helper_profile_expires_at`, and requires trusted current
+time to be strictly earlier. The same strict cutoff is repeated at helper
+launch, confirmation, coordinator acquisition, permit issuance, and immediately
+before send; a Cask installed before expiry does not remain write-capable after
+it. After expiry, only the exact launchd-managed helper's recovery-only launch
+and peer authentication may expose bounded status, trusted-UI fencing, journal
+CAS, close reconciliation, and serialized byte-equal active cleanup; ordinary
+authority remains denied. Installation also validates that the fixed helper
+identifier is registered as one per-user launchd server and that no direct or
+second listener mode is present. Homebrew update or reinstall cannot refresh that field without producing a
+new signed artifact that starts again at E1.
 Homebrew's checksum detects a changed download; the offline-root signature and
 runtime Security.framework checks remain the authenticity and execution
 boundary.

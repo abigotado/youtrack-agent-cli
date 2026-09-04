@@ -20,10 +20,12 @@ workflow commands, attachments, and raw REST paths.
 5. `mutation apply` validates signature, expiry, nonce, payload/schema hashes,
    current identity, project allowlist, and expected state before dispatching
    at most one mutating request.
-6. Report `reconciled`, `failed-before-mutation`, or
+6. Report `reconciled`, `failed_before_mutation`, or
    `operator_resolution_required`. A timeout, reset, truncated response, proxy
-   error after send, or crash after `in_flight` is ambiguous and must never be
-   retried automatically.
+   error after send, or crash/uncertainty at or after permit is ambiguous and
+   must never be retried automatically. A provable failure after `in_flight`
+   but before permit is `failed_before_mutation`; it burns the receipt and
+   requires a new plan rather than replay.
 
 The REST executor cannot make project membership validation and issue mutation
 atomic; disclose that TOCTOU risk. A strict project-bound profile requires the

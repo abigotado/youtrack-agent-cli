@@ -91,6 +91,21 @@ provisional authorization remains deny-only. A later offline-root-signed
 activation grant is issued only over the complete per-architecture pre-grant
 smoke evidence, and the real grant-bound production context must then pass a
 second per-architecture ordinary-command verification before publication.
+The future write path is additionally gated by one launchd-managed helper, its
+serialized authority executor, and a helper-owned fixed-active Keychain
+coordinator: registry commits cannot overlap an apply, acquisition cannot race
+byte-equal cleanup, and apply must durably
+enter `in_flight`, obtain one exact-request permit, send at most once, and
+durably close before the coordinator is released. The descriptor-bound helper
+profile expiry is a strict Gate, publication, installation, and pre-send
+cutoff. The closed evidence contract includes exact install/reinstall and
+Keychain-migration failure cases plus deterministic two-party coordinator
+schedules through close/delete ambiguity and active-cleanup ABA denial. Future coordinator/profile failures
+add stable JSON v1 `error.code` values and distinct future exits 10..13 while
+corruption remains existing exit 1;
+the only recovery commands will be `mutation authority status` and trusted-UI
+`mutation authority recover`, neither with a plan ID or force-clear option.
+None of this is enabled in the current build.
 
 ## Agent Skill
 

@@ -83,14 +83,168 @@ base64url decoding, signature verification, or display:
 | complete stored record | 4,352 |
 | commit authorization or reconciliation request | 6,144 |
 | one Keychain registry item, including metadata returned by Security.framework | 8,192 |
+| one coordinator active, permit, or closed item, including metadata | 8,192 |
 | complete ledger records | 256 |
 | aggregate canonical stored-record bytes | 1,114,112 |
 | aggregate bytes returned by the bounded Keychain query | 2,097,152 |
+| coordinator permit records | 256 |
+| coordinator closed records | 256 |
 
 The canonical-record aggregate bound is exactly `256 * 4,352`. More than 256
 matching items, an item over its bound, either aggregate over its bound, or
 Security.framework returning a value of an unexpected type fails before
 sorting or cryptographic work.
+
+## Exact Security.framework dictionaries and projections
+
+Every Keychain call below is constructed by the helper from constants and
+already validated canonical values. The CLI never supplies a dictionary key,
+class, service, access group, match limit, return flag, synchronizable flag, or
+accessibility value. A dictionary with a missing, additional, differently
+typed, or differently valued entry is a protocol error before the call. All
+CFString-to-data conversions below are exact UTF-8 over the already validated
+printable-ASCII value, with no NUL or normalization.
+
+The resolved private access group is the one exact value authorized by the
+embedded profile and helper entitlement. `SecAccessControlCreateWithFlags`
+uses `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and exactly
+`.privateKeyUsage` plus the separately frozen `userPresence` or
+`biometryCurrentSet` choice. No second accessibility or authentication policy
+is tried.
+
+The `SecKeyCreateRandomKey` attributes are exactly:
+
+| Key | Value |
+| --- | --- |
+| `kSecAttrKeyType` | `kSecAttrKeyTypeECSECPrimeRandom` |
+| `kSecAttrKeySizeInBits` | CFNumber integer `256` |
+| `kSecAttrTokenID` | `kSecAttrTokenIDSecureEnclave` |
+| `kSecUseDataProtectionKeychain` | `kCFBooleanTrue` |
+| `kSecPrivateKeyAttrs` | the exact nested dictionary below |
+
+The private-key dictionary contains exactly
+`kSecAttrIsPermanent=true`, `kSecAttrApplicationTag` as CFData of the complete
+key tag, `kSecAttrAccessGroup` as the resolved group, and
+`kSecAttrAccessControl` as the successfully created access-control object.
+Key creation must return one `SecKey` whose copied public key, 91-byte SPKI,
+application tag, key type, size, token, and access group all match the proposal
+before it can be used.
+
+Signing and existence are different Keychain operations and never share a
+query. An exact signing private-key lookup dictionary contains, in this order
+in the protocol projection: `kSecClass=kSecClassKey`,
+`kSecAttrKeyType=kSecAttrKeyTypeECSECPrimeRandom`,
+`kSecAttrApplicationTag` as the exact tag CFData, `kSecAttrAccessGroup`,
+`kSecUseDataProtectionKeychain=true`, `kSecMatchLimit=kSecMatchLimitOne`,
+`kSecUseAuthenticationContext` as one newly created `LAContext` whose reuse
+duration is zero, `kSecUseAuthenticationUI=kSecUseAuthenticationUIAllow`, and
+`kSecReturnRef=true`. That exact context is passed to the immediately following
+single `SecKeyCreateSignature`, is never used for another lookup/signature, and
+is invalidated on every return path. Success must project to exactly one
+`SecKey`; an array, dictionary, data value, or other CFType is malformed. No
+retry, context replacement, or UI-policy fallback is allowed.
+
+The noninteractive private-key existence dictionary contains exactly the same
+class, key type, exact application tag, access group, data-protection flag, and
+match-one entries, followed by
+`kSecUseAuthenticationUI=kSecUseAuthenticationUIFail` and
+`kSecReturnRef=true`; it contains no `LAContext`. Success projects to exactly
+one typed `SecKey` and proves only presence, never signing authority.
+`errSecItemNotFound:-25300` proves absence. Interaction-not-allowed, auth
+failure, cancellation, wrong CFType, or every other status is neither presence
+nor absence and fails closed. The exact orphan-key delete dictionary below also
+includes `kSecUseAuthenticationUIFail` and no `LAContext`, so cleanup cannot
+summon or inherit authentication UI. No label, generic tag, account, or caller
+predicate is added to either lookup.
+
+The bounded private-key enumeration dictionary contains exactly
+`kSecClass=kSecClassKey`, `kSecAttrKeyType=kSecAttrKeyTypeECSECPrimeRandom`,
+`kSecAttrAccessGroup`, `kSecUseDataProtectionKeychain=true`,
+`kSecMatchLimit=kSecMatchLimitAll`, and `kSecReturnAttributes=true`. Because
+Keychain has no trusted prefix-match operator, the helper caps the returned
+array at 64 before allocation proportional to its count, then projects each
+dictionary to application-tag CFData, key type, integer key size, token ID,
+access group, permanent flag, and synchronizable flag. The tag must decode to
+the fixed prefix plus one canonical key ID; type, size, token, group, permanent
+and synchronizable values must respectively be EC P-256, Secure Enclave, the
+resolved group, true, and false. A non-array success, non-dictionary member,
+duplicate tag, missing projected value, wrong CFType, unexpected item in this
+private group, or result beyond the bound fails closed. Other OS-returned
+diagnostic attributes are neither serialized nor used as authority.
+
+Every registry or coordinator value is stored as a generic-password item.
+The exact add dictionary contains `kSecClass=kSecClassGenericPassword`,
+`kSecAttrService`, `kSecAttrAccount`, `kSecAttrAccessGroup`,
+`kSecAttrAccessible=kSecAttrAccessibleWhenUnlockedThisDeviceOnly`,
+`kSecAttrSynchronizable=false`, `kSecUseDataProtectionKeychain=true`, and
+`kSecValueData` as the complete canonical bytes. Registry items use the fixed
+registry service and revision account. Coordinator items use the service and
+accounts defined below. `SecItemAdd` receives no return flag.
+
+The exact-account read dictionary contains `kSecClassGenericPassword`, exact
+service, exact account, resolved access group, `kSecAttrSynchronizable=false`,
+`kSecUseDataProtectionKeychain=true`, `kSecMatchLimitOne`,
+`kSecReturnAttributes=true`, and `kSecReturnData=true`. Success must be one
+dictionary whose projection contains exactly service CFString, account
+CFString, access-group CFString, accessibility CFString, synchronizable
+CFBoolean, creation/modification CFDates, and value CFData. The first five
+must equal the query and fixed policy; both dates must be valid and modification
+must not precede creation; value and total projected metadata must respect the
+item bound. Authority uses only the exact value bytes. An array, duplicate,
+wrong CFType/value, or missing projection field is ambiguous and fails closed.
+
+The bounded service enumeration dictionary is the same except it omits
+account and uses `kSecMatchLimitAll`. A success result must be an array of
+1..256 dictionaries for the registry or at most one active plus 256 permit and
+256 closed dictionaries for the coordinator. The aggregate raw/projection
+bound is 2,097,152 bytes. Projection occurs before sorting; accounts are then
+validated and sorted by canonical revision or record kind/lease ID. A bare
+dictionary for match-all, duplicate account, unknown account, unexpected
+value, or `errSecSuccess` with an empty collection is malformed. Only
+`errSecItemNotFound` represents an empty service.
+
+The coordinator's final pre-send state probe is exactly three sequential
+exact-account reads with the dictionary above: `active` must return bytes equal
+to the acquired active record, `permit/<lease-id>` must return bytes equal to
+the one permit, and `closed/<lease-id>` must return only
+`errSecItemNotFound:-25300`. No match-all query, cached result, combined
+predicate, reordered call, or extra read can replace this probe. The helper
+then repeats peer audit-token/session and profile-expiry checks without
+releasing the coordinator; any mismatch or noncanonical result prevents send.
+
+Registry revision deletion is forbidden and has no dictionary. Exact orphan
+private-key deletion uses only `kSecClassKey`, EC key type, exact application
+tag CFData, key size 256, Secure Enclave token ID, resolved access group, and
+the data-protection-Keychain flag plus
+`kSecUseAuthenticationUI=kSecUseAuthenticationUIFail`; it contains no
+authentication context. Its ambiguous result is reconciled by exactly one
+private-key lookup using the exact noninteractive existence dictionary above,
+including the same application tag. `errSecItemNotFound:-25300` proves that
+deletion completed. `errSecSuccess` is accepted only with exactly one typed
+`SecKey`; because the fixed query already contains the exact tag, EC key type,
+access group, data-protection flag, and match-one constraint, that result proves
+the orphan still exists and returns
+`REGISTRY_ORPHAN_KEY_DELETE_AMBIGUOUS` without repeating deletion. Any other
+OSStatus, CFType, count, or projection returns the same stable code with an
+internal reason and blocks cleanup.
+This reconciliation never uses a generic-password exact-account read. Exact
+coordinator-active deletion uses only `kSecClassGenericPassword`, coordinator
+service, account `active`, resolved access group,
+`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`,
+`kSecAttrSynchronizable=false`, and the data-protection-Keychain flag. The
+helper first exact-reads and byte-compares the intended item; it never issues a
+service-wide, class-wide, prefix, match-all, permit, or closed-record delete.
+The authority-executor guard is held without interruption from that equality
+read through this delete and its one reconciliation read; a competing
+acquisition remains queued and performs zero Keychain calls during the
+interval. An ambiguous coordinator-active delete is reconciled by one
+generic-password exact-account read and is never blindly repeated.
+`errSecItemNotFound` proves cleanup completed; equal active bytes return
+`APPLY_COORDINATOR_ACTIVE_DELETE_AMBIGUOUS` for trusted read-first recovery;
+different well-formed active bytes are a successful stale no-op and are never
+deleted; malformed, duplicate, or other status returns
+`AUTHORITY_STATE_CORRUPT`. Private-key and coordinator deletion result types
+are therefore never interchangeable.
 
 ## Domains and hashes
 
@@ -106,9 +260,13 @@ is one complete canonical JSON object.
 | acceptance digest | `YTA-REGISTRY-ACCEPTANCE-V1\0` |
 | recovery evidence digest | `YTA-REGISTRY-RECOVERY-EVIDENCE-V1\0` |
 | recovery continuity probe | `YTA-REGISTRY-RECOVERY-CONTINUITY-PROBE-V1\0` |
+| registry intent digest | `YTA-REGISTRY-INTENT-V1\0` |
 | old-key final signature | `YTA-REGISTRY-RECORD-OLD-V1\0` |
 | new-key final signature | `YTA-REGISTRY-RECORD-NEW-V1\0` |
 | commit-candidate digest | `YTA-REGISTRY-COMMIT-V1\0` |
+| coordinator active digest | `YTA-APPLY-COORDINATOR-ACTIVE-V1\0` |
+| coordinator permit digest | `YTA-APPLY-COORDINATOR-PERMIT-V1\0` |
+| coordinator closed digest | `YTA-APPLY-COORDINATOR-CLOSED-V1\0` |
 
 `request_sha256`, `proposal_sha256`, `acceptance_sha256`, and
 `recovery_evidence_sha256` are lowercase SHA-256 over their respective domain
@@ -167,12 +325,13 @@ generation after an explicit revocation, or the exact active private-key item
 is absent from the helper-private Keychain namespace.
 
 For an active generation, after trusted UI and fresh user authentication, the
-helper performs exactly one `SecItemCopyMatching` for the ledger's exact active
-tag, access group, data-protection Keychain, and private-key class. Only
-`errSecItemNotFound` (OSStatus `-25300`) establishes absence. If a key reference
-is returned, the helper performs exactly one continuity probe signature over
-the recovery-continuity-probe domain followed by the exact request bytes, using
-the same fresh zero-reuse `LAContext`:
+helper performs exactly one noninteractive existence lookup for the ledger's
+exact active tag using the UI-fail dictionary above. Only
+`errSecItemNotFound` (OSStatus `-25300`) establishes absence. If a typed key
+reference is returned, the helper creates a fresh zero-reuse `LAContext`,
+performs exactly one signing lookup with the separate UI-allow dictionary, and
+uses that returned key/context for exactly one continuity-probe signature over
+the recovery-continuity-probe domain followed by the exact request bytes:
 
 - a valid signature proves continuity is available, ends recovery with
   `RECOVERY_CONTINUITY_AVAILABLE`, discards the probe, and directs the operator
@@ -182,8 +341,9 @@ the same fresh zero-reuse `LAContext`:
   ends with `RECOVERY_ELIGIBILITY_UNPROVEN`; and
 - none of those errors is reclassified as key loss or retried automatically.
 
-If lookup returns any status other than success with one exact key reference or
-`errSecItemNotFound`, recovery fails with
+If the existence lookup returns any status other than success with one typed
+key reference or `errSecItemNotFound`, or the subsequent signing lookup returns
+anything other than one typed key under its exact fresh context, recovery fails with
 `RECOVERY_ELIGIBILITY_UNPROVEN`. A disabled valid ledger performs no key query.
 
 An eligible helper constructs this canonical evidence object:
@@ -386,6 +546,446 @@ and an exact predecessor hash thereafter. Every event must be legal for the
 state derived immediately before it. Recovery is never allowed to bypass a
 gap, fork, malformed predecessor, bad signature, or invalid prior event.
 
+Before any registry ledger read, proposal validation, key generation, presence
+request, or signing work, the requesting peer constructs one compact canonical
+registry intent capped at 1,024 bytes. Its fields are, in order,
+`schema_version` integer `1`, `intent_type` exactly `registry_commit`,
+`transition_kind`, `artifact_descriptor_sha256`, `ceremony_nonce`,
+`requested_at`, and `expires_at`. The transition is exactly `enrollment`,
+`rotation`, `revocation`, or `recovery`; the nonce is unpadded base64url of 32
+fresh random bytes; expiry is after issue and at most five minutes later. Its
+digest is SHA-256 of ASCII `YTA-REGISTRY-INTENT-V1` plus NUL followed by the
+exact canonical bytes. This `registry_intent_sha256` is available before the
+first mutable authority read and is the only registry-operation payload bound
+into coordinator acquisition. It expresses intent, not eligibility or a
+candidate winner.
+
+## Helper-owned apply authority coordinator
+
+The production helper is one per-user launchd-managed server. Its launchd job
+label is exactly the helper identifier
+`io.github.abigotado.youtrack-agent.approval`; launchd is the only component
+allowed to start it or bind its fixed service endpoint, and it does not run a
+second instance of that label concurrently in the same user bootstrap
+namespace. The helper rejects an inherited/listener substitute, a directly
+spawned server mode, or a peer that did not connect through that endpoint.
+This process topology is part of the signed artifact and Gate evidence, not an
+operator convention.
+
+Inside that single server, one non-reentrant serialized authority executor is
+the only code allowed to call coordinator Keychain operations. It takes an
+in-process executor guard before every active acquisition and retains it across
+the complete apply or registry operation through closed reconciliation and
+exact-read/delete active cleanup. A recovery operation takes the same guard
+before its first coordinator classification read and retains it through its
+journal CAS, close reconciliation, exact active read, possible byte-equal
+delete, ambiguous-delete reconciliation, and final classification. A queued
+competitor cannot call `SecItemAdd`, read coordinator state, replace an item,
+or enter another authority path until the guard is released. In particular,
+no acquisition can linearize between recovery's byte-equality read and exact
+active delete, closing the Keychain read/delete ABA interval.
+
+On helper crash or launchd restart, the old process and its executor cease
+before launchd exposes the replacement endpoint. The replacement creates a
+fresh executor, acquires its guard, performs bounded startup enumeration, and
+enters recovery-only mode for any unresolved active record before accepting or
+queuing ordinary authority work. The in-process guard is never treated as
+durable state: the fixed Keychain active record remains the cross-client and
+cross-restart lock and recovery fence.
+
+All CLI clients therefore serialize registry commits and mutation sends
+through one helper-private coordinator service:
+
+```text
+io.github.abigotado.youtrack-agent.approval.apply-authority.v1
+```
+
+Its only accounts are `active`, `permit/<lease-id>`, and
+`closed/<lease-id>`. A lease ID is `YTAL-` followed by uppercase unpadded RFC
+4648 Base32 of 16 random bytes; decode/re-encode equality is required. The
+fixed `active` account is the crash-durable cross-client mutex: both an apply
+attempt and a registry commit must, while holding the authority-executor
+guard, successfully create it with one `SecItemAdd` before their first
+authority-state read. Every accepted client therefore contends on the same
+Keychain primary key rather than an independent process or filesystem lock.
+`errSecDuplicateItem` means busy and grants no authority.
+
+The active value is compact canonical JSON capped at 4,096 bytes with fields
+in this order: `schema_version`, `record_type` exactly
+`apply_coordinator_active`, `lease_id`, `operation_kind` exactly `apply` or
+`registry_commit`, `coordinator_session_id`, `cli_audit_token_sha256`,
+`artifact_descriptor_sha256`, `authorization_context_sha256`,
+`registry_revision`, `plan_id`, `journal_revision`, `registry_intent_sha256`,
+`created_at`, and `expires_at`. The session ID is unpadded base64url of 32
+fresh random bytes. The CLI digest is required for both operation kinds.
+Apply requires final production context, registry revision, plan, and journal
+revision and sets registry intent null. Registry commit requires the pre-read
+registry-intent digest and sets context, registry revision, plan, and journal
+revision null. Its eventual request/proposal/candidate is constructed and
+validated later while the lease is held and must repeat the intent's
+transition and descriptor; its `challenge` equals the intent's decoded
+`ceremony_nonce` bytes re-encoded by the request codec, and its expiry equals
+the intent expiry. It never changes
+the acquired active bytes. Expiry is at most
+ten minutes after creation and never turns an abandoned record into permission
+to delete, steal, or reuse it.
+
+An apply permit is compact canonical JSON capped at 4,096 bytes with fields
+`schema_version`, `record_type` exactly `apply_coordinator_permit`, `lease_id`,
+`active_sha256`, `coordinator_session_id`, `cli_audit_token_sha256`,
+`artifact_descriptor_sha256`, `authorization_context_sha256`,
+`registry_revision`, `plan_id`, `journal_revision`, `receipt_sha256`,
+`mutation_request_sha256`, `issued_at`, and `expires_at`, in that order. It is
+stored once under `permit/<lease-id>`. Every field is non-null, repeats the
+validated active lease, and binds the exact canonical signed receipt and final
+HTTP request bytes. Its expiry equals the active expiry. A permit is evidence
+for at most one send on the still-open authenticated coordinator connection;
+it is not a bearer token and is never returned as caller-selectable bytes.
+
+A closed value is compact canonical JSON capped at 4,096 bytes with fields
+`schema_version`, `record_type` exactly `apply_coordinator_closed`, `lease_id`,
+`active_sha256`, `permit_sha256`, `operation_kind`, `terminal_outcome`,
+`journal_revision`, `registry_record_sha256`, `closed_at`, `close_mode`,
+`recovery_reason`, `recovery_actor_unique`,
+`recovery_actor_audit_token_sha256`, and `recovery_helper_session_id`, in that
+order. Journal revision is required for apply and null for registry commit;
+the registry-record digest has the inverse rule.
+Permit digest is null for registry commit and for an apply that provably ended
+before any permit existed, and is required exactly when that permit exists.
+`terminal_outcome` is exactly `registry_committed`,
+`registry_not_committed`, `failed_before_mutation`, `applied`, or `ambiguous`.
+`close_mode` is `normal` or `recovery`. A normal close has null recovery fields
+and its exact bytes are constructed before the terminal journal CAS. A
+recovery close is constructed only after the recovery handshake has installed
+the no-sign/no-permit/no-send/no-commit fence; it requires all three recovery
+actor fields. `recovery_actor_unique` is the authenticated recovering CLI's
+Security.framework unique identifier, its audit-token digest binds that new
+connection, and `recovery_helper_session_id` is the fresh helper session that
+performed fencing. These are current recovery authority; the active record's
+old token and session remain historical evidence only. `recovery_reason` is
+null during the uninterrupted path or exactly
+`restart_before_permit`, `restart_after_permit`,
+`restart_before_registry_commit`, `restart_after_registry_commit`, or
+`close_or_delete_ambiguous`. It is stored
+once under `closed/<lease-id>`. Permit and closed records are immutable audit
+and fencing records and are never deleted in the first release; reaching
+either 256-record bound blocks writes and registry ceremonies pending a new
+reviewed protocol.
+
+The active, permit, and closed digests are SHA-256 of their respective domain
+followed by their exact canonical bytes. Active, permit, registry-revision, and
+each normal-path closed add are one-shot. After their success, error,
+cancellation, or ambiguous status, the helper performs at most one
+exact-account read: equal bytes mean success, absence means that attempt did
+not commit, and different/malformed/duplicate result is a conflict. No permit,
+registry-revision, or active acquisition add is retried. A later trusted
+recovery is not a blind retry: after fencing it first exact-reads the immutable
+closed account and may perform one add only if it is absent, using exact closed
+bytes already committed with the terminal journal CAS.
+
+### Apply linearization and fencing
+
+The uninterrupted apply order is exact:
+
+1. The single launchd helper authenticates the connected CLI and checks trusted
+   time before the descriptor expiry without reading mutable authority. If
+   expired, the CLI CASes `confirmed -> expired` and no active item exists.
+   Otherwise it enters the serialized authority executor, takes the executor
+   guard, rechecks expiry, and creates the fixed active item. It retains the
+   guard through step 6 and active cleanup. This successful add is coordinator
+   acquisition, not send authority.
+2. While retaining the same authenticated connection and excluding every
+   registry commit, it replays the complete ledger, validates the unexpired
+   helper profile and final authorization pair/context, and checks the receipt,
+   project policy, credential binding, preconditions, plan, and journal
+   revision. Expiry or another definitive failure after acquisition but before
+   permit closes `failed_before_mutation`, burns the receipt, and sends zero
+   mutation bytes.
+3. The CLI durably compare-and-swaps `confirmed -> in_flight`, storing the
+   exact historical registry and authorization evidence. This is the local
+   non-replay point; failure closes the lease as `failed_before_mutation`.
+4. The helper reauthenticates that same connection, rechecks the unchanged
+   ledger/context/profile cutoff and returned `in_flight` revision, then adds
+   exactly one permit. The successful or exact-read-reconciled permit add is
+   the sole send-authority linearization point.
+5. Only the same connection may send the one request whose exact bytes hash to
+   `mutation_request_sha256`. The helper keeps the coordinator acquired across
+   send and outcome handling, so rotation, revocation, recovery, enrollment,
+   and another apply cannot overlap it. There is no second permit, redirect,
+   retry, or resend.
+6. The CLI constructs the exact `close_mode=normal` closed bytes and durably
+   compare-and-swaps them together with `applied`, `failed_before_mutation`, or
+   `ambiguous` into journal v2. The helper exact-reads that revision and bytes,
+   reads `closed/<lease-id>` first, accepts identical bytes as already
+   committed, or performs one identical add only when the read was not found.
+   Different/malformed bytes fail closed. Only after an identical durable close
+   does it exact-read and clean up `active` under the rules below. Durable
+   closed bytes are the close/fencing linearization point; active deletion is
+   idempotent cleanup, never proof of closure.
+
+If the normal-path closed add returns ambiguously, its one immediate exact read
+maps identical bytes to success, not found to
+`APPLY_COORDINATOR_CLOSE_AMBIGUOUS`/exit 11 for trusted recovery, and
+different/malformed/other to `AUTHORITY_STATE_CORRUPT`/exit 1. The normal path
+does not issue another add or delete active after either failure.
+
+The authenticated coordinator connection carries the lease ID, active digest,
+session ID, and expected journal revision on every message. A reconnect,
+different audit token, restarted helper session, stale journal revision,
+expired lease, or message after close cannot obtain or exercise a permit. The
+network executor accepts request bytes only while that original connection is
+open and the helper still holds an equal active item with an equal permit and
+no closed item. The CLI cannot bypass this check by invoking a transport
+directly; write-capable transport construction remains behind this coordinator
+capability.
+
+Registry enrollment, rotation, revocation, and recovery use the same active
+account with `operation_kind=registry_commit`. The peer first creates the
+canonical registry intent and the helper binds its digest into active; only
+after the serialized executor guard and a strict pre-acquisition profile-expiry
+check may it attempt the active add. At or after expiry it adds nothing. Only
+after successful acquisition may the helper read the ledger or validate/build the
+request, proposal, or candidate. Under the same lease it rechecks exact peer,
+descriptor, intent, ledger, and trusted time strictly before profile expiry
+immediately before the proposal signature, again before the final registry
+signature, and again before the one revision add. It validates the eventual
+candidate against the active intent before commit, reconciles the one revision
+add exactly, adds a committed/not-committed closed record, and then performs
+read-first active cleanup. No registry revision can linearize between an
+apply's in-flight CAS and durable close. If a registry operation acquires
+first, its revision and close are visible before a later apply revalidates, so
+the old receipt is canceled without a permit.
+An initial enrollment is not an exception: even an invalid or duplicate
+enrollment attempt must acquire `active` before its first ledger read or
+proposal validation. If apply already owns `active`, enrollment returns
+`APPLY_COORDINATOR_BUSY`, performs zero ledger reads, key generation, proposal
+signing, revision adds, or cleanup deletes, and cannot learn whether the
+candidate enrollment would otherwise be valid. Gate 1B proves this ordering
+with the deterministic invalid-enrollment contention case.
+
+### Restart and ambiguous recovery
+
+On startup the sole launchd helper takes its fresh authority-executor guard,
+enumerates and projects the bounded coordinator service, and establishes
+clear or recovery-only mode before exposing ordinary approval, registry, or
+apply traffic. An unresolved active item puts that helper session into
+recovery-only mode before it accepts a caller. Recovery deliberately does not
+require the active record's old audit
+token or helper session: those processes may have crashed. Instead the new
+helper authenticates a newly connected CLI by the same exact stable code
+identity and descriptor bound by the active record, then requires trusted UI
+authorization and retained evidence matching every applicable active field.
+The old audit-token/session values are checked as historical fields in that
+evidence, never as the recovering actor.
+
+The recovery request is compact canonical JSON capped at 16,384 bytes with
+fields, in order, `schema_version` integer `1`, `message_type` exactly
+`apply_authority_recovery`, `active_sha256`, `artifact_descriptor_sha256`,
+`recovery_actor_unique`, `recovery_actor_audit_token_sha256`,
+`recovery_helper_session_id`, `journal_record_sha256`,
+`registry_intent_sha256`, `registry_candidate_sha256`, `recovery_nonce`,
+`requested_at`, and `expires_at`. Apply requires the journal digest and null
+registry digests; registry recovery requires the active intent digest and the
+retained candidate digest when a candidate had been produced, with journal
+null. The actor unique/audit-token identify the newly connected exact CLI; the
+helper session is the new 32-byte base64url session; the nonce is 32 fresh
+random bytes; expiry is at most five minutes. The helper exact-reads active,
+permit, closed, journal/candidate evidence, validates their full hash chain and
+descriptor, and reauthenticates the new connection before any state change.
+
+Successful validation installs a recovery-only fence for that active digest.
+It can classify retained state, request one journal v2 CAS, persist/reconcile
+one exact closed record, and remove only the byte-equal active record. It
+cannot sign, acquire a lease, create/exercise a permit, construct or send a
+network request, commit a registry revision, generate a key, or resume any old
+message. These prohibitions apply even if the retained permit was unused. If
+the exact peer/evidence is unavailable, recovery remains blocked. Profile
+expiry normally rejects authority, but a recovery request may proceed at or
+after `helper_profile_expires_at` solely through this fenced cleanup subset;
+expiry can never enable a signature, registry commit, permit, or send.
+
+The helper never edits a CLI journal directly, and no active item permits
+resumption of a send:
+
+- an apply-active record with no permit proves that no send authority was
+  issued. After byte-validating the journal, recovery records
+  `failed_before_mutation`, and asks the CLI to CAS that outcome plus exact
+  recovery-closed bytes into journal v2. This terminalizes and burns the
+  receipt whether the journal was still `confirmed` or already `in_flight`; it
+  never restores either state. A registry-commit active record
+  has no permit by definition; recovery instead exact-reads its intended
+  revision against the retained intent/candidate, records
+  `registry_committed` or `registry_not_committed`, and uses
+  `restart_after_registry_commit` for committed or
+  `restart_before_registry_commit` for absent;
+- active with a permit but no closed record never sends. If the exact retained
+  journal already has a durable `applied`, `failed_before_mutation`, or
+  `ambiguous` outcome, recovery preserves that outcome byte-for-byte and adds
+  the corresponding closed record; a crash after durable outcome cannot
+  downgrade it. If no terminal outcome is durable, recovery writes
+  `ambiguous`, even when a fixture observed zero network bytes. In both paths
+  it uses `restart_after_permit`; normal closed bytes already stored by a
+  terminal CAS remain authoritative, otherwise the CLI CAS stores newly
+  constructed recovery-closed bytes after fencing;
+- active with a matching closed record never resumes work. It only reconciles
+  exact active cleanup. A crash after closed add is therefore fenced before
+  restart; and
+- with no active item, retained permit/closed records are valid audit state
+  only when every apply permit has one matching closed record and every apply
+  close names its permit; registry closes have no permit. An unmatched permit,
+  closed/permit mismatch, multiple active results, unknown account, malformed
+  value, missing journal/candidate, or ambiguous Keychain result blocks the
+  coordinator for explicit operator investigation. Expiry never authorizes
+  reuse, but it does not prevent the exact recovery classification above.
+
+Close recovery is exact-read-first and safely idempotent. When the terminal CAS
+already stored normal closed bytes, recovery first exact-reads
+`closed/<lease-id>` against those bytes: identical means the normal close had
+committed and no recovery close is written; different/malformed/other fails
+with `AUTHORITY_STATE_CORRUPT`; not found proves it did not commit. Only after
+that not-found result and the recovery fence, the CLI atomically appends exact
+`close_mode=recovery` bytes—binding the current recovery actor/helper session
+while preserving the same terminal outcome—to journal v2. If no normal bytes
+ever existed, that post-fence CAS creates the recovery bytes directly. The
+helper then exact-reads against those recovery bytes: identical means already
+committed; not found permits one identical add; different/malformed/other is
+corruption. An ambiguous recovery add ends with
+`APPLY_COORDINATOR_CLOSE_AMBIGUOUS`; a later trusted recovery repeats the
+read-first algorithm, not a blind add. It may therefore observe the identical
+winner or, if still absent, make one identical attempt. No path changes the
+terminal outcome or creates another permit/send.
+
+Active cleanup is also exact-read-first under the continuously held serialized
+authority-executor guard. Not found means cleanup complete. Bytes identical to
+this recovery request's retained active record permit one exact active delete;
+an ambiguous delete ends the command, and a later trusted recovery begins
+again with the exact read under a newly held guard. Different well-formed active bytes
+belong to a newer lease and are a successful stale no-op: recovery does not
+delete, close, or otherwise affect them. Malformed/duplicate/other results are
+`AUTHORITY_STATE_CORRUPT`. This permits a repeated cleanup command while never
+blindly repeating deletion and never touching a nonmatching lease.
+
+Crash after registry revision commit is reconciled only by the existing exact
+revision read, then closed as committed with
+`restart_after_registry_commit`. Crash after send but before a journal outcome
+remains ambiguous and read-only reconciliation is required. A process exit,
+timeout, connection reset, invalid response, stale fence, or cleanup failure
+never authorizes a second permit or network retry.
+
+### Future authority commands and machine errors
+
+This design intentionally makes an additive command/exit-contract change while
+preserving the JSON v1 envelope. It adds exactly two commands:
+
+```text
+youtrack-agent-cli --profile NAME mutation authority status
+youtrack-agent-cli --profile NAME mutation authority recover
+```
+
+Both commands require one explicit, existing `--profile NAME` before helper
+contact; missing profile returns the existing `PROFILE_REQUIRED` usage error
+and exit 2, and an unknown profile uses the existing not-found contract and
+exit 3. Their only accepted inherited flags are `--profile`,
+`-o/--output text|json`, the retained hidden `--json` alias, `--timeout`, and
+`-v/--verbose` with the existing meanings and conflict rules. They reject
+`--yes`, `--dry-run`, `--fields`, and `-o/--output raw` as usage/exit 2;
+`status` does not reinterpret dry-run because it is already read-only, and
+`recover` never treats dry-run as approval. Neither command defines or accepts
+`--plan-id`, a lease ID, `--force`, a cleanup selector, positional arguments,
+stdin data, or an environment override; an unknown inherited or local flag is
+also usage/exit 2. `status` is bounded and read-only. `recover` operates only on the sole exact unresolved active record,
+launches trusted native UI that displays profile, operation kind, lease digest,
+terminal classification, and proposed cleanup, and requires fresh user
+presence. Cancellation changes nothing. The command can run the recovery-only
+handshake above; it can never force-clear, select/delete an arbitrary item, or
+contact YouTrack.
+
+A successful JSON `status` response has exactly the JSON v1 success-envelope
+top-level fields `ok` equal to true, `v` equal to integer 1, `data`, and
+`meta`, in that order. `meta` is required and has
+the existing invocation fields `profile`, `instance`, `account_id`, and
+`account_login` in that order, copied from the validated non-secret profile;
+it contains no count, cursor, authority state, or credential. `data` has these fields in order: `profile`,
+`authority_status`, `artifact_descriptor_sha256`,
+`helper_profile_expires_at`, `active`, `permit`, `closed`, `journal`, and
+`allowed_action`. Status is `clear`, `busy`, `recovery_required`,
+`expired_recovery_only`, or `corrupt`; action is respectively `none`, `wait`,
+`recover`, `recover`, or `operator`. `active` is null or contains, in order,
+`lease_id`, `operation_kind`, `active_sha256`, `created_at`, `expires_at`,
+`historical_cli_audit_token_sha256`, and `historical_helper_session_id`.
+`permit` is null or contains `permit_sha256`, `mutation_request_sha256`,
+`issued_at`, and `expires_at`. `closed` is null or contains `closed_sha256`,
+`terminal_outcome`, `close_mode`, and `closed_at`. `journal` is null or
+contains `version`, `revision`, `state`, and `record_sha256`. These projections
+contain digests and public metadata only—never receipt bytes, request bytes,
+credentials, private keys, Keychain values, or untrusted remote content.
+
+A successful JSON `recover` response uses the same required exact invocation
+`meta`; `data` fields are `profile`, `recovery_status`, `lease_id`, `terminal_outcome`, `closed_sha256`,
+`active_cleanup`, `recovery_actor_unique`, and
+`recovery_helper_session_id`, in that order. Recovery status is `recovered`,
+`already_closed`, or `stale_active_ignored`; cleanup is `deleted`,
+`already_absent`, or `stale_noop`. `terminal_outcome` and `closed_sha256` are
+nullable only for `stale_active_ignored`; every other field is non-null. Text
+mode is a bounded projection of the same fields. Raw output is unsupported for
+both commands.
+
+Every error uses exactly the existing JSON v1 failure shape
+`{"ok":false,"v":1,"error":{"code":"CODE","message":"MESSAGE"},"hint":"HINT"}`
+with no `data` or `meta`. The following new exit numbers deliberately express
+four distinct caller actions; they must be added to the public contract rather
+than disguised as existing exit 9:
+
+| Future exit | Name | Caller action |
+| ---: | --- | --- |
+| 10 | `AUTHORITY_BUSY` | wait, then call authority status |
+| 11 | `AUTHORITY_RECOVERY` | obtain trusted presence and call authority recover |
+| 12 | `ARTIFACT_EXPIRED` | install a newly authorized artifact; only recovery cleanup remains available |
+| 13 | `RECONFIRM_REQUIRED` | prepare a new plan and obtain a new confirmation |
+
+| Future stable `error.code` | Exit | Exact `message` | Exact `hint` |
+| --- | ---: | --- | --- |
+| `APPLY_COORDINATOR_BUSY` | 10 | `authority coordinator is busy` | `run mutation authority status and wait` |
+| `APPLY_COORDINATOR_RECOVERY_REQUIRED` | 11 | `authority recovery is required` | `run mutation authority recover with trusted user presence` |
+| `AUTHORITY_RECOVERY_CANCELED` | 11 | `authority recovery was canceled` | `leave state unchanged or rerun mutation authority recover` |
+| `APPLY_COORDINATOR_CLOSE_AMBIGUOUS` | 11 | `authority close requires recovery` | `run mutation authority recover; never resend the mutation` |
+| `APPLY_COORDINATOR_ACTIVE_DELETE_AMBIGUOUS` | 11 | `authority cleanup requires recovery` | `run mutation authority recover; never resend the mutation` |
+| `HELPER_PROFILE_EXPIRED` | 12 | `authorized helper profile has expired` | `install a newly authorized artifact; recovery cleanup only` |
+| `APPLY_PRE_PERMIT_ABORTED` | 13 | `mutation stopped before permit issuance` | `prepare a new plan and obtain a new confirmation` |
+| `AUTHORITY_STATE_CORRUPT` | 1 | `local authority state is corrupt` | `stop and request operator repair; do not retry or delete state` |
+| `REGISTRY_ORPHAN_KEY_DELETE_AMBIGUOUS` | 1 | `orphan key cleanup is ambiguous` | `stop and request operator repair; do not repeat deletion` |
+| `JOURNAL_V1_AUTHORITY_STATE_QUARANTINED` | 1 | `legacy authority journal state is quarantined` | `stop and request operator repair; do not migrate or retry it` |
+| `AUTHORITY_RECOVERY_DENIED` | 1 | `authority recovery evidence is invalid` | `stop and request operator repair; do not force clear state` |
+
+No new authority command or reason emits exit 9. The existing contract retains
+that number for its already published conflict/stale uses;
+`WRITE_OUTCOME_UNKNOWN` may still use it to direct read-only remote
+reconciliation. It is not reused for coordinator busy, recovery, profile
+expiry, reconfirmation, or cleanup corruption. Unknown new exits are nonzero
+and fail closed for older callers; the envelope version remains 1 because its
+shape is unchanged.
+
+These commands, exits, and reasons are future contract values and are not
+implemented by the current disabled slice. The implementation of record must
+add the four exit definitions and one authoritative reason registry to
+`internal/errx/contract.go`, extend `errx.Describe()` to expose the exact
+code/exit/message/hint mapping, and then extend—not assume—the current
+`tools/gencontract` renderer. `go generate` from `internal/errx` must update
+both `docs/contract.md` and
+`assets/skills/youtrack-agent/reference/contract.md`. The Cobra tree must add
+only the two commands above; the existing `tools/gencommands` path must then
+update `docs/commands.md` and
+`assets/skills/youtrack-agent/reference/commands.md`. The authoritative
+`.agents/rules/cli-contract.md` must be updated in that implementation change,
+its tracked `.cursor/rules` compatibility mirror must be regenerated through
+`.agents/scripts/sync-rules.py`, and both the sync check and the machine-local
+provider compiler `--check` gate must pass. The embedded skill's
+`SKILL.md` and write-policy reference must be updated to route busy/recovery/
+expiry/reconfirm/corruption exactly as above, and the installed Codex/Claude
+copies must come only from that regenerated embedded skill. None of those
+production, generated-contract, canonical-rule, or tracked mirror files is
+changed by this design-only delta.
+
 ## Commit and ambiguous-result reconciliation
 
 Before mutation, the helper sends the complete candidate stored-record bytes
@@ -444,6 +1044,43 @@ strict low-S signatures. At least one vector must form a multi-event chain
 Another positive vector covers recovery from an active valid ledger after the
 exact `errSecItemNotFound:-25300` result.
 
+The same fixture directory contains language-neutral serialized projections
+for every exact key-generation, signing-key lookup with a fresh zero-reuse
+`LAContext` and UI allow, noninteractive existence lookup with UI fail and no
+context, key-enumeration, registry
+add/enumeration/exact-read, orphan-key delete, coordinator add/enumeration/
+exact-read/pre-send-probe, and active-delete dictionary above. Positive coordinator vectors
+cover apply active records, registry-commit active records bound only to a
+pre-read canonical registry intent, later candidate validation under that
+lease, one permit, every normal/recovery closed
+outcome, uninterrupted apply, registry-first cancellation, apply-first
+serialization, restart before permit, restart after permit but before send,
+restart after send but before outcome, close-add ambiguity, and active-delete
+ambiguity. They also cover the one-per-user launchd helper topology, serialized
+authority-executor guard acquisition/release, restart startup classification,
+and a competitor queued after byte-equal active read but before delete that
+performs zero Keychain operations until guard release and acquires only after
+old active is absent. Private-key deletion vectors separately cover delete success,
+ambiguous delete followed by typed `SecKey`, ambiguous delete followed by
+`errSecItemNotFound`, wrong CFType, multiple results,
+and every other OSStatus; coordinator-active deletion vectors separately cover
+delete success, equal-byte exact-read ambiguity, not-found reconciliation,
+different bytes, malformed projection, and every other OSStatus. Fixture
+manifests name symbolic Security.framework constants and
+typed CF values; implementations construct native dictionaries and compare the
+bounded projection rather than relying on CFDictionary iteration order. No
+literal digest is inserted into this document before the vector generator
+emits and both implementations verify it.
+
+Separate negative query vectors delete or substitute
+`kSecUseAuthenticationContext`, reuse an `LAContext`, set a nonzero reuse
+duration, replace UI allow with fail on signing, add a context or UI allow to
+existence/delete, omit UI fail, return a typed key from the wrong query, trigger
+unexpected authentication UI, or carry a signing key/context into a second
+signature. Signing vectors require exactly one prompt-capable lookup and one
+signature; existence/delete vectors require zero prompt presentation and zero
+signature.
+
 Negative vectors must independently cover:
 
 - every raw and aggregate size boundary, revision 0/257, 256/257 records, and
@@ -465,7 +1102,37 @@ Negative vectors must independently cover:
   prefix;
 - duplicate-item races, exact-winner reconciliation, different-winner
   conflict, absent ambiguous add, read ambiguity, and any attempted automatic
-  add retry.
+  add retry;
+- a missing/additional/wrong-typed dictionary entry, legacy Keychain selection,
+  synchronizable item, wrong accessibility/access group/service/account/class,
+  match-limit substitution, unexpected return CFType, match-all bare
+  dictionary, duplicate/unknown projected account or key tag, over-bound result,
+  broad delete, and any registry revision/permit/closed delete;
+- a missing, additional, reordered, cached, match-all, or differently
+  projected pre-send probe; active/permit byte mismatch; closed lookup success;
+  or any send after a probe failure; and
+- two active leases, permit without the exact active/session/audit token,
+  permit before `in_flight`, send without or after permit/close, second permit,
+  second send, registry commit overlapping apply, active deletion before close,
+  stale reconnect/session/journal fence, restart resumption, crash-state
+  downgrade, and treating any post-permit uncertainty as retryable;
+- a second launchd helper instance/listener, direct helper-server spawn,
+  coordinator Keychain access outside the serialized executor, guard release
+  before close/read-delete completion, an acquisition call or active
+  replacement between equality read and delete, competitor coordinator reads
+  before release, or ordinary authority admitted before restart startup
+  classification;
+- registry active without an intent, candidate digest substituted for intent,
+  intent created after a ledger/proposal read, transition/descriptor/nonce/
+  expiry disagreement between intent and request, candidate not validated
+  under the same lease, or any proposal/final signature/commit at or after
+  profile expiry; and
+- recovery requiring the crashed audit token/session, recovery with changed
+  code identity or descriptor, missing retained evidence, recovery before its
+  fence, recovery sign/acquire/permit/send/commit, recovery close missing the
+  new actor/session, normal/recovery close substitution, close add without a
+  preceding exact read, active delete without exact read/byte equality, or
+  deletion of a different well-formed active lease.
 
 Go and Swift must parse and re-encode every positive byte identically and
 reject every negative vector with the same stable reason class. Gate 1A runs
@@ -473,6 +1140,15 @@ both implementations against the same immutable fixture hashes.
 
 ## Evidence
 
+- Apple defines the dictionary-driven Keychain operations
+  [`SecItemAdd`](https://developer.apple.com/documentation/security/secitemadd(_:_:)),
+  [`SecItemCopyMatching`](https://developer.apple.com/documentation/security/secitemcopymatching(_:_:)),
+  and
+  [`SecItemDelete`](https://developer.apple.com/documentation/security/secitemdelete(_:)),
+  together with the explicit
+  [`kSecUseDataProtectionKeychain`](https://developer.apple.com/documentation/security/ksecusedataprotectionkeychain)
+  selector. This protocol narrows those general APIs to the exact dictionaries
+  and bounded projections above.
 - Apple documents that Keychain duplicate detection uses an item's composite
   primary key in [`errSecDuplicateItem`](https://developer.apple.com/documentation/security/errsecduplicateitem).
 - Apple documents private key generation through
