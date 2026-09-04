@@ -268,8 +268,18 @@ and trust evaluation enabled, followed by `SecTrustCopyCertificateChain` on
 the returned trust. Exactly one signer and one encapsulated content value must
 exist. Every call must succeed; signer status and certificate verification
 status must be exactly `kCMSSignerValid` and numeric `errSecSuccess`.
-`cms_all_certificates_sha256` covers the complete `CMSDecoderCopyAllCerts`
-DER multiset sorted by bytewise DER SHA-256. `cms_chain` is the complete
+`CMSDecoderCopyAllCerts` must return 1..32 certificates. Each certificate is
+exported once with `SecCertificateCopyData`; every DER value is nonempty and
+the aggregate DER size is at most 1 MiB. The complete multiset, including
+duplicate DER values, is sorted first by the 32 raw digest bytes of
+`SHA-256(DER)` and then by the raw DER bytes as a deterministic tie-breaker.
+The `cms_all_certificates_sha256` preimage is the ASCII domain
+`YTA-CMS-ALL-CERTIFICATES-V1\0`, followed by the certificate count as one
+unsigned 32-bit big-endian integer, followed for each sorted multiset entry by
+its DER length as one unsigned 32-bit big-endian integer and then its exact DER
+bytes. Its value is SHA-256 of that complete byte sequence. No separator,
+certificate digest, JSON encoding, deduplication, or platform array order is
+part of the preimage. `cms_chain` is the complete
 leaf-to-root evaluated chain; each entry carries every field of the checked-in
 policy entry and must equal it exactly. Unknown critical extensions, omitted
 extension semantics, extra/unordered certificates, policy-digest mismatch, or
@@ -444,16 +454,17 @@ authorization/production-activation-grant.json
 authorization/publication-envelope.json
 authorization/post-grant-verification-plan.json
 authorization/post-grant-verification-evidence-set/index.json
+authorization/post-grant-verification-evidence-set/install-files.json
 authorization/post-grant-verification-evidence-set/files/...
 ```
 
 The descriptor, provisional authorization, and activation grant are outside
 the signed app and outside the app-only payload archive. The publication
-envelope, exact post-grant plan, canonical complete evidence-set index, and
-every file listed in its `install_evidence_files` manifest are also outside
-the app-only payload archive but inside the outer delivery archive at the
-literal paths above. The
-`files/` tree is the index's closed, relative-path namespace; missing, extra,
+envelope, exact post-grant plan, canonical complete evidence-set index,
+canonical install-evidence manifest, and every file listed by that manifest
+are also outside the app-only payload archive but inside the outer delivery
+archive at the literal paths above. The `files/` tree is the install-evidence
+manifest's closed, relative-path namespace; missing, extra,
 duplicate, absolute, dot-segment, symlink, hard-link, or escaping entries fail
 closed. The outer archive is an opaque release file capped at 1 GiB and the
 Cask pins the SHA-256 of its exact downloaded bytes. The envelope deliberately
@@ -776,16 +787,16 @@ Post-grant verification for `confirm_only` has exactly these cases:
 1. `post-grant.confirm.prepare-confirm-success`
 2. `post-grant.confirm.apply-all-deny`
 3. `post-grant.confirm.receipt-terminal-replay-deny`
-4. `post-grant.confirm.cleanup`
-5. `post-grant.confirm.authority-negatives`
+4. `post-grant.confirm.authority-negatives`
+5. `post-grant.confirm.cleanup`
 
 Post-grant verification for `issue_create` has exactly these cases:
 
 1. `post-grant.issue-create.prepare-confirm-apply-dispatch-deny`
 2. `post-grant.issue-create.zero-mutating-bytes`
 3. `post-grant.issue-create.receipt-terminal-replay-deny`
-4. `post-grant.issue-create.cleanup`
-5. `post-grant.issue-create.authority-negatives`
+4. `post-grant.issue-create.authority-negatives`
+5. `post-grant.issue-create.cleanup`
 
 The verifier compiles the following closed case contracts. Step IDs and
 assertion suffixes occur in the shown order; a suffix forms the assertion ID by
@@ -844,16 +855,16 @@ directly appending it to the case ID. Every step always records `stdout` and
 | `post-grant.confirm.prepare-confirm-success` | `prepare`, `confirm` | `.primary`, `.final-production-context` | `ipc`, `ui` |
 | `post-grant.confirm.apply-all-deny` | `apply-negatives` | `.primary`, `.zero-network-bytes` | `network`, `ipc` |
 | `post-grant.confirm.receipt-terminal-replay-deny` | `consume`, `replay` | `.primary`, `.terminal-state`, `.replay-denied` | `ipc`, `security_framework` |
-| `post-grant.confirm.cleanup` | `cleanup`, `verify-cleanup` | `.primary`, `.cleanup-complete` | `ipc`, `security_framework` |
 | `post-grant.confirm.authority-negatives` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `ipc`, `security_framework` |
+| `post-grant.confirm.cleanup` | `cleanup`, `verify-cleanup` | `.primary`, `.cleanup-complete` | `ipc`, `security_framework` |
 
 | Post-grant issue-create case | Exact step IDs | Assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
 | `post-grant.issue-create.prepare-confirm-apply-dispatch-deny` | `prepare`, `confirm`, `apply` | `.primary`, `.final-production-context`, `.dispatch-deny-code` | `network`, `ipc`, `ui` |
 | `post-grant.issue-create.zero-mutating-bytes` | `audit` | `.primary`, `.zero-mutation-bytes` | `network` |
 | `post-grant.issue-create.receipt-terminal-replay-deny` | `consume`, `replay` | `.primary`, `.terminal-state`, `.replay-denied` | `network`, `ipc`, `security_framework` |
-| `post-grant.issue-create.cleanup` | `cleanup`, `verify-cleanup` | `.primary`, `.cleanup-complete` | `network`, `ipc`, `security_framework` |
 | `post-grant.issue-create.authority-negatives` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `network`, `ipc`, `security_framework` |
+| `post-grant.issue-create.cleanup` | `cleanup`, `verify-cleanup` | `.primary`, `.cleanup-complete` | `network`, `ipc`, `security_framework` |
 
 For each step and transcript kind, the transcript ID is the case ID, one dot,
 the step ID, one dot, and the kind. `assertion_ids` equals the full IDs derived
@@ -1474,8 +1485,11 @@ receipt and its 32-byte nonce. The journal CAS and a repeated ordinary
 confirm/apply attempt must both prove the terminal record and return the stable
 `RECEIPT_ALREADY_CONSUMED` reason without UI, preflight, or network access.
 
-Cleanup runs only after the terminal record and its replay-denial observations
-have been retained by digest. Its compact canonical evidence object is capped
+Cleanup runs only after the terminal record, its replay-denial observations,
+and every authority-negative observation have been retained by digest. It is
+the final case and final state-changing action for the post-grant session; no
+step may restage a plan, receipt, socket, copied sidecar, or Keychain object
+after its final probe. Its compact canonical evidence object is capped
 at 8,192 bytes and contains, in order: `schema_version` integer `1`,
 `evidence_type` exactly `post_grant_cleanup`, `descriptor_sha256`,
 `production_activation_grant_sha256`, `architecture`, `gate_session_id`,
@@ -1550,8 +1564,8 @@ exactly `post_grant_verification`, `descriptor_sha256`,
 `provisional_authorization_sha256`, `production_activation_grant_sha256`,
 `authorization_context_sha256`, `gate_plan_sha256`, `approved_capability`,
 `fixture_set_sha256`, `evidence_scopes` exactly the one-element array
-`exact_artifact`, `architectures`, `indexes`, `install_evidence_files`, and
-`result` exactly `pass`.
+`exact_artifact`, `architectures`, `indexes`,
+`install_evidence_manifest_sha256`, and `result` exactly `pass`.
 `architectures` exactly equals the descriptor array. `indexes` has one entry
 per architecture in that order, with fields `architecture`,
 `evidence_index_sha256`, `post_grant_verification_token_sha256`,
@@ -1559,27 +1573,43 @@ per architecture in that order, with fields `architecture`,
 `cleanup_evidence_sha256`, in that order. Every value must equal its token,
 plan, index, authority pair, context, and retained file.
 
-`install_evidence_files` is the complete manifest for the archive's
+`install_evidence_manifest_sha256` is SHA-256 of the exact compact canonical
+`install-files.json` bytes. That separate object is capped at 2,097,152 bytes
+and has fields in exact order: `schema_version` integer `1`, `manifest_type`
+exactly `post_grant_install_evidence`, `descriptor_sha256`,
+`authorization_context_sha256`, `gate_plan_sha256`, and `files`. Its three
+digests exactly equal the complete evidence-set manifest. `files` is the
+complete inventory for the archive's
 `authorization/post-grant-verification-evidence-set/files/` tree. It is sorted
-by the raw UTF-8 bytes of `path` and contains one entry for every regular file
+by the raw ASCII bytes of `path` and contains one entry for every regular file
 under that directory, with fields `path`, `size`, and `sha256` in that order.
-`path` is a non-empty NFC UTF-8 relative path of slash-separated components;
-empty, dot, dot-dot, control-character, backslash, leading-slash, duplicate,
-case-fold-colliding, or normalization-colliding paths are invalid. `size` is a
+Across all architectures it contains 1..1,024 entries and names at most 256
+MiB of aggregate file bytes; these are independent whole-manifest caps, not
+per-index allowances. The counts and aggregate size are checked before any
+proportional allocation or file read.
+`path` is 1..1,024 printable ASCII bytes without JSON escapes and is a relative
+path of slash-separated components. Each component is 1..128 bytes and uses
+only ASCII letters, digits, dot, underscore, or hyphen; dot, dot-dot, empty,
+backslash, leading-slash, trailing-slash, duplicate, and ASCII-case-fold-
+colliding paths are invalid. `size` is a
 non-negative JSON integer no greater than the file-type cap, and `sha256` is
 the digest of the exact file bytes. The list includes every per-architecture
 evidence index and every referenced fixture, transcript, assertion, result
-manifest, terminal record, cleanup object, and inventory/probe object. The
-evidence-set manifest itself is not self-listed: its fixed `index.json` path is
-authenticated by the publication envelope's
-`post_grant_verification_evidence_set_sha256`. A missing, additional,
+manifest, terminal record, cleanup object, and inventory/probe object. Neither
+manifest is self-listed: the fixed `index.json` path is authenticated by the
+publication envelope's `post_grant_verification_evidence_set_sha256`, and the
+fixed `install-files.json` path is authenticated by the evidence-set
+manifest's `install_evidence_manifest_sha256`. A missing, additional,
 reordered, mismatched, linked, escaping, or secret-bearing file fails the
-entire set. `post_grant_verification_evidence_set_sha256` is SHA-256 of these
-exact manifest bytes, so it authenticates both evidence bytes and their
-installed path/multiplicity mapping.
+entire set. `post_grant_verification_evidence_set_sha256` is SHA-256 of the
+exact compact evidence-set manifest bytes. The envelope therefore
+authenticates the compact evidence-set manifest, which authenticates the
+install-evidence manifest, which authenticates every evidence file's installed
+path, size, digest, ordering, and multiplicity without exceeding the compact
+object's 16,384-byte cap.
 
-Post-grant verification token bytes are deliberately absent from
-`install_evidence_files` and from the delivery archive. Before publication,
+Post-grant verification token bytes are deliberately absent from the install-
+evidence manifest and from the delivery archive. Before publication,
 the Gate and release verifiers validate each root signature, token/session
 binding, and expiry and then record its exact digest in both the
 per-architecture index and evidence-set manifest. At installation time that
@@ -1644,9 +1674,10 @@ The Cask uses the literal outer-delivery-archive SHA-256, never `:no_check`,
 installs the complete signed app and detached `authorization/` tree without
 re-signing, rebuilding, fetching, or rewriting any byte, and links the
 contained CLI. Installation validation reads the root-signed publication
-envelope, exact post-grant plan, evidence-set index, and every file listed in
-`install_evidence_files` only from their fixed paths under that same versioned
-installation root. It must verify the envelope signature, matching provisional
+envelope, exact post-grant plan, evidence-set index, install-evidence manifest,
+and every file listed by that manifest only from their fixed paths under that
+same versioned installation root. It must verify the envelope signature,
+matching provisional
 authorization and
 activation grant, authorization context, descriptor, post-grant plan and
 complete evidence-set binding, Developer ID signatures, notarization, and
@@ -1675,13 +1706,15 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
   complete evidence-set manifests;
 - code/entitlement, profile CMS, certificate-chain/policy, notary, and
   non-circular staple evidence wrappers, including exact tool find/version
-  captures and retained output digests;
+  captures, retained output digests, and CMS-certificate multiset framing with
+  duplicate DER values and digest-sort ties;
 - `confirm_only` and `issue_create` provisional authorizations, provisional
   contexts, final grant-bound production contexts, and smoke receipt contexts;
 - both per-architecture activation-smoke token/index variants, complete smoke
   evidence sets, production activation grants, both per-architecture
   post-grant token/index variants, terminal-journal and cleanup objects, and
-  complete post-grant evidence sets; and
+  complete post-grant evidence sets plus their separately digest-bound install-
+  evidence manifests with multi-component ASCII paths; and
 - the publication envelope, app-payload archive, and outer delivery archive.
 
 Both implementations must parse, validate, re-encode, hash, and verify every
@@ -1705,6 +1738,9 @@ independently covers:
 - raw-entitlement-present/dictionary-absent, dictionary-present/raw-absent,
   raw/dictionary semantic disagreement, unknown entitlement, and both values
   absent for a helper that requires its fixed entitlements;
+- CMS certificate count/aggregate overflow, empty DER, changed count/length
+  framing, digest-only or JSON preimage, array-order dependence, duplicate DER
+  removal, wrong digest/DER sort order, and trailing certificate bytes;
 - sidecar traversal, symlink, hard link, wrong owner/mode/type, oversize,
   truncation, inode/metadata change, mixed descriptor, and reopen races;
 - wrong Gate runner, connection audit token, session, nonce, expiry, Gate ID,
@@ -1750,10 +1786,14 @@ independently covers:
 - app-payload, provisional-authorization, activation-smoke evidence set,
   activation-grant, post-grant plan/evidence set, delivery-archive,
   publication-envelope, remote-asset, and Homebrew checksum mismatch; and
-- missing, additional, duplicate, reordered, case/normalization-colliding, or
-  digest/size/path-mismatched `install_evidence_files` entries; unlisted files;
-  a shipped or post-install-fetched post-grant token; and treating a retained
-  token digest as an install-time authority object; and
+- missing, additional, duplicate, reordered, ASCII-case-fold-colliding, or
+  digest/size/path-mismatched install-evidence entries; wrong install-manifest
+  context or digest; non-ASCII, escaped, empty-component, dot-segment,
+  backslash, or overlong paths; unlisted files; a shipped or post-install-
+  fetched post-grant token; and treating a retained token digest as an install-
+  time authority object; and
+- cleanup before authority-negative observations, any object restaged after
+  the final cleanup probe, or a final probe that omits such restaged state; and
 - app-only archive creation or replacement after descriptor canonicalization
   or E1 issuance, quarantined grant reuse, publication before every native
   architecture passes post-grant verification, and a publication envelope

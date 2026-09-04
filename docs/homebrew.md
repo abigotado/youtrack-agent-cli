@@ -68,8 +68,9 @@ hash cycle.
 Installation copies this complete tree to one versioned Caskroom root without
 rebuilding, re-signing, fetching auxiliary assets, or rewriting any byte
 sequence. Before guarded mutations are enabled, the installed verifier reads
-the envelope, plan, index, and referenced evidence only from that root and
-fails closed on missing, extra, linked, escaping, or digest-mismatched files.
+the envelope, plan, evidence-set index, digest-bound install-evidence manifest,
+and listed evidence only from that root and fails closed on missing, extra,
+linked, escaping, or digest-mismatched files.
 Homebrew's checksum detects a changed download; the offline-root signature and
 runtime Security.framework checks remain the authenticity and execution
 boundary.
