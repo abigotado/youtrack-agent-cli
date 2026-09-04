@@ -16,11 +16,16 @@ The trust and activation dependencies are now fixed:
    `approval.Unsupported`.
 3. Implement the signed native helper, OS-protected approval-key registry,
    bounded Go client, and non-distributed operator runner.
-4. Produce one unpublished signed/notarized artifact with the ordinary
-   production confirmation path wired; bind its exact Apple code identities in
-   the offline-root-signed descriptor; pass complete runner/session-bound E1
-   and clean-reset E2 Gate 1A runs; only then issue the confirm-only production
-   authorization and pass its network-disabled ordinary-command smoke.
+4. Produce one unpublished signed/notarized/stapled artifact with the ordinary
+   production confirmation path wired; create and retain its exact app-only
+   payload archive, then bind that archive and the exact Apple code identities
+   in the descriptor before E1; pass complete runner/session-bound E1
+   and clean-reset E2 Gate 1A evidence sets on every declared architecture;
+   only then issue the confirm-only provisional authorization, pass its
+   network-disabled ordinary-command smoke set, and issue the production
+   activation grant. Run the grant-bound ordinary-command verification on every
+   architecture under its deny-only runner token; failed evidence quarantines
+   the unpublished grant and candidate.
 5. Implement canonical fingerprints, typed `issue.create`, one-shot execution,
    and bounded reconciliation while the current repository apply remains
    disabled.
@@ -28,10 +33,14 @@ The trust and activation dependencies are now fixed:
    wired, rerun the two-pass Gate 1A sequence for its new descriptor, then run
    two-pass live Gate 1B on a disposable YouTrack 2026.2 project, including
    Remote MCP/OAuth host tests, rotation/revocation races, and ambiguous-write
-   fault injection. Issue the `issue.create` production authorization only
-   after E2 and run the exact network-isolated dispatch-boundary smoke.
-7. Build the immutable app-only payload archive, outer delivery archive, and
-   detached root-signed publication envelope without changing the app bytes;
+   fault injection. Issue only the `issue.create` provisional authorization
+   after E2, run the exact per-architecture network-isolated dispatch-boundary
+   smoke, and issue the production activation grant only after that complete
+   evidence set passes. Run the grant-bound per-architecture ordinary-command
+   verification and quarantine any failure.
+7. Reuse the exact retained app-only payload archive to build only the outer
+   delivery archive and detached root-signed publication envelope, binding the
+   complete post-grant verification evidence set without changing app bytes;
    keep update/comment disabled or require the strict custom-MCP transaction
    gate.
 8. Publish those exact signed artifacts and an audited SHA-pinned Cask/private
@@ -41,10 +50,15 @@ Gate 1A cannot pass before durable confirmation exists in the candidate's
 ordinary production entry point. The unpublished candidate is the object under
 test; failure discards it, while PASS qualifies its exact descriptor/code
 identities without a
-post-Gate code change. Neither Gate token is production authority. The offline
-root signs a capability-specific production authorization only after E2, and a
-separate black-box smoke must exercise that production-only branch before
-publication. Gate 1B applies the same rule to the first remote mutation.
+post-Gate code change. Neither Gate token nor provisional authorization is
+production authority. The offline root signs a capability-specific provisional
+authorization only after E2; a separate content-addressed black-box smoke set
+must exercise that deny-only branch on every declared architecture before the
+root signs a production activation grant. The exact grant-bound production
+context must then pass a separate per-architecture ordinary-command
+verification in the trusted disposable pre-publication environment; only the
+later publication envelope binds that evidence, avoiding a hash cycle. Gate 1B
+applies the same rule to the first remote mutation.
 
 ## Gate 0 — operator architecture decision
 
@@ -261,13 +275,18 @@ trust/storage/package topology
   -> exact registry codec + pinned artifact-authorization root
   -> durable confirmation, injected and unwired
   -> native helper + protected key registry + operator runner
-  -> signed candidate descriptor with production confirm wiring
-  -> complete Gate 1A E1 + clean-reset E2
-  -> confirm-only production authorization + black-box smoke
+  -> signed/stapled candidate + retained app-only archive
+  -> descriptor with production confirm wiring and archive digest
+  -> complete per-architecture Gate 1A E1 + clean-reset E2 evidence sets
+  -> confirm-only provisional authorization + black-box smoke evidence set
+  -> confirm-only production activation grant
+  -> per-architecture post-grant production-context verification
   -> fingerprints + disabled issue.create engine
   -> new exact descriptor with production issue.create wiring
-  -> two-pass Gate 1A rerun + two-pass live YouTrack Gate 1B
-  -> issue.create production authorization + dispatch-boundary smoke
+  -> per-architecture two-pass Gate 1A rerun + live YouTrack Gate 1B sets
+  -> issue.create provisional authorization + dispatch-boundary smoke set
+  -> issue.create production activation grant
+  -> per-architecture post-grant production-context verification
   -> update/comment risk decision or strict custom MCP
   -> publication envelope + SHA-pinned signed Cask/private tap
 ```

@@ -23,7 +23,8 @@ Two companion specifications are normative parts of this decision:
 - [Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md) freezes
   every authority-bearing ledger and ceremony byte; and
 - [Gate artifact authorization](gate1a-artifact-authorization.md) freezes the
-  independent exact-code authorization and two-pass Gate ceremony.
+  independent exact-code descriptor, per-architecture Gate evidence,
+  provisional-to-smoke-to-activation ceremony, and publication binding.
 
 ## Decision
 
@@ -48,8 +49,9 @@ YouTrackAgent.app/
 The delivery archive additionally carries the detached authorization files at
 the fixed archive-root paths defined by the artifact-authorization protocol.
 They remain outside the sealed application bundle and are installed at fixed
-installation-root sibling paths. This detached shape lets an authorization bind the
-final signed CodeDirectory identities without a self-reference.
+installation-root sibling paths. This detached shape lets the provisional
+authorization and activation grant bind the final signed CodeDirectory
+identities without a self-reference.
 
 The identifiers are immutable protocol and packaging inputs:
 
@@ -98,14 +100,15 @@ and info[CFBundleVersion] = "${RELEASE_BUILD}"
 The shipped baseline requirements contain the literal Team ID and build
 number; production code never expands an environment variable at runtime.
 Those requirements establish publisher and coarse build identity, but they are
-not exact-artifact authority. Both sides additionally require authorization
-from the separately pinned offline Ed25519 root and compare the running self
+not exact-artifact authority. Both sides additionally require the matching
+provisional authorization and smoke or production activation context from the
+separately pinned offline Ed25519 root and compare the running self
 and connection-bound peer `kSecCodeInfoUnique` / `kSecCodeInfoCdHashes` values
 with its exact per-architecture allowlist. The peer is resolved from the audit
 token with `SecCodeCopyGuestWithAttributes`; PID and filesystem paths are
 diagnostic only. Missing, expired, wrong-domain, wrong-capability,
-wrong-artifact, or differently signed authorization fails before protocol
-bytes or registry state are accepted.
+wrong-artifact, provisional-only, mismatched-context, or differently signed
+authority objects fail before protocol bytes or registry state are accepted.
 
 The root public key, key ID, signature domains, canonical sidecar bytes,
 safe-read rules, and candidate-to-production lifecycle are fixed in
@@ -297,19 +300,37 @@ controlled unpublished Gate candidate until Gate 1B selects and proves the
 exact ordering between apply and a concurrent rotation or revocation; Gate 1A
 does not claim that cross-boundary guarantee.
 
-The journal stores the complete canonical signed receipt and an exact copy of
-the verification SPKI, not only a digest. The copy is binding evidence, never a
-trust root. Audit and reconciliation may reparse a historical receipt with
-protocol bounds and match its SPKI to an active or retained generation solely
-to establish historical signature authenticity. That result never authorizes a
-network mutation.
+The journal stores the complete canonical signed receipt, an exact copy of the
+verification SPKI, and one closed stage-tagged authority set with all exact
+canonical bytes and digests—not only digest labels. Production and post-grant
+sets contain the descriptor, signed provisional authorization, signed
+activation grant, and final context. A pre-grant smoke set instead contains the
+descriptor, signed provisional authorization, signed smoke token, provisional
+context, and smoke receipt context; it contains no grant and any hard-denied
+`in_flight` attempt is moved to the non-reconcilable terminal state
+`activation_smoke_consumed`. Confirmation stores the matching set in the same
+revision CAS that moves `prepared` to `confirmed`. Apply reopens and fully
+revalidates those bytes against the pinned root and current stage context, then
+carries the unchanged set through the atomic `confirmed -> in_flight`
+transition. The copies are binding evidence, never trust roots. Audit may
+reparse either stage type; reconciliation accepts only production/post-grant
+sets for already `in_flight` ordinary work and never accepts a smoke set. The
+verifier applies protocol bounds, verifies the two matching root signatures,
+rebuilds either the descriptor/provisional/smoke-token/context chain or the
+descriptor/provisional/grant/final-context chain and capability, and matches
+its SPKI to an active or retained generation solely to establish historical
+authenticity. That read-only result never authorizes a new network mutation.
 
 For apply authorization, the signed receipt's registry revision must equal the
 current complete ledger revision and its generation, SPKI, and fingerprint
-must equal the one current `active` generation. The current status
-must explicitly permit apply. Any intervening registry transition makes the
-receipt ineligible; status/apply cancels a still-confirmed plan rather than
-falling back to a retained key. Rotation/revocation races before confirmation,
+must equal the one current `active` generation. Its authorization-context
+digest must equal the currently active provisional-authorization/activation-
+grant pair. The current status must explicitly permit apply. Any intervening
+registry or activation transition makes a still-confirmed receipt ineligible;
+status/apply cancels the plan rather than falling back to retained authority.
+After the durable `confirmed -> in_flight` transition, reconciliation verifies
+the persisted historical key and authorization context but does not require
+either to remain active. Rotation/revocation races before confirmation,
 between confirmation and apply, and at the future in-flight boundary are Gate
 tests. Gate 1B must settle the last ordering before the executor candidate is
 qualified for any use beyond that controlled Gate run.
@@ -320,12 +341,18 @@ before Gate 1A. The current repository remains wired to
 native adapter through `application.NewDefault` and exercise the ordinary
 production `mutation confirm` entry point while every remote executor remains
 disabled. If either complete Gate pass fails, that candidate is discarded. The
-first complete run is E1 evidence only, not production authority. A distinct
-runner/session-bound E2 token then drives the complete suite again after a
-clean reset. Only after both runs pass may the offline root sign a
-capability-specific production authorization. A final network-disabled
-black-box activation smoke exercises that production-only branch. The exact
-sequence and failure quarantine are normative in
+first complete run is E1 evidence only, not production authority. Distinct
+runner/session-bound E2 tokens then drive the complete suite again after a
+clean reset. E1 and E2 run with fresh tokens on every declared architecture.
+Only after both complete evidence sets pass may the offline root sign a
+capability-specific provisional authorization, which still denies ordinary
+production use. A final network-disabled black-box activation smoke runs under
+fresh per-architecture deny-only tokens. Only its complete passing evidence
+set permits the offline root to sign the production activation grant. The
+exact artifact then loads that grant and provisional authorization and repeats
+the ordinary capability path on every architecture under separate deny-only
+post-grant runner tokens. Only the publication envelope may bind that later
+evidence without a hash cycle. The exact sequence and failure quarantine are normative in
 [Gate artifact authorization](gate1a-artifact-authorization.md). No post-Gate
 rebuild or wiring change inherits this evidence.
 
@@ -428,9 +455,12 @@ The separate Gate runner identity is diagnostic orchestration only and is
 never accepted as the production helper's protocol peer. A Gate run uses a
 disposable macOS user or VM and destroys its fixture Keychain state afterward.
 
-Gate 1A production authorization has only `confirm`; its final smoke drives the
+Gate 1A provisional authorization names only `confirm_only` but enables no
+ordinary command by itself. Its content-addressed smoke workflow drives the
 ordinary `mutation confirm` command and proves every apply path remains
-disabled. Gate 1A qualifies only the exact native-approval candidate. The
+disabled on every declared architecture. Only the later activation grant makes
+confirmation available in production. Gate 1A qualifies only the exact
+native-approval candidate. The
 current REST
 executor stays disabled. A later exact signed candidate must wire the ordinary
 production `mutation apply` entry point for only `issue.create` and pass live
@@ -438,21 +468,31 @@ Gate 1B on a disposable YouTrack 2026.2 project. Because wiring the executor
 changes the artifact, that same candidate must first rerun and pass Gate 1A.
 Gate 1B then proves exact identity/preconditions, one-shot execution,
 rotation/revocation ordering, and bounded ambiguous-outcome reconciliation.
-After its two complete Gate passes, the final `issue.create` authorization is
-smoked with the ordinary `youtrack-agent-cli --profile work mutation apply
---plan-id <issue-create-plan-id>` path on a network-isolated host. Only the
-expected loopback read-only preflight is allowed; an instrumented mutating
+After its two complete Gate evidence sets, the root signs only a provisional
+`issue_create` authorization. The per-architecture smoke workflow then drives
+the ordinary prepare, confirm, and `youtrack-agent-cli --profile work mutation
+apply --plan-id <issue-create-plan-id>` path on a network-isolated host. Only
+the expected loopback read-only preflight is allowed; an instrumented mutating
 dispatch boundary returns the unique post-authorization hard-deny result and
-records zero mutating-request bytes. Wrong capability, tampered authorization,
-wrong artifact, `issue.update`, and `comment.add` fail before dispatch. A failed
-candidate is discarded; a passing candidate is published byte-for-byte with no
-post-Gate activation edit.
+records zero mutating-request bytes. Wrong capability, tampered provisional
+authorization, wrong artifact, expired or mismatched smoke token,
+`issue.update`, and `comment.add` fail before dispatch. Smoke receipts bind a
+disjoint authorization context and cannot be replayed after activation. A
+failed candidate is discarded; only the complete smoke evidence set permits a
+production activation grant. The exact grant-bound production context then
+passes a second per-architecture ordinary-command verification with final-
+context receipts and the same safe pre-socket mutation denial. The grant is
+cryptographically usable during this bounded step, so the disposable Gate host
+and release operator are trusted to quarantine the grant and candidate after
+any failure. A passing candidate is published byte-for-byte with no post-Gate
+activation edit.
 
 Public Homebrew distribution is last. The accepted shape is a Cask or private
 tap whose SHA-256 pins the outer delivery archive containing the immutable app
-payload plus detached authorization. Publication also requires the external
-root-signed envelope binding the payload, authorization, E1/E2 evidence, and
-outer archive. The Cask installs those exact bytes and links the contained CLI;
+payload plus detached provisional authorization and production activation
+grant. Publication also requires the external root-signed envelope binding the
+payload, both authority objects, E1/E2 evidence sets, activation-smoke evidence
+set, complete post-grant verification evidence set, and outer archive. The Cask installs those exact bytes and links the contained CLI;
 a source Formula cannot rebuild the helper or establish its production code
 identity.
 

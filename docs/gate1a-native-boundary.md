@@ -143,10 +143,14 @@ The pinned production requirements are exact, not caller-configurable. Their
 full Developer ID Application expressions and identifiers are frozen in the
 [trust-root ADR](gate1a-trust-root.md#signed-bundle-and-identifiers).
 They are only the coarse publisher/build predicate. Exact authority also
-requires the offline-root-signed descriptor and capability authorization, plus
-Security.framework validity and a match between the running self and
-connection-bound peer `kSecCodeInfoUnique` / `kSecCodeInfoCdHashes` values and
-the authorized per-architecture set.
+requires the offline-root-signed descriptor, provisional authorization, and
+matching smoke or production-activation context, plus Security.framework
+validity and a match between the running self and connection-bound peer
+`kSecCodeInfoUnique` / `kSecCodeInfoCdHashes` values and the authorized
+per-architecture set. Both peers exchange and agree on the descriptor digest
+and canonical authorization-context digest before display or signing. A
+descriptor-only, provisional-only, mixed provisional/grant, or smoke/active
+context disagreement fails closed.
 
 `TEAM_ID` and positive decimal `RELEASE_BUILD` are required immutable
 operator-supplied build/Gate inputs with no repository defaults. Each peer

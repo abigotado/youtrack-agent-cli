@@ -39,9 +39,12 @@ Before implementing an enabled `mutation confirm` or `mutation apply`, a macOS f
 The [registry/ceremony protocol](../docs/gate1a-registry-protocol.md) freezes
 every authority-bearing transition byte. The
 [artifact-authorization protocol](../docs/gate1a-artifact-authorization.md)
-freezes the pinned Ed25519 root, exact descriptor, runner/session-bound E1 and
-E2 full Gate runs, post-E2 capability authorization, and final black-box
-production-path smoke. A Gate token is never production authority.
+freezes the pinned Ed25519 root, exact descriptor, per-architecture
+runner/session-bound E1 and E2 full Gate evidence sets, post-E2 provisional
+authorization, pre-grant deny-only smoke, production activation grant, and a
+separate per-architecture verification of the real grant-bound production
+context before publication. A Gate token or provisional authorization is never
+production authority.
 
 ## Homebrew activation gate
 
@@ -56,8 +59,9 @@ Homebrew may link the contained CLI but may not build, replace, extract, or
 re-sign the helper. Gate 1A must prove immutable CLI/helper provenance and that
 first install, identical reinstall, rollback refusal, and replacement preserve
 identity or fail closed. The future Cask pins the root-signed publication
-envelope's outer archive SHA-256, installs the detached authorization at its
-fixed support path, and never uses `sha256 :no_check`. It does not authorize a
+envelope's outer archive SHA-256, installs the detached descriptor,
+provisional authorization, and activation grant at their fixed support paths,
+and never uses `sha256 :no_check`. It does not authorize a
 second write-capable build.
 
 The same gate must test the first Cask install path against the application-
@@ -66,7 +70,8 @@ the only permitted initial migration is the operator-invoked
 `auth migrate-keychain --profile NAME --yes` flow, with cancellation and
 partial failure covered. The repository now has committed source and a remote,
 but no immutable release tag, signed archive checksum, installed Developer ID
-Application identity, pinned-root authorization, or notarization evidence, so it cannot provide release
+Application identity, pinned-root provisional/activation authority, or
+notarization evidence, so it cannot provide release
 provenance for an active Cask.
 
 A later write-capable Cask version is prohibited until a separate rollover ADR
@@ -119,22 +124,23 @@ All durable mutation operations use one journal transaction API with revision-ba
 
 `prepare` acquires profile, policy, and journal locks, commits the authoritative canonical plan as `prepared`, then exports a 0600 copy. Export failure does not erase or duplicate the journal record.
 
-`confirm` has two phases. It first snapshots the prepared plan under profile/policy/journal locks and releases all locks. The native helper displays that one immutable snapshot, hashes those exact bytes into the receipt, and signs the deterministic unsigned receipt together with the current registry revision and active key identity. The service reacquires the locks in the same order, revalidates unchanged identity, policy, plan hash, state, journal revision, registry revision, and active key, then atomically stores the receipt and moves to `confirmed`. Concurrent confirmation loses the compare-and-swap and cannot mint a second usable receipt.
+`confirm` has two phases. It first snapshots the prepared plan under profile/policy/journal locks and releases all locks. The native helper displays that one immutable snapshot, hashes those exact bytes into the receipt, and signs the deterministic unsigned receipt together with the current registry revision, active key identity, and final grant-bound authorization-context digest. The service reacquires the locks in the same order, revalidates unchanged identity, policy, plan hash, state, journal revision, registry revision, active key, descriptor, signed provisional authorization, signed activation grant, and derived context. It then atomically stores the receipt, exact canonical authority objects/context and all digests, and moves to `confirmed`. Concurrent confirmation loses the compare-and-swap and cannot mint a second usable receipt.
 
-`apply` holds the profile and policy locks while it validates the bound credential and remote preconditions. Historical verification with a retained public key is audit evidence only. Apply authority requires the signed receipt's registry revision and generation/SPKI/fingerprint to equal the current active registry entry. Any intervening transition cancels a confirmed plan. It briefly acquires the journal lock to atomically consume an eligible receipt and persist `in_flight`, releases the journal lock, sends at most one mutation while retaining the outer identity/policy locks, then reacquires the journal lock to record the outcome. Once `in_flight` is durable, the nonce is never reusable and the state never returns to `confirmed`; Gate 1B must prove the exact apply-versus-rotation/revocation ordering.
+`apply` holds the profile and policy locks while it validates the bound credential and remote preconditions. Historical verification with retained key or authority bytes is audit evidence only. Apply authority requires the signed receipt's registry revision and generation/SPKI/fingerprint to equal the current active registry entry and its context digest to equal the currently valid descriptor/provisional/grant pair. Any intervening registry or activation transition cancels a confirmed plan. It briefly acquires the journal lock to revalidate and atomically carry the exact historical authority set while consuming the eligible receipt and persisting `in_flight`, releases the journal lock, sends at most one mutation while retaining the outer identity/policy locks, then reacquires the journal lock to record the outcome. Once `in_flight` is durable, the nonce is never reusable and the state never returns to `confirmed`; Gate 1B must prove the exact apply-versus-rotation/revocation ordering.
 
-`reconcile` snapshots an eligible state and revision, performs bounded reads without the journal lock, then compare-and-swaps the evidence and next state. Repeated reconciliation is read-only and idempotent. Terminal states return their existing record without additional network activity unless the operator explicitly requests a fresh evidence collection.
+`reconcile` snapshots an eligible state, revision, receipt, SPKI, and exact historical descriptor/provisional/grant/context bytes, fully verifies their pinned-root signatures, hashes, capability, and receipt binding without requiring the context to remain active, performs bounded reads without the journal lock, then compare-and-swaps the evidence and next state. Repeated reconciliation is read-only and idempotent. Terminal states return their existing record without additional network activity unless the operator explicitly requests a fresh evidence collection.
 
 ## Complete state table
 
 | From | Event | To | Recovery semantics |
 |---|---|---|---|
 | none | valid offline prepare committed | `prepared` | Export can be repeated from the journal; no network or credential was used. |
-| `prepared` | trusted helper receipt committed | `confirmed` | Exactly one receipt/key generation is retained. |
+| `prepared` | trusted helper receipt and active authority set committed | `confirmed` | Exactly one receipt/key generation plus the exact canonical descriptor, signed provisional authorization, signed activation grant, derived context, and all digests are retained. |
 | `prepared` | operator cancellation or expiry | `canceled` / `expired` | Terminal; create a new plan. |
-| `confirmed` | receipt consumed before dispatch | `in_flight` | Durable non-replay point. |
+| `confirmed` | receipt and unchanged active authority set consumed before dispatch | `in_flight` | Durable non-replay point; the complete historical authority set remains available for read-only reconciliation. |
 | `confirmed` | operator cancellation or expiry before consumption | `canceled` / `expired` | Terminal; no mutation attempt. |
 | `confirmed` | approval registry revision or active generation changed | `canceled` | Retained keys may verify history but never authorize apply. |
+| `confirmed` | descriptor, provisional authorization, activation grant, or final context changed | `canceled` | Historical bytes remain audit evidence but never authorize apply. |
 | `in_flight` | definitive rejection proving no mutation | `failed_before_mutation` | Terminal; a new plan is required. |
 | `in_flight` | verified success recorded | `applied` | Non-replayable; proceed to bounded verification. |
 | `in_flight` | timeout, reset, unexpected/invalid response, or uncertain send | `ambiguous` | Never retry; reconcile. |
@@ -158,19 +164,27 @@ A verified remote success followed by stdout failure or journal-finalization fai
 6. Implement the journal state machine and fail-closed approval interfaces.
 7. Implement durable two-phase confirmation and its native adapter behind
    dependency injection while the current repository remains disabled.
-8. Build an unpublished signed/notarized candidate whose default production
-   factory wires confirmation, sign its exact descriptor, run complete Gate 1A
-   E1 and clean-reset E2, then issue the confirm-only production authorization
-   and pass its ordinary-command black-box smoke. No post-Gate wiring or rebuild
-   occurs.
+8. Build an unpublished signed/notarized/stapled candidate whose default
+   production factory wires confirmation. Create and retain its exact app-only
+   archive, freeze its descriptor, then run complete Gate 1A
+   E1 and clean-reset E2 on every declared architecture, then issue the
+   confirm-only provisional authorization and pass its ordinary-command
+   black-box smoke set. Issue the production activation grant only afterward,
+   then verify the exact grant-bound production context through the ordinary
+   commands on every architecture under deny-only runner restrictions. Failed
+   evidence quarantines the unpublished candidate and grant. No post-Gate
+   wiring or rebuild occurs.
 9. Implement the typed one-shot `issue.create` engine and reconciliation behind
    the disabled executor boundary.
 10. Build an unpublished exact candidate whose ordinary production factory
     wires only `issue.create`, repeat the two-pass Gate 1A sequence against its
     new descriptor, then run two-pass live Gate 1B on a disposable YouTrack
-    2026.2 project. Only after E2 issue production authorization and run the
-    exact loopback-preflight/hard-deny dispatch smoke before publication; there
-    is no post-Gate activation edit.
+    2026.2 project. Only after E2 issue provisional authorization and run the
+    exact per-architecture loopback-preflight/hard-deny dispatch smoke; only a
+    complete passing smoke evidence set permits the production activation grant.
+    The real grant-bound context then passes the separate per-architecture
+    ordinary-command verification before publication. There is no post-Gate
+    activation edit.
 11. Keep `issue.update` and `comment.add` disabled until their separate
     REST-TOCTOU acceptance or strict custom-MCP transaction decision.
 12. Run contract, security, primary, and independent adversarial review gates

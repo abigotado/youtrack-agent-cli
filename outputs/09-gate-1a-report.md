@@ -23,9 +23,9 @@ they do not prove the signed native approval boundary required by Gate 1A.
 | Requirement | Status | Evidence |
 | --- | --- | --- |
 | Pre-Gate v2 canonical receipt/signature byte contract | Passed for slice 1 only | `docs/gate1a-protocol.md` and `testdata/gate1a` |
-| Activation-eligible v3 registry-revision binding | Not implemented | Required v3 delta in `docs/gate1a-protocol.md` |
+| Activation-eligible v3 registry/context binding | Not implemented | Required v3 delta in `docs/gate1a-protocol.md` |
 | Complete registry/ceremony codec and cross-language vectors | Specified, not implemented | `docs/gate1a-registry-protocol.md` |
-| Offline-root exact-artifact descriptor/authorization | Specified, not instantiated | `docs/gate1a-artifact-authorization.md`; no production root/signatures exist |
+| Offline-root exact-artifact descriptor/provisional authorization/activation grant | Specified, not instantiated | `docs/gate1a-artifact-authorization.md`; no production root/signatures exist |
 | Strict bounded Go receipt codec | Passed for slice 1 | `go test -race ./internal/approval` |
 | Independent Swift parser/encoder agreement | Passed for slice 1 | 39 tests through `swift test` on macOS |
 | Reversible inert rendering of every displayed byte | Passed for slice 1 | all-byte, empty, maximum-size, and round-trip Swift tests |
@@ -93,10 +93,14 @@ Keychain or Secure Enclave state.
   `get-task-allow`.
 - The bundle is notarized and stapled; `codesign`, `spctl`, and stapler checks
   pass against the exact designated requirement, Team ID, and architecture set.
-- The offline root signs only runner/session-bound E1 and E2 tokens until two
-  complete clean-host Gate passes succeed. Production authorization is issued
-  afterward and its ordinary-command branch passes the mandatory
-  network-disabled black-box smoke.
+- The offline root signs only fresh per-architecture runner/session-bound E1
+  and E2 tokens until both complete clean-host evidence sets succeed. It then
+  issues only a provisional authorization. Its content-addressed ordinary-
+  command branch must pass the mandatory network-disabled smoke on every
+  declared architecture before the root may issue a production activation
+  grant. The exact artifact must then load that grant, derive the final
+  production context, and pass a separate per-architecture ordinary-command
+  verification before publication.
 - Clean-machine first install, identical reinstall, accidental package
   rollback, binary/helper replacement, and key rotation cases preserve the
   stated first-release boundary or fail closed. A mixed-build fixture is
@@ -128,14 +132,18 @@ accepted helper peer. The current repository remains wired to
 `approval.Unsupported`, but the unpublished Gate candidate's default factory
 must wire the native adapter before signing. Gate success qualifies those exact
 Apple code identities only through the descriptor and the post-E2 confirm-only
-production authorization; it is not followed by a wiring commit or rebuild. `apply` and
+provisional authorization plus post-smoke activation grant; it is not followed
+by a wiring commit or rebuild. `apply` and
 `reconcile` remain disabled until a separate exact Gate 1B candidate proves
 their one-shot and ambiguous-outcome behavior on a disposable YouTrack project.
 Because that wiring changes exact code identities, the same candidate must run
 the complete E1/E2 Gate 1A sequence before the two-pass Gate 1B evidence can
-qualify it. The final `issue.create` production authorization then undergoes
-the exact CLI/loopback-preflight/hard-deny dispatch smoke with zero mutating
-request bytes before publication.
+qualify it. The final `issue.create` provisional authorization then undergoes
+the exact per-architecture CLI/loopback-preflight/hard-deny dispatch smoke with
+zero mutating request bytes. Only the complete passing smoke evidence set
+permits the production activation grant. A second exact-artifact verification
+then exercises the real grant-bound context and schema-v3 receipts on every
+architecture under deny-only runner restrictions before publication.
 
 ## Homebrew decision
 
@@ -149,8 +157,11 @@ then prove the live one-shot YouTrack write path. The existing offline module
 manifest and checker remain readiness inputs only.
 
 The eventual Cask must pin the publication envelope's exact outer archive
-SHA-256, install the immutable app payload and detached authorization without
-rewriting either, and reject `sha256 :no_check`. Homebrew checksum validation is
+SHA-256, install the immutable app payload, detached provisional authorization,
+and activation grant without rewriting them, bind the complete post-grant
+verification evidence in the publication envelope, and reject
+`sha256 :no_check`.
+Homebrew checksum validation is
 not a substitute for the pinned-root signature or runtime code-identity checks.
 
 Only the first signed Cask build may follow these gates. A second
