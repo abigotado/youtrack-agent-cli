@@ -868,8 +868,16 @@ unregistered digest, empty step, changed command field, or validly hashed but
 uncompiled manifest fails before token acceptance. Changing a contract requires
 a protocol revision and new Gate.
 
-All IDs match `^[a-z0-9][a-z0-9._-]{0,127}$` and are globally unique by
-manifest type. Only set-like fixture, assertion, and transcript manifest entry
+Case, step, fixture, assertion, and transcript IDs match
+`^[a-z0-9][a-z0-9._-]{0,127}$`. Case IDs are unique within a complete plan;
+step IDs are unique within their case and may recur in different cases.
+Fixture, assertion, and transcript IDs are globally unique by manifest type.
+Observation IDs instead are exactly a compiled case ID, one literal `/`, and
+that case's compiled step ID or the literal `final-evaluation`; the complete
+ID is at most 128 ASCII bytes. Exact membership in the fixed case/step or
+case-final contract is mandatory. Extra slashes, path escapes, percent-encoded
+separators, and normalization or decoding to obtain a matching ID are rejected.
+Only set-like fixture, assertion, and transcript manifest entry
 arrays are sorted by increasing unsigned UTF-8 ID bytes and must already be in
 that order on input. Order-bearing arrays are never sorted: command-contract
 entries and `case_evaluations`, plan `cases`, case `steps`, step `argv`,
@@ -1770,8 +1778,9 @@ selected by `executable_component` for `negative_peer_fixture`, or the separatel
 identity object for a supervisor. A negative-peer identity can occur only in
 its compiled rejection observation and never satisfies an exact-artifact
 positive identity assertion.
-Observation IDs are printable ASCII of 1..128 bytes; digests use the common
-grammar; exit codes are JSON integers `0..255`. Secret-bearing output is a Gate
+Observation IDs follow the exact case/step grammar and membership rule above;
+printable ASCII alone is not sufficient. Digests use the common grammar; exit
+codes are JSON integers `0..255`. Secret-bearing output is a Gate
 failure and is never made acceptable merely by hashing it.
 
 An assertion-result manifest is compact canonical JSON capped at 32,768 bytes
@@ -2013,6 +2022,67 @@ SHA-256 of these exact bytes. The snapshot operation, setup final evaluation,
 every later observation, the per-architecture evidence index, and its
 evidence-set entry all carry this same digest; no later enumeration may silently
 substitute current registry state for it.
+
+`setup_transcript_manifest_sha256` selects exactly the existing
+`transcript_results` codec, capped at 32,768 bytes, for the first setup case's
+`enroll` operation. The applicable setup case is exactly one of
+`gate1b.setup-exact-artifact-enrollment`,
+`smoke.confirm.setup-exact-artifact-enrollment`,
+`smoke.issue-create.setup-exact-artifact-enrollment`,
+`post-grant.confirm.setup-exact-artifact-enrollment`, or
+`post-grant.issue-create.setup-exact-artifact-enrollment`, selected by the
+validated token's stage and capability and the fixed command contract. Its
+`observation_id` is exactly that case ID plus `/enroll`. Its five entries are,
+in order, `stdout`, `stderr`, `ipc`, `ui`, and `security_framework`, with
+`transcript_id` exactly the case ID plus `.enroll.` plus the corresponding
+kind, and all other fields following the existing transcript-result codec.
+The selector is plain SHA-256 over these complete canonical manifest bytes.
+Every entry's complete content and the manifest itself must be durably
+retained outside disposable state before the snapshot is emitted. A
+pre-enrollment-inventory, snapshot, final-evaluation, transcript-set, or
+whole-run manifest cannot satisfy this selector, even if correctly hashed.
+
+The selected `ipc` transcript content is one closed canonical object capped at
+4,096 bytes. Its fields are, in order:
+
+1. `schema_version`, integer `1`
+2. `evidence_type`, exactly `stage_setup_enrollment`
+3. `stage_type`, exactly `gate1b`, `activation_smoke`, or
+   `post_grant_verification`
+4. `stage_token_sha256`
+5. `setup_context_sha256`
+6. `artifact_descriptor_sha256`
+7. `architecture`
+8. `approved_capability`, exactly `issue_create_gate` for Gate 1B, otherwise
+   the token's `confirm_only` or `issue_create`
+9. `gate_runner_unique`
+10. `gate_session_id`
+11. `registry_revision`, integer `1`
+12. `registry_record_sha256`
+13. `generation`, integer `1`
+14. `signing_key_tag`
+15. `signing_key_spki_der_b64u`
+16. `signing_key_fingerprint_sha256`
+17. `generated_key_tags`, exactly the one-element array `[signing_key_tag]`
+18. `coordinator_closed_sha256`
+19. `result`, exactly `committed`
+
+The exact authenticated helper emits these bytes on the existing enrollment
+operation after the registry commit and durable enrollment coordinator close;
+the runner retains them as that operation's `ipc` transcript. This creates no
+new IPC endpoint. Token/context fields must equal the independently validated
+root-signed token and its setup context. Enrollment fields must equal the
+valid revision-1 record and its enrollment closed record, including the exact
+key identity. The helper can deterministically reconstruct these bytes from
+that token/context and the supplied snapshot's enrollment-field projection,
+checked against those valid registry/closed records. It compares both the
+reconstructed content SHA-256 and byte count to the selected `ipc` entry.
+Reconstruction requires no additional cleanup-intent field. The reconstructed
+object contains no timestamp, snapshot digest, `setup_transcript_manifest_sha256`,
+or other manifest digest. The dependency order is strictly enrollment commit and closed
+record, then enrollment IPC content, then the complete durable five-entry
+enroll transcript-result manifest, then snapshot, then setup final evaluation.
+No object may depend on its own digest or on a later object in this sequence.
 
 When these two evidence codecs are reused with `stage_type=gate1b`, this is the
 end of their shared contract: none of the cleanup context, cleanup inventory,
@@ -2675,6 +2745,12 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
   complete evidence-set manifests, including Gate 1B E1- and E2-bound setup
   contexts, empty pre-enrollment inventories, immutable baseline registry
   snapshots, and their exact index/evidence-set tuple projections;
+- all five setup-case enroll transcript-result manifests with their exact
+  observation IDs and ordered five entries, closed `stage_setup_enrollment`
+  IPC bytes, and helper reconstruction from the validated token/context and
+  snapshot enrollment fields checked against registry/closed records; the
+  exact commit/closed-to-IPC-to-manifest-to-snapshot-to-final-evaluation DAG,
+  with matching content digests and byte counts in both Go and Swift;
 - all four Gate 1A/Gate 1B by E1/E2
   `gate_receipt_context_v1` objects and digests, matching schema-3 receipts,
   complete `gate_authority_evidence_v1` journal branches with retained
@@ -2770,6 +2846,17 @@ independently covers:
   transcript; shell/cwd/env/stdin inheritance; prepare/confirm/apply reorder;
   dynamic-value injection; observation omission/addition/reorder; and command-
   context digest mismatch;
+- observation IDs with extra slashes, escaped or encoded separators,
+  normalization-dependent matches, an uncompiled case/step pair, or more than
+  128 bytes; a setup selector naming any observation other than the exact
+  first-case `enroll`, a wrong manifest codec, missing/extra/reordered entry,
+  changed transcript ID/kind, unretained content, or snapshot creation before
+  durable retention of all five entries and their result manifest;
+- unknown/reordered/oversized `stage_setup_enrollment` fields, wrong stage,
+  token, context, capability, tag, SPKI, fingerprint, registry or closed record,
+  an extra generated tag, cross-session or cross-token/context splicing, IPC
+  content-digest or byte-count disagreement on reconstruction, and any
+  timestamp/snapshot/manifest field or dependency cycle in enrollment evidence;
 - missing, early, duplicate, or reordered case-final evaluation; nonempty
   `assertion_ids` or an assertion result on any operation observation; empty or
   reordered final assertion IDs; final evaluation before all operation and

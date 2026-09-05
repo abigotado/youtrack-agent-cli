@@ -950,6 +950,28 @@ setup-transcript manifest before the executor guard. A restarted helper
 receives and validates those same retained bytes; it never reconstructs the
 list from current Keychain state.
 
+The setup transcript manifest is exactly the first setup case's completed
+`enroll` operation `transcript_results` object, under the selector and
+32,768-byte cap in the
+[stage enrollment evidence codec](gate1a-artifact-authorization.md#stage-only-first-exact-artifact-enrollment).
+It is never the snapshot, pre-enrollment inventory, final-evaluation, or
+whole-case manifest. Its five entries are the exact compiled stdout, stderr,
+IPC, UI, and Security.framework transcript IDs in that order. The adjacent
+digest is plain SHA-256 of its canonical bytes.
+
+A manifest commits transcript hashes; it does not itself contain the generated
+key list. Before accepting cleanup attribution, the helper reconstructs the
+closed canonical `stage_setup_enrollment` IPC evidence bytes defined by that
+codec from the validated stage token and setup context, supplied immutable
+snapshot, and the exact validated revision-1 registry and enrollment-closed
+records in this intent. It checks every duplicated field and requires its
+`generated_key_tags` to equal exactly the one snapshot tag. The reconstructed
+bytes' SHA-256 and byte length must equal the manifest's sole `ipc` entry's
+`content_sha256` and `byte_count`. This also applies after restart, uses no
+mutable Keychain enumeration, and needs neither a new endpoint nor an
+additional intent field. A wrong selector, missing/extra entry, unreconstructible
+record, or digest/length/tuple mismatch quarantines before any deletion.
+
 `expected_registry_records` is the complete session-created registry set in
 ascending numeric revision order and contains exactly the snapshot's revision-1
 record. Every entry contains `account`,
@@ -1585,9 +1607,12 @@ the existing invocation fields `profile`, `instance`, `account_id`, and
 it contains no count, cursor, authority state, or credential. `data` has these fields in order: `profile`,
 `authority_status`, `artifact_descriptor_sha256`,
 `helper_profile_expires_at`, `active`, `permit`, `closed`, `journal`, and
-`allowed_action`. Status is `clear`, `busy`, `recovery_required`,
-`expired_recovery_only`, or `corrupt`; action is respectively `none`, `wait`,
-`recover`, `recover`, or `operator`. `active` is null or contains, in order,
+`allowed_action`. Status is `clear`, `busy`, `recovery_required`, or
+`expired_recovery_only`; action is respectively `none`, `wait`, `recover`, or
+`recover`. Every successful status response exits 0. Corruption never produces
+a success envelope or an `authority_status=corrupt` projection: it uses only
+the exact `AUTHORITY_STATE_CORRUPT` failure envelope and exit 1 defined below,
+with no `data` or `meta`. `active` is null or contains, in order,
 `lease_id`, `operation_kind`, `active_sha256`, `created_at`, `expires_at`,
 `historical_cli_audit_token_sha256`, and `historical_helper_session_id`.
 `permit` is null or contains `permit_sha256`, `mutation_request_sha256`,
@@ -1757,8 +1782,10 @@ and every other OSStatus; coordinator-active deletion vectors separately cover
 delete success, equal-byte exact-read ambiguity, not-found reconciliation,
 different bytes, malformed projection, and every other OSStatus. Fixture
 vectors additionally serialize both signed stage-token variants, the exact
-setup snapshot, cleanup context, request, retained intent, every valid progress
-prefix, delete-attempt-start/durable-ack and step-result/progress-ack exchange,
+setup enrollment IPC evidence, its five-entry enroll transcript-result
+manifest, the later setup snapshot, cleanup context, request, retained intent,
+and every valid progress prefix, delete-attempt-start/durable-ack and
+step-result/progress-ack exchange,
 same-directory exclusive-`0600` temp writes, canonical file and directory
 `fsync`, collision-safe no-replace publication, no-follow reopen/hash checks,
 exact registry/coordinator/key read and delete dictionary, projected read
@@ -1813,6 +1840,14 @@ zero signature.
 
 Negative vectors must independently cover:
 
+- a status success envelope containing `authority_status=corrupt`, corruption
+  returned with any exit other than 1 or any code other than
+  `AUTHORITY_STATE_CORRUPT`, and a corruption failure carrying `data` or `meta`;
+- selecting a snapshot, pre-inventory, or final-evaluation transcript manifest
+  as setup attribution; missing, extra, reordered, or wrong-kind enroll
+  transcript entries; reconstructed enrollment IPC evidence with a substituted
+  token, context, tag, registry record, closed record, digest, or byte length;
+  and any snapshot/manifest self-reference, all rejected before deletion;
 - every raw and aggregate size boundary, revision 0/257, 256/257 records, and
   overlong base64url before allocation;
 - missing, duplicate, unknown, reordered, escaped, whitespace-modified, or
