@@ -85,6 +85,21 @@ The recommended common component is a dedicated `youtrack-agent-cli`, not direct
   registry acquisition binds a pre-read canonical intent, while recovery uses
   a new exact-code actor/session and read-first idempotent fencing cleanup; the
   executor guard prevents acquisition between byte-equality read and delete;
+- setup-first activation-smoke and post-grant plans whose stage token/context
+  authorizes only one exact-artifact revision-1 enrollment from a proved empty
+  disposable inventory, whose retained registry snapshot binds every later
+  observation/index/set, and whose final cleanup proves all setup domains empty;
+- a distinct root-token-bound `stage_cleanup` authority whose immutable
+  pre-delete intent binds that setup evidence, helper-created key order,
+  complete attributed record/key bytes, exact dictionaries, and operation
+  order; the serialized helper exact-reads/byte-compares, durably acknowledges
+  a fixed-attempt marker plus cross-bound `delete_pending` progress only after
+  exclusive no-follow publication, file/directory fsync, and exact reopen,
+  before the sole delete, and terminalizes absence or
+  quarantines an unresolved marker without re-deletion;
+- case-final assertion evaluation: operation observations carry no assertion
+  IDs and only the runner's ordered post-transcript final observation can pass
+  a case;
 - a descriptor-bound embedded-helper profile expiry checked strictly at Gate,
   publication, installation, peer authentication, confirmation, permit, and
   registry proposal/final signing, registry commit, and final pre-send, with

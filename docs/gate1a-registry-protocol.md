@@ -2,7 +2,8 @@
 
 Status: normative design for Gate 1A; not implemented and not production
 enabled. This document freezes the helper-private approval-key ledger and the
-four authority ceremonies. It does not make `approval.Unsupported` usable.
+four authority ceremonies plus the distinct release-stage cleanup authority.
+It does not make `approval.Unsupported` usable.
 
 The [trust-root ADR](gate1a-trust-root.md) owns the Keychain access group,
 service, account naming, peer code requirements, and release boundary. This
@@ -42,8 +43,11 @@ value and requires byte-for-byte equality with the input.
 All string values are printable ASCII and contain no JSON escape. JSON
 integers are base-10 digits with no sign and no leading zero, except the value
 zero itself. Nullable fields are exactly JSON `null`, never an empty string.
-Booleans are exactly `true` or `false`. There are no arrays or nested objects
-in an authority object.
+Booleans are exactly `true` or `false`. Core registry and coordinator authority
+objects have no arrays or nested objects. The separately named stage-cleanup
+intent, progress, and evidence objects are bounded artifact containers and use
+only the exact ordered arrays/entries defined in their section; this exception
+does not widen any core object.
 
 The common grammar is:
 
@@ -82,6 +86,11 @@ base64url decoding, signature verification, or display:
 | final record body | 4,096 |
 | complete stored record | 4,352 |
 | commit authorization or reconciliation request | 6,144 |
+| stage-cleanup IPC request | 524,288 |
+| stage-cleanup IPC result | 131,072 |
+| stage-cleanup context | 4,096 |
+| stage-cleanup intent | 262,144 |
+| stage-cleanup progress or evidence | 65,536 |
 | one Keychain registry item, including metadata returned by Security.framework | 8,192 |
 | one coordinator active, permit, or closed item, including metadata | 8,192 |
 | complete ledger records | 256 |
@@ -138,9 +147,12 @@ in the protocol projection: `kSecClass=kSecClassKey`,
 `kSecUseDataProtectionKeychain=true`, `kSecMatchLimit=kSecMatchLimitOne`,
 `kSecUseAuthenticationContext` as one newly created `LAContext` whose reuse
 duration is zero, `kSecUseAuthenticationUI=kSecUseAuthenticationUIAllow`, and
-`kSecReturnRef=true`. That exact context is passed to the immediately following
-single `SecKeyCreateSignature`, is never used for another lookup/signature, and
-is invalidated on every return path. Success must project to exactly one
+`kSecReturnRef=true`. The context is an input only to that `SecItemCopyMatching`
+lookup; `SecKeyCreateSignature` has no authentication-context parameter. On
+successful lookup, the returned `SecKey` is passed to exactly one immediately
+following `SecKeyCreateSignature`. The context is never reused for a lookup or
+treated as a signing argument and is invalidated after lookup/signature success,
+cancellation, or every other failure. Success must project to exactly one
 `SecKey`; an array, dictionary, data value, or other CFType is malformed. No
 retry, context replacement, or UI-policy fallback is allowed.
 
@@ -212,7 +224,9 @@ predicate, reordered call, or extra read can replace this probe. The helper
 then repeats peer audit-token/session and profile-expiry checks without
 releasing the coordinator; any mismatch or noncanonical result prevents send.
 
-Registry revision deletion is forbidden and has no dictionary. Exact orphan
+Registry revision and coordinator permit/closed deletion are forbidden outside
+the exact stage-cleanup authority below and have no ordinary-flow dictionary.
+Exact orphan
 private-key deletion uses only `kSecClassKey`, EC key type, exact application
 tag CFData, key size 256, Secure Enclave token ID, resolved access group, and
 the data-protection-Keychain flag plus
@@ -246,6 +260,40 @@ deleted; malformed, duplicate, or other status returns
 `AUTHORITY_STATE_CORRUPT`. Private-key and coordinator deletion result types
 are therefore never interchangeable.
 
+The stage-cleanup generic-password delete dictionary is a separate closed
+dictionary accepted only by that authority. In protocol projection order it
+contains exactly `kSecClass=kSecClassGenericPassword`, the fixed registry or
+coordinator `kSecAttrService`, the exact attributed `kSecAttrAccount`, the
+resolved `kSecAttrAccessGroup`,
+`kSecAttrAccessible=kSecAttrAccessibleWhenUnlockedThisDeviceOnly`,
+`kSecAttrSynchronizable=false`, and
+`kSecUseDataProtectionKeychain=true`. It contains no value, match limit,
+return flag, wildcard, prefix, or caller-selected predicate. Its preceding and
+reconciliation read is the exact-account generic-password read above. The
+stage-cleanup private-key read is the exact noninteractive UI-fail/no-context
+existence query; the helper copies and canonically projects that returned
+`SecKey` to tag, type, size, token, access group, DER SPKI, and SPKI fingerprint
+for byte comparison. It obtains tag/type/size/token/access-group from the exact
+typed `SecKeyCopyAttributes` projection, obtains the public key only through
+`SecKeyCopyPublicKey`, requires its external representation to be the canonical
+65-byte uncompressed P-256 X9.63 point, wraps it with the fixed 26-byte SPKI
+prefix, and hashes the resulting 91 bytes. It never exports private-key bytes
+or signs. A null/wrong-typed result, missing/wrong attribute, noncanonical
+public point, or API error is quarantine, not absence. Its delete is exactly the orphan-key delete dictionary
+above even when the retained setup snapshot marks that session-created
+generation active. Neither query may present UI or sign.
+
+`SecItemDelete` returns only `OSStatus`; no CF result is accepted. For either
+stage dictionary, each operation begins with its exact read. Not-found advances
+without deletion; a different value, malformed/wrong CFType, duplicate,
+interaction-required, or other status quarantines. A byte-equal value permits a
+physical delete only after the durable `delete_attempt_started` marker and its
+exact acknowledgement defined below. Direct `errSecItemNotFound:-25300` from
+that one delete is terminal. Success and other statuses use one exact
+post-invocation read to establish absence or quarantine, never to authorize a
+second delete. Helper/runner restart begins with the exact read and unresolved
+marker classification; it never infers completion from an unretained result.
+
 ## Domains and hashes
 
 Domain strings below are ASCII including the final NUL byte. Concatenation has
@@ -267,6 +315,12 @@ is one complete canonical JSON object.
 | coordinator active digest | `YTA-APPLY-COORDINATOR-ACTIVE-V1\0` |
 | coordinator permit digest | `YTA-APPLY-COORDINATOR-PERMIT-V1\0` |
 | coordinator closed digest | `YTA-APPLY-COORDINATOR-CLOSED-V1\0` |
+| stage-cleanup request digest | `YTA-STAGE-CLEANUP-REQUEST-V1\0` |
+| stage-cleanup intent digest | `YTA-STAGE-CLEANUP-INTENT-V1\0` |
+| stage-cleanup progress digest | `YTA-STAGE-CLEANUP-PROGRESS-V1\0` |
+| stage-cleanup delete-attempt digest | `YTA-STAGE-CLEANUP-DELETE-ATTEMPT-V1\0` |
+| stage-cleanup operation-result digest | `YTA-STAGE-CLEANUP-OPERATION-RESULT-V1\0` |
+| stage-cleanup evidence digest | `YTA-STAGE-CLEANUP-EVIDENCE-V1\0` |
 
 `request_sha256`, `proposal_sha256`, `acceptance_sha256`, and
 `recovery_evidence_sha256` are lowercase SHA-256 over their respective domain
@@ -274,6 +328,12 @@ followed by the complete canonical object. The proposal digest includes its
 `proposal_signature`. The record
 digest used by commit authorization is SHA-256 over the commit domain followed
 by the complete stored record.
+Stage-cleanup request, intent, progress, delete-attempt, operation-result, and
+evidence digests use their matching domains followed by the complete canonical
+object. `operation_result_sha256` specifically means the operation-result
+domain followed by the exact canonical operation-result bytes. A setup or cleanup context
+digest is instead plain SHA-256 of its exact canonical context bytes, as frozen
+by the artifact-authorization protocol; it is not a signing domain.
 
 `previous_record_sha256` is deliberately different: it is lowercase SHA-256
 over the exact complete prior stored-record bytes, with no domain prefix. The
@@ -330,7 +390,8 @@ exact active tag using the UI-fail dictionary above. Only
 `errSecItemNotFound` (OSStatus `-25300`) establishes absence. If a typed key
 reference is returned, the helper creates a fresh zero-reuse `LAContext`,
 performs exactly one signing lookup with the separate UI-allow dictionary, and
-uses that returned key/context for exactly one continuity-probe signature over
+uses only that returned key for exactly one `SecKeyCreateSignature`
+continuity-probe signature over
 the recovery-continuity-probe domain followed by the exact request bytes:
 
 - a valid signature proves continuity is available, ends recovery with
@@ -763,6 +824,425 @@ signing, revision adds, or cleanup deletes, and cannot learn whether the
 candidate enrollment would otherwise be valid. Gate 1B proves this ordering
 with the deterministic invalid-enrollment contention case.
 
+### Release-stage cleanup authority
+
+`stage_cleanup` is a distinct authenticated IPC operation, not a registry
+ceremony, coordinator recovery, ordinary uninstall, or production maintenance
+command. The helper accepts it only from the exact Gate runner connection when
+all of the following validate together: the complete exact root-signed
+`activation_smoke` or `post_grant_verification` token (not only its digest),
+that token's `cleanup_authorization=attributed_stage_cleanup_only`, the
+canonical stage cleanup context, the descriptor and running code identities,
+native architecture, approved capability, runner unique, gate session, and the
+retained setup context and post-enrollment registry snapshot. The token must be
+currently unexpired and its plan must carry
+`stage_cleanup_policy=attributed_stage_cleanup_v1`. A different token type,
+session, architecture, capability, runner, descriptor, setup snapshot, or
+context is rejected before a Keychain read.
+Trusted current time must also be strictly before the descriptor's
+`helper_profile_expires_at` at request authentication and immediately before
+each item read/delete. These checks instantiate the existing smoke- or
+post-grant-observation profile-expiry boundary for every internal cleanup step;
+they do not create an expiry grace or recovery exception.
+
+Setup and cleanup contexts are disjoint. The setup context can authorize only
+the first exact-artifact enrollment; the cleanup context can authorize only
+the bounded attributed deletion protocol in this section. Neither context can
+sign a receipt or registry proposal/final record, acquire or replace
+coordinator `active`, create or exercise a permit, construct transport, send a
+request, cross a runner session, or become ordinary production/recovery
+authority. Ordinary production, uninstall, maintenance, and every non-stage
+flow continue to forbid registry-revision, permit, closed-record, or active-key
+deletion.
+
+Before the first delete, the trusted runner durably writes the exact cleanup
+intent and initial progress object to immutable content-addressed storage
+outside the disposable journal root, runner mutable-state root, and helper
+Keychain namespaces. A cleanup intent is compact canonical JSON capped at
+262,144 bytes with fields, in order:
+
+1. `schema_version`, integer `1`
+2. `intent_type`, exactly `stage_cleanup`
+3. `stage_type`, `activation_smoke` or `post_grant_verification`
+4. `stage_token_sha256`
+5. `setup_context_sha256`
+6. `cleanup_context_sha256`
+7. `artifact_descriptor_sha256`
+8. `architecture`
+9. `approved_capability`
+10. `gate_runner_unique`
+11. `gate_session_id`
+12. `pre_enrollment_inventory_sha256`
+13. `pre_enrollment_inventory_base64url`
+14. `setup_transcript_manifest_sha256`
+15. `setup_transcript_manifest_base64url`
+16. `registry_snapshot_sha256`
+17. `registry_snapshot_base64url`
+18. `generated_key_tags`
+19. `expected_registry_records`
+20. `expected_coordinator_records`
+21. `expected_key_items`
+22. `delete_operations`
+23. `created_at`
+24. `expires_at`
+
+Every base64url value is unpadded encoding of the named exact canonical bytes;
+decode/re-encode equality and its adjacent digest are mandatory. The empty
+pre-enrollment inventory, setup transcript result manifest, and registry
+snapshot must equal the already retained setup evidence. `expires_at` is no
+later than the root-signed stage-token expiry. `generated_key_tags` is the
+helper-owned creation-order list captured on the authenticated stage session,
+contains exactly the setup snapshot's one generation-1 tag, and cannot be
+supplied or reordered by the runner. Smoke and post-grant plans contain no
+rotation, recovery, or other key creation, so any second tag is unattributed
+state and quarantines cleanup.
+Before intent construction the helper emits that list in its authenticated
+setup transcript and retained snapshot; the runner copies it byte-for-byte,
+and the helper compares the intent array to the digest-bound snapshot value and
+setup-transcript manifest before the executor guard. A restarted helper
+receives and validates those same retained bytes; it never reconstructs the
+list from current Keychain state.
+
+`expected_registry_records` is the complete session-created registry set in
+ascending numeric revision order and contains exactly the snapshot's revision-1
+record. Every entry contains `account`,
+`record_sha256`, and `record_base64url`, in that order, and the decoded bytes
+must form the valid descriptor-bound chain beginning at revision 1.
+`expected_coordinator_records` is the complete session-created audit set in
+account byte order and contains entries with `record_kind` exactly `permit` or
+`closed`, `account`, `record_sha256`, and `record_base64url`, in that order.
+It never contains `active`; every permit has its matching closed record and
+every entry binds this descriptor/session and the retained receipt/registry
+tuple. `expected_key_items` follows `generated_key_tags` order and contains
+`key_tag`, `key_projection_sha256`, and `key_projection_base64url`; each
+projection is the exact UI-fail lookup projection defined above and matches its
+registry SPKI/fingerprint tuple. These complete exact bytes, not service/name
+patterns, are the deletion attribution boundary.
+Registry/coordinator `record_sha256` retains that record type's ordinary domain
+definition; `key_projection_sha256` is plain SHA-256 of the exact projection.
+
+For `confirm_only`, the coordinator set contains exactly the setup enrollment's
+one registry-commit closed record and no permit. For `issue_create`, it also
+contains exactly the capability workflow's one apply permit and matching
+closed record, for three entries total in account-byte order. Rejected
+authority-negative probes create no record. Any other count, kind, lease,
+operation, or session is unattributed and fails before deletion.
+
+`delete_operations` is the only allowed operation order. Its entries contain,
+in order, `operation_index` starting at zero, `item_kind` exactly
+`coordinator_record`, `registry_record`, or `private_key`, `service` nullable
+only for a key, `account` nullable only for a key, `key_tag` required only for
+a key, `expected_item_sha256`, `exact_read_dictionary_sha256`, and
+`exact_delete_dictionary_sha256`. It contains first every attributed
+coordinator permit/closed entry in account byte order, then every attributed
+registry revision in descending numeric order, then every attributed key in
+reverse helper creation order. Each dictionary digest is SHA-256 of the
+language-neutral canonical projection of exactly the read/delete dictionary
+specified above. The target arrays and operation array must be a one-to-one
+mapping: missing, duplicate, extra, reordered, or differently projected entries
+invalidate the intent before any delete.
+For each operation, `expected_item_sha256` is plain SHA-256 of the exact stored
+value bytes or key-projection bytes, independent of the record's domain digest,
+so it is the digest used by the pre/post-read equality checks.
+
+Initial progress is retained before deletion with fields, in order,
+`schema_version` integer `1`, `progress_type` exactly `stage_cleanup_progress`,
+`cleanup_intent_sha256`, `gate_session_id`, `previous_progress_sha256` null,
+`progress_revision` integer `0`,
+`next_operation_index` integer `0`, `completed_operation_result_sha256s` exact
+empty array, `delete_attempt_started_sha256s` exact empty array,
+`pending_delete_attempt_sha256` null, `operation_result_sha256s` exact empty
+array, `state` exactly `in_progress`, and `updated_at`. State is only
+`in_progress`, `delete_pending`, `complete`, or `quarantined`. Before every
+physical delete, the runner atomically appends its acknowledged marker digest
+to `delete_attempt_started_sha256s`, sets `pending_delete_attempt_sha256`,
+increments `progress_revision`, and durably retains the resulting
+`delete_pending` progress. After each read/delete/reconciliation result,
+the runner atomically appends its digest to `operation_result_sha256s` and
+increments `progress_revision`; every successor sets
+`previous_progress_sha256` to the exact domain digest of its immediate durable
+predecessor. Only `deleted` or `already_absent` also appends
+the digest to `completed_operation_result_sha256s` and increments
+`next_operation_index`; `reconciled_absent` does the same. `quarantined` leaves
+that index unchanged and sets the terminal progress state. Every result clears
+`pending_delete_attempt_sha256`. The runner retains the new progress bytes and
+acknowledges their digest before another operation. A complete record has
+`next_operation_index` equal to the operation count, exactly one completed
+result per operation in operation order, and `state` exactly `complete`;
+the marker array contains zero or one entry per operation and every entry has
+fixed `attempt=1`; operation-result digests remain in operation order. An
+unresolved marker is represented only by `state=delete_pending` and the equal
+last marker digest in `pending_delete_attempt_sha256`. Missing, forked,
+rolled-back, reordered, or
+non-prefix progress is unverifiable and quarantines the session.
+
+The IPC request is compact canonical JSON capped at 524,288 bytes with fields,
+in order, `schema_version` integer `1`, `message_type` exactly `stage_cleanup`,
+`stage_type`, `stage_token_sha256`, `stage_token_base64url`,
+`setup_context_sha256`, `cleanup_context_sha256`,
+`cleanup_context_base64url`, `artifact_descriptor_sha256`, `architecture`,
+`approved_capability`, `gate_runner_unique`, `gate_session_id`,
+`registry_snapshot_sha256`, `cleanup_intent_sha256`,
+`cleanup_intent_base64url`, `cleanup_progress_sha256`,
+`cleanup_progress_base64url`, `requested_at`, and `expires_at`. The exact token,
+cleanup context, intent, and progress bytes must decode, re-encode, hash, and
+cross-bind. Request expiry is after issue, at most five minutes later, and no
+later than token/intent expiry. The terminal response is capped at
+131,072 bytes and contains `schema_version`, `message_type` exactly
+`stage_cleanup_result`, `request_sha256`, `cleanup_intent_sha256`,
+`final_cleanup_progress_sha256`, `status` exactly `complete` or `quarantined`,
+`next_operation_index`, `helper_cleanup_evidence_sha256` and
+`helper_cleanup_evidence_base64url` both null unless complete, and `finished_at`,
+in that order. The returned evidence bytes must match their digest; `complete`
+is the sole status that permits the runner to continue toward a passing final
+inventory.
+
+After all immutable inputs validate, the helper enters the one serialized
+authority executor and holds its guard through enumeration, every item
+read/delete/reconciliation, the final Keychain absence inventory, and result.
+Before the first delete and on every resumed request, an exact-account read of
+coordinator `active` must return only `errSecItemNotFound:-25300`; stage cleanup
+never deletes active and never proceeds around it. The bounded registry,
+coordinator, and key enumerations may contain only byte-equal not-yet-completed
+attributed intent entries and no unknown, extra, or mismatched entry. An
+expected entry may be absent even when its result is not yet in the durable
+progress prefix because its delete may have committed before acknowledgement;
+only that entry's ordered exact-read operation may classify the absence and
+advance progress.
+The enrolled registry generation may still be `active`; it is removable here
+only because its exact revision/generation/tag/SPKI/fingerprint/descriptor/
+session tuple equals the retained setup snapshot and cleanup intent.
+
+Each operation begins with the exact read and complete value- or key-projection
+comparison. With no pending marker, not-found completes the operation as
+`already_absent` without a delete; exact presence may proceed only through the
+marker handshake below; mismatch, malformed/wrong CFType, duplicate,
+interaction-required, or other status quarantines before deletion. With a
+pending marker, another physical delete is always forbidden: exact absence
+completes as `reconciled_absent`, exact byte-equal presence quarantines for
+manual repair, and every unknown or mismatched result quarantines. Recovery
+therefore classifies an unresolved invocation but never guesses whether it ran
+and never repeats it.
+
+Immediately before the sole physical `SecItemDelete`, the helper constructs a
+compact canonical marker with fields, in order, `schema_version` integer `1`,
+`marker_type` exactly `delete_attempt_started`, `stage_type`,
+`stage_token_sha256`, `setup_context_sha256`, `cleanup_context_sha256`,
+`artifact_descriptor_sha256`, `architecture`, `approved_capability`,
+`gate_runner_unique`, `gate_session_id`, `registry_snapshot_sha256`,
+`cleanup_intent_sha256`, `operation_index`, `item_kind`, `target_id`,
+`expected_item_sha256`, `exact_delete_dictionary_sha256`, `attempt` integer
+`1`, and `started_at`. Its digest uses the stage-cleanup delete-attempt domain.
+There is exactly zero or one marker per operation and no value other than
+`attempt=1` is valid.
+
+The helper sends a compact canonical message capped at 131,072 bytes with
+fields `schema_version` integer `1`, `message_type` exactly
+`stage_cleanup_delete_attempt_start`, `cleanup_intent_sha256`,
+`prior_progress_sha256`, `operation_index`,
+`delete_attempt_started_sha256`, `delete_attempt_started_base64url`,
+`delete_pending_progress_sha256`, and
+`delete_pending_progress_base64url`, in that order. The proposed progress
+appends that marker and enters `delete_pending`. The runner append-only retains
+the marker and pending-progress bytes in immutable outside-disposable custody,
+publishes and verifies them through the exact durable protocol below, and then
+returns an acknowledgement capped at 4,096 bytes with
+fields `schema_version` integer `1`, `message_type` exactly
+`stage_cleanup_delete_attempt_ack`, `cleanup_intent_sha256`,
+`delete_attempt_started_sha256`, `delete_pending_progress_sha256`,
+`progress_revision`, `operation_index`, `gate_session_id`, and
+`acknowledged_at`, in that order. Only an exact acknowledgement of those durable
+bytes permits the helper's one invocation. A lost, early, changed, duplicate,
+or unpersisted acknowledgement causes connection close and leaves the marker
+pending; it never permits a delete.
+
+After invocation, the helper records a canonical operation result with fields
+`schema_version`, `result_type` exactly `stage_cleanup_operation`,
+`cleanup_intent_sha256`, `operation_index`,
+`delete_attempt_started_sha256` null only when pre-read absence or rejection
+prevented invocation, `item_kind`, `target_id`, `expected_item_sha256`,
+`pre_read_status`, `pre_read_item_sha256`, `delete_status`,
+`post_read_status`, `post_read_item_sha256`, `outcome` exactly `deleted`,
+`already_absent`, `reconciled_absent`, or `quarantined`,
+`quarantine_reason` null unless outcome is `quarantined`, and `observed_at`, in
+that order. Statuses are numeric `OSStatus`; item hashes are over complete
+generic-password value or canonical key-projection bytes. Direct
+`errSecItemNotFound:-25300` from `SecItemDelete` is terminal
+`already_absent`, clears the pending marker, and requires no post-read. Direct
+success followed by exact absence records `deleted`; exact presence or an
+unverifiable read quarantines with `delete_success_still_present` or
+`delete_success_unverifiable`. Every
+other delete status requires one exact read: absence records
+`reconciled_absent`; exact expected presence records `quarantined` with reason
+`delete_result_still_present`; unknown/mismatch records `quarantined` with
+reason `delete_result_unverifiable`. Recovery of a pending marker uses reasons
+`pending_delete_still_present` or `pending_delete_unverifiable`. Pre-read
+rejection uses `pre_delete_read_unverifiable`. No other nullable combination or
+reason is valid, and no quarantined outcome permits another delete.
+
+The field shapes are exhaustive. `<marker>` is the one acknowledged marker
+digest, `<expected>` is `expected_item_sha256`, `<different>` is a non-equal
+digest from an otherwise typed success. `<read-invalid>` means either numeric
+`0` with `<different>` for a typed nonmatching item or null for a malformed,
+duplicate, wrong-CFType, or unprojectable success, or any numeric status other
+than `0` and `-25300` with a null item hash. `<delete-other>` is any numeric
+delete status other than `0` and `-25300`. “Advance” means append this result to both result arrays
+and increment `next_operation_index`; “quarantine” appends it only to
+`operation_result_sha256s`, leaves the index unchanged, and terminalizes
+progress.
+
+| Case | Marker | Pre-read status / item hash | Delete status | Post-read status / item hash | Outcome | Reason | Progress |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| initial pre-read absence | null | `-25300` / null | null | null / null | `already_absent` | null | advance |
+| initial pre-read rejection | null | `<read-invalid>` | null | null / null | `quarantined` | `pre_delete_read_unverifiable` | quarantine |
+| direct delete success | `<marker>` | `0` / `<expected>` | `0` | `-25300` / null | `deleted` | null | advance |
+| direct delete not-found | `<marker>` | `0` / `<expected>` | `-25300` | null / null | `already_absent` | null | advance |
+| direct delete success, exact item still present | `<marker>` | `0` / `<expected>` | `0` | `0` / `<expected>` | `quarantined` | `delete_success_still_present` | quarantine |
+| direct delete success, post-read unverifiable | `<marker>` | `0` / `<expected>` | `0` | `<read-invalid>` | `quarantined` | `delete_success_unverifiable` | quarantine |
+| ambiguous delete, post-read absence | `<marker>` | `0` / `<expected>` | `<delete-other>` | `-25300` / null | `reconciled_absent` | null | advance |
+| ambiguous delete, exact item still present | `<marker>` | `0` / `<expected>` | `<delete-other>` | `0` / `<expected>` | `quarantined` | `delete_result_still_present` | quarantine |
+| ambiguous delete, post-read unverifiable | `<marker>` | `0` / `<expected>` | `<delete-other>` | `<read-invalid>` | `quarantined` | `delete_result_unverifiable` | quarantine |
+| pending-marker recovery absence | `<marker>` | `-25300` / null | null | null / null | `reconciled_absent` | null | advance |
+| pending-marker recovery exact presence | `<marker>` | `0` / `<expected>` | null | null / null | `quarantined` | `pending_delete_still_present` | quarantine |
+| pending-marker recovery unverifiable | `<marker>` | `<read-invalid>` | null | null / null | `quarantined` | `pending_delete_unverifiable` | quarantine |
+
+These rows are the complete canonical encoder/decoder state space.
+
+A crash after invocation but before result persistence leaves the durable
+pending marker as the authority. Recovery reuses the identical token,
+cleanup-context, intent, marker, and longest valid progress prefix. Delete
+success and direct not-found both reconcile only through exact absence and a
+terminal `reconciled_absent` result; an ambiguous invocation whose item remains
+exactly present quarantines for manual repair. The helper never rebuilds
+attribution or dictionaries from mutable state and invokes `SecItemDelete` at
+most once per operation across all processes, restarts, and token lifetime.
+
+The initial request opens one full-duplex cleanup exchange and the helper holds
+the serialized executor guard until its terminal response or connection loss.
+After each operation or pending-marker reconciliation it sends one compact canonical intermediate message capped
+at 131,072 bytes with fields, in order, `schema_version` integer `1`,
+`message_type` exactly `stage_cleanup_step_result`,
+`cleanup_intent_sha256`, `prior_progress_sha256`, `operation_index`,
+`operation_result_sha256`, `operation_result_base64url`,
+`proposed_progress_sha256`, and `proposed_progress_base64url`. The result and
+progress bytes must decode/re-encode, hash, and represent exactly that next
+prefix. The runner durably retains both in the immutable outside-disposable
+evidence store, then returns an acknowledgement capped at 4,096 bytes with
+fields `schema_version` integer `1`, `message_type` exactly
+`stage_cleanup_progress_ack`, `cleanup_intent_sha256`,
+`proposed_progress_sha256`, `progress_revision`, `next_operation_index`,
+`gate_session_id`, and `acknowledged_at`, in that order. The helper verifies the
+acknowledged digest and counters before the next read/delete. A missing,
+changed, duplicate, reordered, or early acknowledgement closes the exchange
+without another operation. On reconnect, the runner sends a new initial
+request containing the longest durably retained valid prefix; neither peer
+manufactures or rolls back an acknowledgement.
+
+Marker/progress publication uses the same durable no-follow pattern as the
+journal protocol, in the already preopened mode-`0700` retained-evidence
+directory outside disposable state. The exact final basenames are
+`delete-attempt-<delete_attempt_started_sha256>.json` and
+`cleanup-progress-<delete_pending_progress_sha256>.json`. For each object the
+runner opens a fresh same-directory random temporary basename with
+`O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC` and mode `0600`, verifies by
+`fstat` that it is a same-user regular file with link count one and exact mode,
+writes the complete canonical bytes, and `fsync`s the file. It then publishes
+to the digest-derived final basename without replacement, using
+`renameatx_np(..., RENAME_EXCL)` or the protocol-equivalent collision-safe
+`linkat` followed by unlink of the temporary name. An existing final name is
+accepted only after the exact reopen verification below proves identical
+bytes; a different value is a collision and quarantines. After each final-name
+publication/unlink it `fsync`s the containing directory, opens the final entry
+relative to that same directory with
+`O_RDONLY|O_CLOEXEC|O_NOFOLLOW`, repeats owner/mode/type/link-count and size
+checks, reads the exact capped bytes from that one descriptor, repeats
+`fstat`, and requires byte-for-byte canonical equality and the expected domain
+digest. The marker is published and verified first; the cross-bound
+`delete_pending` progress is then published and verified by the same sequence.
+
+The pending progress is valid only when it advances the supplied prior valid
+prefix by exactly one revision, sets `previous_progress_sha256` to that prior
+progress digest, keeps `next_operation_index` and all result
+arrays unchanged, appends the one marker digest, sets both
+`pending_delete_attempt_sha256` to that digest and `state=delete_pending`, and
+matches the marker's stage/token/setup-context/cleanup-context/descriptor/
+architecture/capability/runner/session/snapshot/intent/operation/dictionary
+fields. Before sending the ACK, the runner also publishes the exact ACK bytes
+append-only in its retained IPC transcript ledger with the same file/fsync/
+collision-safe-publication/directory-fsync/reopen verification. Thus a sent ACK
+is durable evidence that both final pair entries existed and cross-bound to the
+valid prior prefix; an in-memory or merely written-but-not-reopened pair can
+never authorize `SecItemDelete`.
+
+Recovery begins from the longest durable ACK ledger entry, never merely the
+largest progress filename. Every acknowledged marker/pending-progress pair
+must still exist and pass the same no-follow reopen, exact-byte/hash, and
+cross-binding checks. A missing member, one-member/temporary-only partial
+publication, non-cross-bound pair, collision, changed metadata, or reopen
+mismatch quarantines the complete session and prohibits deletion; recovery
+never rolls back to the preceding prefix. Unacknowledged partial final entries
+or leftover temporary names likewise quarantine rather than being ignored or
+promoted.
+
+There is no digest cycle: the marker binds only the already fixed stage,
+intent, and operation; pending progress binds the prior progress and marker;
+the ACK binds both final marker and pending-progress digests. Successful
+exclusive publication, directory `fsync`, and no-follow reopen/hash comparison
+is the storage-model durability boundary. A crash or injected directory-fsync/
+reopen failure before the ACK means the helper receives no authority to delete.
+Loss after that boundary is not modeled as a normal power-loss outcome; if a
+later durable ACK ledger entry makes a missing/corrupt pair detectable, it is
+local corruption and quarantines without another delete.
+
+The helper cleanup evidence is compact canonical JSON capped at 65,536 bytes
+with fields, in order, `schema_version` integer `1`, `evidence_type` exactly
+`stage_cleanup_keychain`, `stage_type`, `stage_token_sha256`,
+`setup_context_sha256`, `cleanup_context_sha256`,
+`artifact_descriptor_sha256`, `architecture`, `approved_capability`,
+`gate_runner_unique`, `gate_session_id`, `pre_enrollment_inventory_sha256`,
+`setup_transcript_manifest_sha256`, `registry_snapshot_sha256`,
+`cleanup_intent_sha256`, `final_progress_sha256`,
+`delete_attempt_started_sha256s`, `operation_result_sha256s`,
+`completed_operation_result_sha256s`,
+`final_registry_accounts`,
+`final_coordinator_accounts`, `final_key_tags`, `started_at`, `finished_at`, and
+`result` exactly `pass`. Completed-result digests exactly equal the complete
+ordered operation list; operation-result and marker arrays equal the retained
+progress history. Every marker precedes its matching physical delete, has
+fixed attempt 1, and occurs at most once; an operation completed from initial
+absence has no marker.
+The three final arrays are empty and coordinator `active` is
+absent. The helper emits these exact bytes only after all attributed Keychain
+targets are absent.
+
+After validating that helper evidence, the runner removes the attributed
+journal/session filesystem state and emits the complete cleanup evidence to
+immutable storage outside disposable state. It contains, in order,
+`schema_version` integer `1`, `evidence_type` exactly `stage_cleanup_pass`,
+`stage_type`, `stage_token_sha256`, `setup_context_sha256`,
+`cleanup_context_sha256`, `artifact_descriptor_sha256`, `architecture`,
+`approved_capability`, `gate_runner_unique`, `gate_session_id`,
+`pre_enrollment_inventory_sha256`, `setup_transcript_manifest_sha256`,
+`registry_snapshot_sha256`, `cleanup_intent_sha256`,
+`final_cleanup_progress_sha256`, `helper_cleanup_evidence_sha256`,
+`final_empty_inventory_sha256`, `finished_at`, and `result` exactly `pass`.
+Only this complete object may be bound by the stage index. Its final inventory
+proves registry, coordinator, key, journal, and mutable runner state empty; the
+case-final cleanup assertion runs afterward and must match both evidence
+objects and their retained bytes.
+
+An unknown or unattributed item, mismatched bytes/projection, unexpected
+service/account/tag, active coordinator singleton, malformed/duplicate query
+result, changed snapshot, or non-prefix progress causes `quarantined` with zero
+further deletion. A token/context/intent or helper profile that expires or
+becomes unverifiable during partial cleanup cannot pass or authorize another
+delete. The trusted
+runner then quarantines and destroys the complete disposable user/VM; all stage
+observations, indexes, evidence, contexts, and publication inputs remain
+invalid. Mid-cleanup recovery may use only the exact retained bytes and only
+while every signature, expiry, peer, session, descriptor, and progress check
+still passes.
+
 ### Restart and ambiguous recovery
 
 On startup the sole launchd helper takes its fresh authority-executor guard,
@@ -1046,8 +1526,10 @@ exact `errSecItemNotFound:-25300` result.
 
 The same fixture directory contains language-neutral serialized projections
 for every exact key-generation, signing-key lookup with a fresh zero-reuse
-`LAContext` and UI allow, noninteractive existence lookup with UI fail and no
-context, key-enumeration, registry
+`LAContext` and UI allow, the returned `SecKey` used for exactly one
+context-free-API `SecKeyCreateSignature` call followed by context invalidation
+on every outcome, noninteractive existence lookup with UI fail and no context,
+key-enumeration, registry
 add/enumeration/exact-read, orphan-key delete, coordinator add/enumeration/
 exact-read/pre-send-probe, and active-delete dictionary above. Positive coordinator vectors
 cover apply active records, registry-commit active records bound only to a
@@ -1066,6 +1548,27 @@ ambiguous delete followed by typed `SecKey`, ambiguous delete followed by
 and every other OSStatus; coordinator-active deletion vectors separately cover
 delete success, equal-byte exact-read ambiguity, not-found reconciliation,
 different bytes, malformed projection, and every other OSStatus. Fixture
+vectors additionally serialize both signed stage-token variants, the exact
+setup snapshot, cleanup context, request, retained intent, every valid progress
+prefix, delete-attempt-start/durable-ack and step-result/progress-ack exchange,
+same-directory exclusive-`0600` temp writes, canonical file and directory
+`fsync`, collision-safe no-replace publication, no-follow reopen/hash checks,
+exact registry/coordinator/key read and delete dictionary, projected read
+value, every valid nullable operation-result shape, helper evidence, complete
+runner evidence, and final empty inventory. Three specific crash vectors stop
+after physical invocation but before result persistence: delete success and
+direct `errSecItemNotFound` both recover by exact absence into terminal
+`reconciled_absent`, while an ambiguous result with the exact item still
+present recovers into quarantine/manual repair. Every trace asserts one durable
+`delete_attempt_started` marker before invocation and exactly one
+`SecItemDelete` call for that operation across restart; every restart replays
+the identical intent, marker, and last durable progress bytes and starts with
+the same exact read. A separate crash/fault vector interrupts marker or pending-
+progress publication at file-fsync, no-replace publication, directory-fsync,
+and reopen checkpoints before ACK and proves zero `SecItemDelete` calls. A
+detectable ACK-ledger/pair loss or mismatch is a corruption vector that
+quarantines without rollback or delete; it is not modeled as successful
+directory-fsync durability loss. Fixture
 manifests name symbolic Security.framework constants and
 typed CF values; implementations construct native dictionaries and compare the
 bounded projection rather than relying on CFDictionary iteration order. No
@@ -1076,10 +1579,13 @@ Separate negative query vectors delete or substitute
 `kSecUseAuthenticationContext`, reuse an `LAContext`, set a nonzero reuse
 duration, replace UI allow with fail on signing, add a context or UI allow to
 existence/delete, omit UI fail, return a typed key from the wrong query, trigger
-unexpected authentication UI, or carry a signing key/context into a second
-signature. Signing vectors require exactly one prompt-capable lookup and one
-signature; existence/delete vectors require zero prompt presentation and zero
-signature.
+unexpected authentication UI, pass any context-like value to the signature
+call, reuse the returned signing key for a second signature, or omit context
+invalidation on success, cancellation, lookup failure, or signature failure.
+Signing vectors require exactly one prompt-capable lookup, one signature made
+with only the returned `SecKey`, and one terminal context invalidation;
+existence/delete vectors require zero prompt presentation, zero context, and
+zero signature.
 
 Negative vectors must independently cover:
 
@@ -1107,7 +1613,8 @@ Negative vectors must independently cover:
   synchronizable item, wrong accessibility/access group/service/account/class,
   match-limit substitution, unexpected return CFType, match-all bare
   dictionary, duplicate/unknown projected account or key tag, over-bound result,
-  broad delete, and any registry revision/permit/closed delete;
+  broad delete, and any registry revision/permit/closed delete outside the
+  exact stage-cleanup authority;
 - a missing, additional, reordered, cached, match-all, or differently
   projected pre-send probe; active/permit byte mismatch; closed lookup success;
   or any send after a probe failure; and
@@ -1132,7 +1639,32 @@ Negative vectors must independently cover:
   fence, recovery sign/acquire/permit/send/commit, recovery close missing the
   new actor/session, normal/recovery close substitution, close add without a
   preceding exact read, active delete without exact read/byte equality, or
-  deletion of a different well-formed active lease.
+  deletion of a different well-formed active lease; and
+- stage cleanup without the exact root-signed smoke/post-grant token, cleanup
+  context, descriptor, native architecture, capability, runner/session, or
+  retained setup snapshot; setup/cleanup authority used to sign, acquire,
+  permit, send, or cross sessions; absent/mutable intent or progress bytes;
+  current-state reconstruction; a wrong, unknown, unattributed, duplicate, or
+  reordered expected item, generated-key tag, dictionary, operation, or
+  completed prefix; missing/changed/early progress acknowledgement; a delete
+  without a preceding durable acknowledged `delete_attempt_started` marker;
+  wrong marker stage/token/setup or cleanup context/descriptor/architecture/
+  capability/runner/session/snapshot/intent/operation/dictionary, attempt other
+  than `1`, multiple markers, marker rollback, same-directory/temp mode or
+  no-follow violation, noncanonical write, missing file/directory fsync,
+  replacement publication, name collision with different bytes, publication
+  or reopen/hash failure, non-cross-bound pair, or acknowledgement before both
+  entries and the ACK ledger entry are durably reopened;
+  a second delete after any marker, including an unresolved one; coordinator
+  active present; enrolled registry tuple not
+  equal to the retained active generation; missing pre-read or byte comparison;
+  mismatch followed by deletion; unresolved-marker absence not terminalized as
+  `reconciled_absent`; unresolved-marker exact presence not quarantined for
+  manual repair; blind delete retry after ambiguity; restart
+  with changed bytes; stage-token/intent or helper-profile expiry, or other
+  unverifiability after partial cleanup, treated
+  as pass; incomplete final inventory; or any such delete from an ordinary
+  production, Gate, or non-stage flow.
 
 Go and Swift must parse and re-encode every positive byte identically and
 reject every negative vector with the same stable reason class. Gate 1A runs

@@ -19,7 +19,9 @@ The trust and activation dependencies are now fixed:
 3. Implement the signed native helper, OS-protected approval-key registry,
    bounded Go client, and non-distributed operator runner. Keep the fresh-
    `LAContext` UI-allow signing lookup separate from UI-fail/no-context
-   existence and delete queries, with disjoint vectors.
+   existence and delete queries; use only the returned `SecKey` for one
+   `SecKeyCreateSignature` call, invalidate the context on every outcome, and
+   freeze disjoint vectors for those boundaries.
 4. Produce one unpublished signed/notarized/stapled artifact with the ordinary
    production confirmation path wired; create and retain its exact app-only
    payload archive, then bind that archive and the exact Apple code identities
@@ -29,7 +31,12 @@ The trust and activation dependencies are now fixed:
    set, Keychain-migration cancellation/interruption/partial-failure set, and
    all 88 profile-expiry boundary vectors;
    only then issue the confirm-only provisional authorization, pass its
-   network-disabled ordinary-command smoke set, and issue the production
+   network-disabled ordinary-command smoke set. Begin each smoke/post-grant
+   capability plan with the token/context-limited exact-artifact revision-1
+   enrollment from a canonical empty five-domain inventory, bind its retained
+   registry snapshot to every later observation/index/set, end with a proved-
+   empty cleanup, and accept assertions only in a case-final runner evaluation
+   after all operation/transcript results. Then issue the production
    activation grant. Run the grant-bound ordinary-command verification on every
    architecture under its deny-only runner token; failed evidence quarantines
    the unpublished grant and candidate.
@@ -63,9 +70,20 @@ The trust and activation dependencies are now fixed:
    authority status/recover envelopes/exits, and v1-to-v2 migration/quarantine.
    Issue only the `issue.create` provisional authorization
    after E2, run the exact per-architecture network-isolated dispatch-boundary
-   smoke, and issue the production activation grant only after that complete
+   smoke under the same setup-first/snapshot-bound/cleanup-last case contract,
+   and issue the production activation grant only after that complete
    evidence set passes. Run the grant-bound per-architecture ordinary-command
-   verification and quarantine any failure.
+   verification and quarantine any failure. Implement final deletion only as
+   the distinct signed `stage_cleanup` IPC: retain its complete attributed
+   intent/progress outside disposable state before the first delete, serialize
+   exact-read/byte-compare/delete in the sole helper executor, and require the
+   durable acknowledged fixed-attempt marker before invocation. Recovery of an
+   unresolved marker may only terminalize exact absence or quarantine; it must
+   never re-delete. Publish both marker and cross-bound `delete_pending`
+   progress from same-directory exclusive `0600` no-follow temps with canonical
+   write/file fsync, collision-safe no-replace publication, directory fsync,
+   and exact no-follow reopen before ACK. Destroy/quarantine rather than touch
+   unknown state.
 7. Sign the root publication envelope over the exact post-grant plan and
    complete evidence set, then reuse the retained app-only payload to build one
    outer delivery archive containing the app, authority objects, envelope,
@@ -305,6 +323,7 @@ Do not copy built-in mutation scripts and call them “guarded” without these 
 | Mutation | Pre-send failure, server rejection, timeout before/after commit, process crash |
 | Reconciliation | Unique success, zero match, multiple match, unspecified comment order, unrelated concurrent update |
 | Local authority | Single launchd helper; serialized guard; acquisition-between-read/delete ABA denial; exact status/recover JSON + invocation meta/flags/exits; prepared-only v1 migration and all-other-state quarantine |
+| Release stages | Exact setup-first 5/6/6/6 case lists; distinct token-bound `stage_cleanup`; immutable attributed intent/progress; exact read/compare; no-follow temp + file/directory fsync + exclusive publish + reopen-verified marker/pending-progress pair before ACK and sole delete; partial-pair/pre-ACK fault quarantine with zero delete; unresolved-marker absence terminalization and present/unknown quarantine with zero re-delete; exhaustive operation-result shapes/domain; final empty inventory and case-final assertions |
 | Secrets | Config/argv/log/error/crash-output scan |
 | Portability | Same skill scenarios in Codex and Claude Code |
 

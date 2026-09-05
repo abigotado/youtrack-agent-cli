@@ -162,8 +162,10 @@ non-decimal, and ad-hoc inputs fail closed.
 
 The helper-only permanent key is P-256 Secure Enclave material stored through
 the data-protection Keychain with `kSecAttrAccessControl`. A new `LAContext`
-with zero reuse is present in the exact signing-key lookup and bound to the
-actual one private-key signing operation, used once, and invalidated. Separate
+with zero reuse is present only in the exact signing-key lookup. The returned
+`SecKey`, not the context, is used exactly once with `SecKeyCreateSignature`,
+which has no context parameter; the context is invalidated on every lookup or
+signature outcome. Separate
 existence/delete queries carry no context and force authentication UI to fail.
 Password-fallback versus `biometryCurrentSet` remains an
 explicit operator-reviewed policy. PR A does not create this key or access any
@@ -228,6 +230,26 @@ all driven by exact binary barrier schedules and event traces. Future failures
 use the additive JSON v1 commands and distinct future exits 10..13 frozen
 there; corruption remains existing exit 1 and no native status creates retry
 authority.
+
+Activation-smoke and post-grant sessions are not allowed to assume a registry
+already exists. Their first compiled case derives a stage-token-bound setup
+context that permits only one exact-artifact revision-1 enrollment after exact
+bounded absence probes for the production registry and coordinator services,
+signing-key namespace, journal root, and mutable runner state. The retained
+generation/SPKI/fingerprint/descriptor/session snapshot binds every later
+observation and evidence index. Final cleanup uses UI-fail/no-context queries
+and the bounded filesystem probe to prove all five domains empty. It runs only
+through the distinct root-token- and snapshot-bound `stage_cleanup` IPC after
+the exact attributed records, helper-created tags, Security.framework
+dictionaries, and delete order have been retained outside disposable state.
+The helper holds the serialized executor, requires coordinator `active`
+absent, exact-reads and byte-compares each item before its one delete, and
+first requires a durable acknowledged `delete_attempt_started` marker. An
+unresolved marker never permits another delete: absence reconciles terminally,
+while presence or unknown state quarantines for manual repair.
+Unknown/mismatched state is never deleted; expiry or uncertainty destroys the
+quarantined disposable user/VM and invalidates the run. Setup and cleanup
+contexts cannot sign, permit, send, or cross sessions.
 Recovery is a separate trusted-UI handshake: a new exact-code CLI and helper
 session validate the descriptor and retained evidence, while old audit-token/
 session values are historical only. Its fence can classify/CAS, close, and

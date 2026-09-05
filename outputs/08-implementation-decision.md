@@ -67,6 +67,30 @@ binds the security-relevant contents while the Cask separately pins its
 containing archive without a recursive hash. It does not authorize a second
 write-capable build.
 
+Both activation-smoke capability plans and both post-grant plans are now
+setup-first and cleanup-last. A stage token plus derived setup-only context may
+perform exactly one revision-1 exact-artifact enrollment after canonical empty
+registry/coordinator/key/journal/session inventories pass. The retained
+generation/SPKI/fingerprint/descriptor/session snapshot binds every later
+observation, per-architecture index, and complete evidence set. Operation
+observations carry empty assertion IDs; only the separate case-final runner
+evaluation may emit the ordered aggregate after all transcripts exist. Every
+failure runs bounded cleanup, and an unproved cleanup destroys the quarantined
+disposable user/VM while invalidating all session output.
+
+Cleanup itself is a distinct root-token-bound `stage_cleanup` IPC authority,
+not a consequence of the setup context or ordinary maintenance. Its immutable
+pre-delete intent binds the empty pre-inventory, setup transcript/snapshot,
+helper-created key order, complete attributed record/key bytes, exact
+Security.framework dictionaries, and operation order. Under the serialized
+executor the helper requires coordinator active absent, exact-reads and
+byte-compares each item, and durably acknowledges a fixed-attempt marker before
+its sole delete only after the marker and cross-bound `delete_pending` progress
+are exclusively published, file/directory-fsynced, and exactly reopened.
+Restart with an unresolved marker terminalizes exact absence
+or quarantines presence/unknown state without another delete. Unknown or expired partial state is quarantined
+and the disposable environment is destroyed; it is never broadly deleted.
+
 The same gate must test the first Cask install path against the application-
 bound Keychain ACL. Install hooks must not silently reauthorize credentials;
 the only permitted initial migration is the operator-invoked

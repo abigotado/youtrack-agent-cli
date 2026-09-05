@@ -67,7 +67,16 @@ envelope, exact post-grant plan, and the complete closed evidence-set tree at
 the protocol's fixed archive-root paths. The envelope does not hash its
 containing archive; the reviewed Cask pins the archive bytes, while the root
 signature binds every security-relevant contained object without a recursive
-hash cycle.
+hash cycle. The closed tree includes, per architecture, the setup-only
+enrollment context, empty pre-enrollment inventory, retained revision-1
+registry snapshot, case-final evaluations, and final empty-inventory cleanup
+proof, including the immutable attributed cleanup-intent/progress and
+helper/runner evidence digests. The prepublication helper accepts deletion only
+through the exact root-token-bound `stage_cleanup` IPC and reconciles each
+byte-equal item under its serialized executor, with one durable acknowledged
+marker before the sole delete and no re-delete for an unresolved marker. Session-bound stage
+tokens remain historical digests only and are not shipped, so installed or
+ordinary production processes receive no such deletion authority.
 
 Installation copies this complete tree to one versioned Caskroom root without
 rebuilding, re-signing, fetching auxiliary assets, or rewriting any byte

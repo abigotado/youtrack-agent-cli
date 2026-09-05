@@ -147,7 +147,9 @@ fixed prefix. The logical generation, key ID, full tag, DER SPKI, and
 fingerprint are bound into the registry transition. Its private key
 is non-exportable and requires `.privateKeyUsage` together with the accepted
 fresh-presence policy. A new `LAContext` with zero reuse is bound to the actual
-signing-key lookup and its one sign operation, used once, and invalidated.
+signing-key lookup only. Its returned `SecKey` is used exactly once with
+`SecKeyCreateSignature`, which accepts no context parameter, and the context is
+invalidated on every lookup or signature outcome.
 Noninteractive existence and orphan-delete queries instead require
 `kSecUseAuthenticationUIFail`, carry no `LAContext`, and can never sign. A separate Gate decision
 must record whether the release uses `userPresence` or
@@ -385,17 +387,38 @@ clean reset. E1 and E2 run with fresh tokens on every declared architecture.
 Only after both complete evidence sets pass may the offline root sign a
 capability-specific provisional authorization, which still denies ordinary
 production use. A final network-disabled black-box activation smoke runs under
-fresh per-architecture deny-only tokens. Only its complete passing evidence
+fresh per-architecture deny-only tokens. Each capability plan begins with one
+token/context-limited exact-artifact enrollment from a retained canonical
+empty inventory, binds the resulting revision-1/generation-1 registry snapshot
+to every later observation and both evidence-index layers, and ends by proving
+the disposable registry/coordinator/key/journal/session inventory empty. Only
+its complete passing evidence
 set permits the offline root to sign the production activation grant. The
 exact artifact then loads that grant and provisional authorization and repeats
-the ordinary capability path on every architecture under separate deny-only
-post-grant runner tokens. Only the publication envelope may bind that later
+the same setup-first, cleanup-last discipline plus the ordinary capability path
+on every architecture under separate deny-only post-grant runner tokens. Every
+case passes only through a final runner evaluation after all operation and
+transcript results exist. Only the publication envelope may bind that later
 evidence. The envelope is then packaged with the bound plan and complete
 evidence tree; because it does not hash its containing delivery archive, this
 creates no hash cycle. The exact sequence and failure quarantine are normative
 in
 [Gate artifact authorization](gate1a-artifact-authorization.md). No post-Gate
 rebuild or wiring change inherits this evidence.
+
+Cleanup is not inferred from setup or production authority. The exact
+root-signed smoke/post-grant token derives a distinct session-bound cleanup
+context accepted only by `stage_cleanup`. Before its first delete, the trusted
+runner retains an immutable intent outside disposable state containing the
+empty pre-inventory, setup transcript/snapshot, helper-created key list,
+complete attributed record/key bytes, exact Security.framework dictionaries,
+and delete order. The sole launchd helper holds its serialized executor across
+exact-read/byte-compare/delete, durably marks and acknowledges the fixed sole
+attempt before invocation, and never re-deletes an unresolved marker. It
+requires coordinator `active` absent, removes only the retained session's
+registry generation, permit/closed records, and keys, and quarantines any
+unknown or mismatched state without deleting it. Partial cleanup after token or
+evidence expiry can never pass; the disposable user/VM is destroyed.
 
 The existing pre-Gate receipt schema v2 does not carry registry revision and is
 therefore not activation-eligible. Before durable confirmation, the shared Go
@@ -552,7 +575,9 @@ passes a second per-architecture ordinary-command verification with final-
 context receipts and the same safe pre-socket mutation denial. The grant is
 cryptographically usable during this bounded step, so the disposable Gate host
 and release operator are trusted to quarantine the grant and candidate after
-any failure. A passing candidate is published byte-for-byte with no post-Gate
+any failure. Each failure runs bounded cleanup; failure to prove the five
+inventory domains empty destroys the quarantined disposable user/VM and all
+session output remains invalid. A passing candidate is published byte-for-byte with no post-Gate
 activation edit.
 
 Public Homebrew distribution is last. The accepted shape is a Cask or private

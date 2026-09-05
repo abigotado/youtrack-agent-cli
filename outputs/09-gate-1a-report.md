@@ -72,8 +72,9 @@ PASSED**.
   group; only a committed active registry transition may select it.
 - The item uses `kSecAttrAccessControl`; it does not combine that contract with
   legacy `kSecAttrAccess` ACL configuration.
-- One new zero-reuse `LAContext` appears only in the exact signing-key lookup,
-  is bound to its one private-key sign operation, and is then invalidated.
+- One new zero-reuse `LAContext` appears only in the exact signing-key lookup.
+  The returned `SecKey`, not the context, is used once with
+  `SecKeyCreateSignature`; the context is invalidated on every outcome.
   Separate existence/delete queries contain no context, force authentication
   UI to fail, and can never sign.
 - The selected `userPresence` password-fallback or `biometryCurrentSet` policy
@@ -200,6 +201,35 @@ evidence tree without fetching or rewriting them, and reject `sha256
 the Cask separately pins its containing archive so no recursive hash is needed.
 Homebrew checksum validation is
 not a substitute for the pinned-root signature or runtime code-identity checks.
+
+The capability-specific activation-smoke plans contain exactly 5 and 6 cases;
+the post-grant plans contain exactly 6 each. Every plan starts with a stage-
+token/setup-context-limited exact-artifact enrollment from a canonical empty
+registry/coordinator/key/journal/session inventory, binds the retained
+revision-1/generation-1 snapshot to every later observation/index/set, and
+ends with a proved-empty cleanup. Operation observations have empty assertion
+IDs; only a case-final runner evaluation emitted after all transcript results
+can pass the case. Failure cleanup is bounded, and an unproved cleanup destroys
+the quarantined disposable user/VM while invalidating all session output.
+
+The cleanup step is now frozen as a separate root-token-bound `stage_cleanup`
+IPC authority. Before its first delete the runner retains the exact cleanup
+context, setup evidence/snapshot, helper-generated key list, attributed
+registry/coordinator/key bytes, Security.framework dictionaries, and ordered
+operations outside disposable state. The sole helper executor requires active
+coordinator absence and performs exact-read/byte-compare/delete with read-first
+restart classification. A durable acknowledged fixed-attempt
+`delete_attempt_started` marker precedes each sole invocation; unresolved exact
+absence terminalizes, while presence/unknown quarantines without re-delete.
+ACK is permitted only after both marker and cross-bound `delete_pending`
+progress pass same-directory exclusive-`0600` canonical write/file fsync,
+collision-safe publication, directory fsync, and no-follow reopen/hash checks;
+any detectable partial pair or pre-ACK fault quarantines and permits no delete.
+Operation results use their dedicated digest domain and the exhaustive
+pre-read/direct-result/ambiguous-result/pending-marker field-shape table.
+Unknown, mismatched, expired, or unverifiable partial
+cleanup cannot pass and triggers quarantine/destruction without further
+deletion.
 
 Only the first signed Cask build may follow these gates. A second
 write-capable release remains blocked until its separate rollover decision and

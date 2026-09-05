@@ -91,6 +91,21 @@ provisional authorization remains deny-only. A later offline-root-signed
 activation grant is issued only over the complete per-architecture pre-grant
 smoke evidence, and the real grant-bound production context must then pass a
 second per-architecture ordinary-command verification before publication.
+Each activation-smoke and post-grant capability plan starts with a setup-only
+exact-artifact enrollment from a canonical empty disposable inventory, binds
+the retained revision-1 registry snapshot through every later observation and
+evidence index, and finishes by proving the inventory empty again. Assertions
+are accepted only in a case-final runner observation emitted after every
+operation transcript is retained; failed cleanup destroys the quarantined
+disposable user/VM and invalidates all session output.
+That final deletion is a separate root-token-bound `stage_cleanup` IPC
+authority, not ambient registry maintenance: before deleting anything it
+retains the exact setup snapshot, attributed record/key bytes, dictionaries,
+and operation order outside disposable state, then reconciles every delete by
+exact read and byte comparison under the serialized helper executor. One
+durable acknowledged `delete_attempt_started` marker precedes its sole physical
+delete; an unresolved marker can only prove absence or quarantine. Unknown
+state is quarantined, never deleted.
 The future write path is additionally gated by one launchd-managed helper, its
 serialized authority executor, and a helper-owned fixed-active Keychain
 coordinator: registry commits cannot overlap an apply, acquisition cannot race

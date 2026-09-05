@@ -635,7 +635,13 @@ compact canonical fields are, in order:
 16. `gate_target_sha256`, null except for Gate 1B
 17. `provisional_context_sha256`, null except for activation smoke
 18. `authorization_context_sha256`, null except for post-grant verification
-19. `cases`, an ordered array
+19. `stage_setup_policy`, null for Gate 1A/Gate 1B or exactly
+    `first_exact_artifact_enrollment_v1` for activation smoke and post-grant
+    verification
+20. `stage_cleanup_policy`, null for Gate 1A/Gate 1B or exactly
+    `attributed_stage_cleanup_v1` for activation smoke and post-grant
+    verification
+21. `cases`, an ordered array
 
 `gate_plan_sha256` always means SHA-256 of these complete exact plan bytes,
 including when `plan_type` is `activation_smoke`. No `smoke_plan_sha256` field
@@ -695,6 +701,16 @@ read-only `GET`/`HEAD`; the mutation dispatcher remains a pre-socket hard deny.
 The two post-grant policies have the same network restrictions as their smoke
 counterparts but require the real grant-bound final authorization context and
 the post-grant token's distinct dispatch-denial code.
+For either stage policy, `stage_setup_policy` grants no ambient registry
+authority: it is usable only by the first compiled setup case, only with the
+stage token and derived setup context, and only to create revision 1 from the
+proved empty disposable inventory described below. Rotation, recovery,
+revocation, a second enrollment, receipt signing, and mutation dispatch are
+outside that setup authority.
+`stage_cleanup_policy` is likewise not ambient deletion authority. It permits
+only the distinct `stage_cleanup` IPC protocol over the exact retained cleanup
+intent and cleanup context; ordinary production and non-stage processes retain
+the no-delete rule.
 An inherited non-IPC descriptor, alternate Unix path, missing audit-token
 check, IPv6/hostname loopback, datagram/raw socket, or undeclared socket attempt
 is a Gate failure. Any policy change requires a protocol revision, not a new
@@ -788,18 +804,34 @@ replaced.
 A command-contract manifest is compact canonical JSON capped at 131,072 bytes.
 Its fields are `schema_version` integer `1`, `manifest_type` exactly
 `command_contract`, `plan_type`, `approved_capability`,
-`fixture_executable_manifest_sha256`, and `entries`, in that order. The fixture
-digest follows the same required/null rule as the plan. Entries are in the
+`fixture_executable_manifest_sha256`, `entries`, and `case_evaluations`, in
+that order. The fixture digest follows the same required/null rule as the plan.
+Entries are in the
 normative case/step order below and contain, in order, `case_id`,
 `evidence_scope`, `step_id`, `executable_role`, `executable_component`, `argv`,
 `working_directory`, `environment`, `stdin`, `timeout_seconds`, `fixture_ids`,
 `assertion_ids`, and `transcript_ids`.
-`argv`, `assertion_ids`, and `transcript_ids` are nonempty; `environment` is
-the required empty array; `fixture_ids` may be empty where the compiled
-contract needs no fixture. The `argv` field is the exact typed template later
-resolved by the runner. The entry fixes each step's executable, argv template,
-timeout, and complete ordered ID lists; a plan never supplies or overrides
-different values.
+`argv` and `transcript_ids` are nonempty; `assertion_ids` is the exact empty
+array on every operation entry. `environment` is the required empty array;
+`fixture_ids` may be empty where the compiled contract needs no fixture. The
+`argv` field is the exact typed template later resolved by the runner. The
+entry fixes each operation's executable, argv template, timeout, and complete
+ordered ID lists; a plan never supplies or overrides different values.
+
+`case_evaluations` has exactly one entry per case in normative case order.
+The six manifests therefore contain exactly 23, 25, 5, 6, 6, and 6
+case-evaluation entries for Gate 1A, Gate 1B, smoke confirm, smoke issue-create,
+post-grant confirm, and post-grant issue-create respectively.
+Each contains, in order, `case_id`, `observation_id` equal to the case ID plus
+`/final-evaluation`, `executable_role` and `executable_component` both exactly
+`gate_runner`, `assertion_ids`, and `transcript_ids`. Its `assertion_ids` are
+the complete ordered IDs obtained from that case row's suffixes. Its
+`transcript_ids` are exactly the final evaluator's derived `stdout` then
+`stderr` IDs. This is not a candidate subprocess command: it binds the
+already authenticated runner's mandatory case-final evaluation after every
+operation observation and transcript result exists. A plan case contains
+`case_id`, `evidence_scope`, `steps`, and `final_evaluation`, in that order;
+the last field is rebuilt from this manifest entry.
 
 The release verifier contains exactly six checked-in literal digests named
 `GATE1A_COMMAND_CONTRACT_SHA256`, `GATE1B_COMMAND_CONTRACT_SHA256`,
@@ -810,7 +842,8 @@ The release verifier contains exactly six checked-in literal digests named
 manifest whose plan type/capability matches its name. The corresponding plan
 field must equal that literal, its fixture-executable field must equal the
 manifest field, and its `cases` array must byte-for-byte equal the canonical
-case tree rebuilt from all manifest entry fields, including scope. A missing literal/manifest,
+case tree rebuilt from all operation and case-evaluation manifest entries,
+including scope. A missing literal/manifest,
 unregistered digest, empty step, changed command field, or validly hashed but
 uncompiled manifest fails before token acceptance. Changing a contract requires
 a protocol revision and new Gate.
@@ -819,13 +852,15 @@ All IDs match `^[a-z0-9][a-z0-9._-]{0,127}$` and are globally unique by
 manifest type. Only set-like fixture, assertion, and transcript manifest entry
 arrays are sorted by increasing unsigned UTF-8 ID bytes and must already be in
 that order on input. Order-bearing arrays are never sorted: command-contract
-entries, plan `cases`, case `steps`, step `argv`, `assertion_ids`,
-`transcript_ids`, observations, evidence scopes, and concurrency trace events
-must occur in the exact normative order declared below. A producer cannot use
+entries and `case_evaluations`, plan `cases`, case `steps`, step `argv`,
+case-final `assertion_ids`, `transcript_ids`, observations, evidence scopes,
+and concurrency trace events must occur in the exact normative order declared
+below. A producer cannot use
 map iteration or byte sorting to replace that order. A set digest is SHA-256
 over the exact canonical bytes of the explicitly set-like manifest. The plan
 validator loads each manifest by digest, rejects missing/extra entries, and
-requires every step reference to resolve with the declared kind and evaluator.
+requires every operation and final-evaluation reference to resolve with the
+declared kind and evaluator.
 An unreferenced manifest entry or a referenced ID absent from the plan is
 invalid.
 
@@ -902,41 +937,52 @@ below must contain the same IDs once each in this exact order.
 
 For activation smoke, `confirm_only` has exactly these cases:
 
-1. `smoke.confirm.prepare-confirm-success`
-2. `smoke.confirm.apply-all-deny`
-3. `smoke.confirm.receipt-context-ineligible`
-4. `smoke.confirm.authority-negatives`
+1. `smoke.confirm.setup-exact-artifact-enrollment`
+2. `smoke.confirm.prepare-confirm-success`
+3. `smoke.confirm.apply-all-deny`
+4. `smoke.confirm.receipt-context-ineligible`
+5. `smoke.confirm.authority-negatives`
 
 `issue_create` smoke has exactly these cases:
 
-1. `smoke.issue-create.prepare-confirm-apply-dispatch-deny`
-2. `smoke.issue-create.zero-mutating-bytes`
-3. `smoke.issue-create.update-comment-other-deny`
-4. `smoke.issue-create.receipt-context-ineligible`
-5. `smoke.issue-create.authority-negatives`
+1. `smoke.issue-create.setup-exact-artifact-enrollment`
+2. `smoke.issue-create.prepare-confirm-apply-dispatch-deny`
+3. `smoke.issue-create.zero-mutating-bytes`
+4. `smoke.issue-create.update-comment-other-deny`
+5. `smoke.issue-create.receipt-context-ineligible`
+6. `smoke.issue-create.authority-negatives`
 
 Post-grant verification for `confirm_only` has exactly these cases:
 
-1. `post-grant.confirm.prepare-confirm-success`
-2. `post-grant.confirm.apply-all-deny`
-3. `post-grant.confirm.receipt-terminal-replay-deny`
-4. `post-grant.confirm.authority-negatives`
-5. `post-grant.confirm.cleanup`
+1. `post-grant.confirm.setup-exact-artifact-enrollment`
+2. `post-grant.confirm.prepare-confirm-success`
+3. `post-grant.confirm.apply-all-deny`
+4. `post-grant.confirm.receipt-terminal-replay-deny`
+5. `post-grant.confirm.authority-negatives`
+6. `post-grant.confirm.cleanup`
 
 Post-grant verification for `issue_create` has exactly these cases:
 
-1. `post-grant.issue-create.prepare-confirm-apply-dispatch-deny`
-2. `post-grant.issue-create.zero-mutating-bytes`
-3. `post-grant.issue-create.receipt-terminal-replay-deny`
-4. `post-grant.issue-create.authority-negatives`
-5. `post-grant.issue-create.cleanup`
+1. `post-grant.issue-create.setup-exact-artifact-enrollment`
+2. `post-grant.issue-create.prepare-confirm-apply-dispatch-deny`
+3. `post-grant.issue-create.zero-mutating-bytes`
+4. `post-grant.issue-create.receipt-terminal-replay-deny`
+5. `post-grant.issue-create.authority-negatives`
+6. `post-grant.issue-create.cleanup`
 
-The verifier compiles the following closed case contracts. Step IDs and
-assertion suffixes occur in the shown order; a suffix forms the assertion ID by
-directly appending it to the case ID. Every step always records `stdout` and
-`stderr`; the last column adds required transcript kinds.
+The four stage lists therefore contain exactly 5, 6, 6, and 6 cases in the
+order shown. Each first case is the only setup-authorized case; each last case
+contains or is the final cleanup and final empty-inventory proof.
 
-| Gate 1A case | Exact step IDs | Assertion suffixes | Additional transcripts |
+The verifier compiles the following closed case contracts. Operation step IDs
+and case-final assertion suffixes occur in the shown order; a suffix forms the
+assertion ID by directly appending it to the case ID. Every operation records
+`stdout` and `stderr`; the last column adds required transcript kinds. The
+tables do not abbreviate assertion timing: every listed suffix belongs only to
+the separate `/final-evaluation` observation, never to an operation
+observation.
+
+| Gate 1A case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
 | `gate1a.artifact.static-validation` | `validate` | `.primary`, `.all-architectures`, `.launchd-single-helper-server` | `security_framework` |
 | `gate1a.artifact.runtime-peer-validation` | `launch`, `handshake`, `launch-negative-outer`, `reject-negative-outer`, `launch-negative-helper`, `reject-negative-helper` | `.primary`, `.mixed-cli-peer-deny`, `.mixed-helper-peer-deny`, `.negative-peer-no-authority` | `ipc`, `security_framework` |
@@ -991,7 +1037,7 @@ different-winner, source-delete success/error/ambiguity, restart, and cleanup
 partial failure are mandatory schedule fixtures for these cases. Missing any
 one is a Gate failure.
 
-| Gate 1B case | Exact step IDs | Assertion suffixes | Additional transcripts |
+| Gate 1B case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
 | `gate1b.issue-create.prepare-confirm-apply-success` | `prepare`, `confirm`, `apply` | `.primary`, `.one-created-issue` | `network`, `ipc`, `ui` |
 | `gate1b.issue-create.expected-state-conflict` | `prepare`, `confirm`, `mutate-fixture`, `apply` | `.primary`, `.zero-create` | `network`, `ipc`, `ui` |
@@ -1019,46 +1065,53 @@ one is a Gate failure.
 | `gate1b.receipt.context-and-replay-deny` | `prepare`, `confirm`, `copy-context`, `replay` | `.primary`, `.zero-mutation-dispatch` | `network`, `ipc`, `ui` |
 | `gate1b.authority.fail-closed-matrix` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `network`, `ipc`, `security_framework` |
 
-| Confirm smoke case | Exact step IDs | Assertion suffixes | Additional transcripts |
+| Confirm smoke case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
+| `smoke.confirm.setup-exact-artifact-enrollment` | `pre-enrollment-inventory`, `enroll`, `snapshot` | `.primary`, `.pre-enrollment-empty`, `.setup-only-authority`, `.registry-snapshot` | `ipc`, `ui`, `security_framework` |
 | `smoke.confirm.prepare-confirm-success` | `prepare`, `confirm` | `.primary`, `.smoke-context` | `ipc`, `ui` |
 | `smoke.confirm.apply-all-deny` | `apply-negatives` | `.primary`, `.zero-network-bytes` | `network`, `ipc` |
 | `smoke.confirm.receipt-context-ineligible` | `consume`, `copy-context`, `replay` | `.primary`, `.terminal-state`, `.ordinary-context-denied` | `ipc` |
-| `smoke.confirm.authority-negatives` | `verify-matrix`, `cleanup` | `.primary`, `.all-negatives-rejected`, `.cleanup-complete` | `ipc`, `security_framework` |
+| `smoke.confirm.authority-negatives` | `verify-matrix`, `derive-cleanup-context`, `retain-cleanup-intent`, `stage-cleanup`, `verify-cleanup` | `.primary`, `.all-negatives-rejected`, `.cleanup-intent-retained`, `.stage-cleanup-authority`, `.delete-attempt-marked-before-invocation`, `.unresolved-attempt-no-redelete`, `.attributed-deletes-only`, `.cleanup-complete`, `.final-inventory-empty` | `ipc`, `security_framework` |
 
-| Issue-create smoke case | Exact step IDs | Assertion suffixes | Additional transcripts |
+| Issue-create smoke case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
+| `smoke.issue-create.setup-exact-artifact-enrollment` | `pre-enrollment-inventory`, `enroll`, `snapshot` | `.primary`, `.pre-enrollment-empty`, `.setup-only-authority`, `.registry-snapshot` | `ipc`, `ui`, `security_framework` |
 | `smoke.issue-create.prepare-confirm-apply-dispatch-deny` | `prepare`, `confirm`, `apply` | `.primary`, `.dispatch-deny-code` | `network`, `ipc`, `ui` |
 | `smoke.issue-create.zero-mutating-bytes` | `audit` | `.primary`, `.zero-mutation-bytes` | `network` |
 | `smoke.issue-create.update-comment-other-deny` | `prepare-negatives`, `apply-negatives` | `.primary`, `.zero-mutation-dispatch` | `network`, `ipc` |
 | `smoke.issue-create.receipt-context-ineligible` | `terminalize`, `copy-context`, `replay` | `.primary`, `.terminal-state`, `.ordinary-context-denied` | `network`, `ipc` |
-| `smoke.issue-create.authority-negatives` | `verify-matrix`, `cleanup` | `.primary`, `.all-negatives-rejected`, `.cleanup-complete` | `network`, `ipc`, `security_framework` |
+| `smoke.issue-create.authority-negatives` | `verify-matrix`, `derive-cleanup-context`, `retain-cleanup-intent`, `stage-cleanup`, `verify-cleanup` | `.primary`, `.all-negatives-rejected`, `.cleanup-intent-retained`, `.stage-cleanup-authority`, `.delete-attempt-marked-before-invocation`, `.unresolved-attempt-no-redelete`, `.attributed-deletes-only`, `.cleanup-complete`, `.final-inventory-empty` | `network`, `ipc`, `security_framework` |
 
-| Post-grant confirm case | Exact step IDs | Assertion suffixes | Additional transcripts |
+| Post-grant confirm case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
+| `post-grant.confirm.setup-exact-artifact-enrollment` | `pre-enrollment-inventory`, `enroll`, `snapshot` | `.primary`, `.pre-enrollment-empty`, `.setup-only-authority`, `.registry-snapshot` | `ipc`, `ui`, `security_framework` |
 | `post-grant.confirm.prepare-confirm-success` | `prepare`, `confirm` | `.primary`, `.final-production-context` | `ipc`, `ui` |
 | `post-grant.confirm.apply-all-deny` | `apply-negatives` | `.primary`, `.zero-network-bytes` | `network`, `ipc` |
 | `post-grant.confirm.receipt-terminal-replay-deny` | `consume`, `replay` | `.primary`, `.terminal-state`, `.replay-denied` | `ipc`, `security_framework` |
 | `post-grant.confirm.authority-negatives` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `ipc`, `security_framework` |
-| `post-grant.confirm.cleanup` | `cleanup`, `verify-cleanup` | `.primary`, `.cleanup-complete` | `ipc`, `security_framework` |
+| `post-grant.confirm.cleanup` | `derive-cleanup-context`, `retain-cleanup-intent`, `stage-cleanup`, `verify-cleanup` | `.primary`, `.cleanup-intent-retained`, `.stage-cleanup-authority`, `.delete-attempt-marked-before-invocation`, `.unresolved-attempt-no-redelete`, `.attributed-deletes-only`, `.cleanup-complete`, `.final-inventory-empty` | `ipc`, `security_framework` |
 
-| Post-grant issue-create case | Exact step IDs | Assertion suffixes | Additional transcripts |
+| Post-grant issue-create case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
+| `post-grant.issue-create.setup-exact-artifact-enrollment` | `pre-enrollment-inventory`, `enroll`, `snapshot` | `.primary`, `.pre-enrollment-empty`, `.setup-only-authority`, `.registry-snapshot` | `ipc`, `ui`, `security_framework` |
 | `post-grant.issue-create.prepare-confirm-apply-dispatch-deny` | `prepare`, `confirm`, `apply` | `.primary`, `.final-production-context`, `.dispatch-deny-code` | `network`, `ipc`, `ui` |
 | `post-grant.issue-create.zero-mutating-bytes` | `audit` | `.primary`, `.zero-mutation-bytes` | `network` |
 | `post-grant.issue-create.receipt-terminal-replay-deny` | `consume`, `replay` | `.primary`, `.terminal-state`, `.replay-denied` | `network`, `ipc`, `security_framework` |
 | `post-grant.issue-create.authority-negatives` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `network`, `ipc`, `security_framework` |
-| `post-grant.issue-create.cleanup` | `cleanup`, `verify-cleanup` | `.primary`, `.cleanup-complete` | `network`, `ipc`, `security_framework` |
+| `post-grant.issue-create.cleanup` | `derive-cleanup-context`, `retain-cleanup-intent`, `stage-cleanup`, `verify-cleanup` | `.primary`, `.cleanup-intent-retained`, `.stage-cleanup-authority`, `.delete-attempt-marked-before-invocation`, `.unresolved-attempt-no-redelete`, `.attributed-deletes-only`, `.cleanup-complete`, `.final-inventory-empty` | `network`, `ipc`, `security_framework` |
 
 For each step and transcript kind, the transcript ID is the case ID, one dot,
-the step ID, one dot, and the kind. `assertion_ids` equals the full IDs derived
-from that row; `transcript_ids` equals `stdout`, `stderr`, then the additional
-kinds in table order for every step. A case with an empty step list, an empty
-assertion list, a changed step/assertion/transcript order, or an ID not compiled
-from this table is rejected before execution.
+the step ID, one dot, and the kind. Every operation step's `assertion_ids` is
+exactly `[]`; its `transcript_ids` equals `stdout`, `stderr`, then the additional
+kinds in table order. The case-final evaluation's assertion IDs are the full
+IDs derived from that row, and its two transcript IDs use step component
+`final-evaluation` and kinds `stdout`, then `stderr`. A case with an empty
+operation-step list, an empty case-final assertion list, a changed operation,
+evaluation, assertion, or transcript order, or an ID not compiled from this
+table is rejected before execution.
 
-Each case object contains only `case_id`, `evidence_scope`, and `steps`, in
-that order. Steps are ordered and
+Each case object contains only `case_id`, `evidence_scope`, `steps`, and
+`final_evaluation`, in that order. Steps are ordered operations and
 contain these fields in order: `step_id`, `executable_role`,
 `executable_component`, `argv`, `working_directory`, `environment`, `stdin`,
 `timeout_seconds`, `fixture_ids`,
@@ -1082,6 +1135,23 @@ is always null, `environment` is always an empty array, and `stdin` is exactly
 transcript IDs are 1..128 printable ASCII bytes, explicitly declared in their
 respective manifests, unique in their array, and never pathnames supplied by a
 caller.
+
+`final_evaluation` contains exactly the fields frozen by the command-contract
+`case_evaluations` entry. The runner may create it only after every operation
+has terminated and every declared stdout, stderr, and additional transcript
+result has been retained by digest. Its canonical stdout is a bounded
+case-evaluation aggregate with fields `schema_version` integer `1`, `case_id`,
+`ordered_operation_observation_ids`, `ordered_transcript_results_sha256`,
+`ordered_exit_codes`, `assertion_results_sha256`, and `result` exactly `pass`,
+in that order; stderr is exactly zero bytes. The three ordered arrays match the
+operation-step and per-step transcript order without sorting. Case assertions
+evaluate only retained operation, transcript, and state inputs; they never
+depend on the final aggregate bytes, its stdout digest, or the final observation
+digest. The runner first evaluates those assertions, records their manifest,
+then emits the aggregate containing that manifest digest and finally the
+case-final observation. A crash, timeout, missing transcript, or failed
+assertion produces no passing final observation and therefore no passing case
+or evidence index.
 
 `argv` has 1..64 entries and at most 16,384 decoded bytes. Every entry is one
 closed typed object using one exact schema:
@@ -1271,17 +1341,24 @@ Post-grant `issue_create` verification also uses those exact three ordinary
 steps with real grant-bound authority, but the session token forces its own
 pre-socket dispatch denial after read-only loopback preflight.
 
-For every step the plan implies exactly one observation ID formed by the case
-ID, one slash, and the step ID. Evidence observations must equal that derived
-list byte-for-byte and in order—no missing, duplicate, reordered, or additional
-entry. The observation scope must equal its case scope. The recorded
+For every operation step the plan implies exactly one observation ID formed by
+the case ID, one slash, and the step ID, followed by the mandatory case ID plus
+`/final-evaluation` observation. Evidence observations must equal that complete
+derived list byte-for-byte and in order—no missing, duplicate, reordered, early,
+or additional entry. The observation scope must equal its case scope. Every
+operation observation carries exact `assertion_ids=[]`; only the final
+evaluation carries the case row's ordered assertion IDs. The recorded
 `command_sha256` covers a compact canonical execution context containing that
 scope, executable role and component, the resolved executable's exact canonical descriptor
 slice, disjoint-fixture slice, or negative-peer slice digest, resolved argv
 array, null working
 directory, empty environment, closed stdin, timeout, fixture hashes, assertion
 IDs, and transcript IDs. Recording merely a display string or a shell command
-is invalid.
+is invalid. For a final evaluation, `command_sha256` instead covers its
+canonical evaluation context: case ID/scope, pinned runner identity, every
+prior operation observation ID and result-manifest digest in order, and the
+compiled final assertion/transcript IDs. It cannot be computed before the last
+operation result exists.
 
 ## E1 Gate authorization
 
@@ -1415,9 +1492,14 @@ canonical evidence index. The index is capped at 65,536 bytes. Its fields are:
 Observation order is the order frozen by the Gate plan. Each entry contains
 `observation_id`, `evidence_scope`, `executable_role`, `executable_component`,
 `executable_identity_sha256`, `command_sha256`, `stdout_sha256`,
-`stderr_sha256`, `exit_code`, `assertion_results_sha256`, and
-`transcript_results_sha256`, in that order. Scope and role exactly match the
-compiled case and step. `executable_identity_sha256` hashes the complete exact
+`stderr_sha256`, `exit_code`, `registry_snapshot_sha256`, `assertion_ids`,
+`assertion_results_sha256`, and `transcript_results_sha256`, in that order.
+`registry_snapshot_sha256` is null for Gate 1A/Gate 1B and for activation-
+smoke/post-grant setup operations before snapshot creation. It equals the exact
+retained post-enrollment snapshot for the setup `snapshot` operation, its
+final evaluation, and every later stage observation. Scope and role exactly
+match the compiled case, step, or case-final evaluation.
+`executable_identity_sha256` hashes the complete exact
 descriptor code-slice entry (`cli` maps to `outer`, `helper` to `helper`),
 fixture-executable slice for `fixture_cli`/`fixture_helper`, negative-peer slice
 selected by `executable_component` for `negative_peer_fixture`, or the separately pinned runner or verifier
@@ -1432,9 +1514,11 @@ An assertion-result manifest is compact canonical JSON capped at 32,768 bytes
 with fields `schema_version` integer `1`, `manifest_type` exactly
 `assertion_results`, `observation_id`, and `entries`, in that order. Each entry
 has `assertion_id`, `evaluator`, `expected_sha256`, `actual_sha256`, and
-`result` exactly `pass`, in that order. Entries exactly equal the step's
-compiled `assertion_ids` order and the evaluator/expected digest in the
-assertion-set manifest.
+`result` exactly `pass`, in that order. For an operation observation, `entries`
+and the observation's `assertion_ids` are both exact empty arrays. For a
+case-final evaluation they exactly equal the row's compiled assertion order
+and the evaluator/expected digest in the assertion-set manifest. No operation
+may claim an assertion pass before the case-final aggregate exists.
 
 A transcript-result manifest has the same cap and fields `schema_version`,
 `manifest_type` exactly `transcript_results`, `observation_id`, and `entries`.
@@ -1444,6 +1528,13 @@ exactly `captured`, in that order. Entries exactly equal the compiled
 `transcript_ids` order and kind; byte count is within the transcript-set cap and
 the retained content file matches its digest.
 
+The final evaluator's stdout is the exact case-evaluation aggregate defined
+above. Its assertion-result manifest is created only after every ordered
+operation transcript-result manifest has been loaded and matched to the
+aggregate; its own transcript-result manifest then captures the final stdout
+and empty stderr. This makes assertion suffixes case-final, not aliases for an
+arbitrarily early operation result.
+
 The two observation fields hash the exact respective result-manifest bytes.
 The runner and offline verifier both require one-to-one equality: every
 required ID occurs once, no unrequired ID occurs, all expected and actual
@@ -1451,7 +1542,11 @@ objects are retained by digest, and every result has the required success
 literal. The observation's direct stdout/stderr digests must equal the content
 digests of its exact stdout/stderr transcript entries. An aggregate success
 bit, unordered map, missing result manifest, or
-digest referring to a different observation is invalid.
+digest referring to a different observation is invalid. In particular, a
+nonempty operation `assertion_ids`, an assertion result on a non-final
+observation, an evaluation emitted before the final operation transcript, or a
+missing/reordered final evaluation invalidates the run; there is no pass bit
+that can substitute for it.
 
 Gate 1A observations include every approval-protocol, code-identity, Keychain,
 UI-presence, fail-closed, restart, and clean-host test. Gate 1B observations
@@ -1475,16 +1570,27 @@ capped at 16,384 bytes. Its fields are `schema_version` integer `1`,
 `gate_id` exactly `gate1a`, `gate1b`, or `activation_smoke`,
 `descriptor_sha256`, `gate_plan_sha256`, `gate_target_sha256`,
 `provisional_context_sha256`, `fixture_executable_manifest_sha256`,
-`evidence_scopes`, `architectures`, `indexes`, and `result` exactly `pass`, in
-that order. Gate sets use null provisional context; smoke uses null Gate
-target. The fixture-executable digest is required only for Gate 1A. Gate 1A
+`evidence_scopes`, `architectures`, `indexes`, `registry_snapshots`, and
+`result` exactly `pass`, in that order. Gate sets use null provisional context,
+smoke uses null Gate target, and `registry_snapshots` is null for Gate sets.
+The fixture-executable digest is required only for Gate 1A. Gate 1A
 scope order is exactly `exact_artifact`, then `disjoint_fixture`; Gate 1B and
 smoke contain only `exact_artifact`. `architectures` exactly equals the
 descriptor array.
-`indexes` has one entry per architecture in that same order, with fields
-`architecture`, `evidence_index_sha256`, `gate_token_sha256`, and
-`gate_session_id` in order. Every tuple must match its canonical index and
-root-signed token. All token and session IDs are unique across all sets.
+For Gate sets, `indexes` has one entry per architecture in that same order,
+with fields `architecture`, `evidence_index_sha256`, `gate_token_sha256`, and
+`gate_session_id` in order. For activation smoke, each entry appends
+`setup_context_sha256`, `pre_enrollment_inventory_sha256`,
+`registry_snapshot_sha256`, `cleanup_context_sha256`,
+`cleanup_intent_sha256`, `final_cleanup_progress_sha256`,
+`helper_cleanup_evidence_sha256`, `stage_cleanup_evidence_sha256`,
+`cleanup_evidence_sha256`, and `final_empty_inventory_sha256`, in that order.
+Its non-null
+`registry_snapshots` array has one entry per descriptor architecture, in that
+order, with fields `architecture` and `registry_snapshot_sha256`; it must
+exactly project the matching index entries. Every tuple must match its
+canonical index, root-signed token, and retained setup/cleanup evidence. All
+token and session IDs are unique across all sets.
 
 An evidence-set digest is SHA-256 over the exact manifest bytes. A Gate stage
 passes only as the complete set; no per-architecture index, subset, combined
@@ -1554,6 +1660,112 @@ group.
 `provisional_context_sha256` names this digest. It is a smoke input only and is
 not the context accepted by ordinary peers or production receipts.
 
+### Stage-only first exact-artifact enrollment
+
+Every activation-smoke and post-grant capability plan begins with its compiled
+`setup-exact-artifact-enrollment` case on a newly created disposable macOS user
+or VM. The stage token contains `setup_authorization` exactly
+`first_exact_artifact_enrollment_only`. After validating that token, the exact
+runner and artifact derive a compact canonical setup context capped at 4,096
+bytes with fields, in order, `schema_version` integer `1`, `context_type`
+exactly `stage_first_exact_artifact_enrollment`, `stage_type` exactly
+`activation_smoke` or `post_grant_verification`, `descriptor_sha256`,
+`stage_token_sha256`, `architecture`, `approved_capability`,
+`gate_runner_unique`, `gate_session_id`, and `setup_authorization` exactly
+`first_exact_artifact_enrollment_only`. `setup_context_sha256` is SHA-256 of
+those exact bytes. This context is accepted only for the first case's one
+revision-1 enrollment ceremony. It cannot authorize rotation, recovery,
+revocation, another enrollment, plan preparation, receipt signing,
+confirmation, apply, coordinator permit, or network access. The ordinary smoke
+receipt context or final production context, not this setup context, controls
+all later workflow authority.
+
+After the retained setup snapshot exists, the runner and exact artifact derive
+a second compact canonical context capped at 4,096 bytes with fields, in order,
+`schema_version` integer `1`, `context_type` exactly
+`stage_attributed_cleanup`, `stage_type`, `descriptor_sha256`,
+`stage_token_sha256`, `setup_context_sha256`, `registry_snapshot_sha256`,
+`architecture`, `approved_capability`, `gate_runner_unique`, `gate_session_id`,
+and `cleanup_authorization` exactly `attributed_stage_cleanup_only`.
+`cleanup_context_sha256` is plain SHA-256 of those exact bytes. It is accepted
+only by the final case's distinct `stage_cleanup` IPC operation and only while
+the root-signed stage token remains valid. Neither setup nor cleanup context can
+sign a registry/receipt, acquire or exercise a permit, send, cross a session,
+or substitute for smoke receipt/final production authority.
+
+Before any registry, coordinator, signing-key, journal, plan, receipt, socket,
+or loopback state is created, the first case emits a compact canonical
+pre-enrollment inventory capped at 8,192 bytes. Its fields are, in order,
+`schema_version` integer `1`, `evidence_type` exactly
+`stage_pre_enrollment_empty_inventory`, `stage_type`, `descriptor_sha256`,
+`architecture`, `gate_runner_unique`, `gate_session_id`, `registry_service`,
+`registry_accounts`, `coordinator_service`, `coordinator_accounts`,
+`signing_key_tag_prefix`, `signing_key_tags`, `journal_root_inventory_sha256`,
+`runner_session_state_sha256`, `observed_at`, and `result` exactly `empty`.
+The two services and tag prefix are the fixed production values from the
+registry protocol. All three account/tag arrays are exact empty arrays.
+`journal_root_inventory_sha256` hashes a compact canonical empty regular-file
+inventory, and `runner_session_state_sha256` hashes a compact canonical object
+whose `plans`, `receipts`, `sockets`, `loopback_accounts`, and
+`temporary_sidecars` arrays, in that order, are all empty. The already
+authenticated immutable stage token and its setup context are held outside
+this mutable disposable inventory. Bounded exact Keychain enumeration, an
+already opened no-follow journal-root descriptor, and runner-owned state
+enumeration must all independently prove emptiness; not-found is accepted only
+where the exact Security.framework contract declares it.
+
+The single setup enrollment must commit revision 1/generation 1 and durably
+close and remove its coordinator active record before its `snapshot` operation
+emits a compact canonical post-enrollment registry snapshot capped at 16,384
+bytes. Its fields are, in order, `schema_version` integer `1`, `evidence_type`
+exactly `stage_post_enrollment_registry_snapshot`, `stage_type`,
+`descriptor_sha256`, `stage_token_sha256`, `setup_context_sha256`,
+`pre_enrollment_inventory_sha256`, `architecture`, `gate_runner_unique`,
+`gate_session_id`, `registry_service`, `registry_revision` integer `1`,
+`registry_record_sha256`, `generation` integer `1`, `signing_key_tag`,
+`signing_key_spki_der_b64u`, `signing_key_fingerprint_sha256`,
+`setup_transcript_manifest_sha256`, `generated_key_tags`,
+`coordinator_closed_sha256`, and `created_at`. `generated_key_tags` is the
+helper-owned creation-order array and contains exactly the snapshot tag at this
+boundary. The revision record, generation,
+SPKI, fingerprint, descriptor, architecture, runner unique, and session must
+equal the enrolled exact artifact and token. `registry_snapshot_sha256` is
+SHA-256 of these exact bytes. The snapshot operation, setup final evaluation,
+every later observation, the per-architecture evidence index, and its
+evidence-set entry all carry this same digest; no later enumeration may silently
+substitute current registry state for it.
+
+The pre-enrollment inventory, setup context, registry snapshot, every result
+they reference, and failure evidence are written to immutable
+content-addressed storage outside the disposable user/session root and outside
+the disposable Keychain namespace before the runner advances. The runner may
+read them only by preopened digest-bound handles. The final cleanup emits the
+same inventory schema with `evidence_type` exactly
+`stage_final_empty_inventory`; every account/tag array and both mutable-state
+inventories must again be empty. Its digest is `final_empty_inventory_sha256`.
+Cleanup passes only when this final inventory is byte-equivalent to the initial
+empty state after ignoring the two evidence-type/timestamp fields and when the
+recorded registry revision/key and all later journal/session state have been
+removed. Before its first deletion, the runner must retain the cleanup context,
+canonical intent, and initial progress bytes required by the registry
+protocol's [release-stage cleanup authority](gate1a-registry-protocol.md#release-stage-cleanup-authority).
+
+Every stage failure or timeout runs one bounded cleanup decision from the last
+retained inventory and append-only evidence. Attributed deletion is attempted
+only when the valid setup snapshot, cleanup context, intent, initial progress,
+and unexpired token already exist; it then uses only `stage_cleanup`. A failure
+before that complete authority exists performs read-only five-domain probes.
+If they are not canonically empty—including enrollment committed but snapshot
+not retained—the trusted runner quarantines and destroys the entire disposable
+user/VM without a per-item delete. If even the pre-enrollment inventory was not
+retained, the same probes run and any incomplete result is uncertain. If a
+valid stage cleanup or read-only probe proves the final empty inventory, the
+failed run and all candidate outputs are still invalid. Otherwise destruction
+is mandatory; no best-effort delete can qualify the run. Failure, cleanup
+uncertainty, missing retained evidence, or destruction uncertainty invalidates
+every observation, index, evidence set, token-derived context, and publication
+input from that session.
+
 ## Mandatory activation smoke
 
 For each declared architecture, the offline root signs a distinct smoke token
@@ -1570,23 +1782,34 @@ with a fresh runner session. Its unsigned fields are:
 9. `approved_capability`, exactly matching the provisional authorization
 10. `gate_runner_unique`
 11. `gate_session_id`
-12. `loopback_origin`, null for `confirm_only` or `http://127.0.0.1:` followed
+12. `setup_authorization`, exactly
+    `first_exact_artifact_enrollment_only`
+13. `cleanup_authorization`, exactly `attributed_stage_cleanup_only`
+14. `loopback_origin`, null for `confirm_only` or `http://127.0.0.1:` followed
     by one canonical decimal port in `1..65535` for `issue_create`
-13. `dispatch_deny_code`, null for `confirm_only` or exactly
+15. `dispatch_deny_code`, null for `confirm_only` or exactly
     `GATE_PRODUCTION_MUTATION_DISPATCH_DENIED` for `issue_create`
-14. `issued_at`
-15. `expires_at`, no more than 30 minutes after issue
+16. `issued_at`
+17. `expires_at`, no more than 30 minutes after issue
 
 The smoke plan's descriptor, capability, architecture set, and provisional
-context must match the token and provisional authorization. Smoke tokens and
+context must match the token and provisional authorization; the plan must begin
+with the capability-specific setup case and carry
+`stage_setup_policy=first_exact_artifact_enrollment_v1` and
+`stage_cleanup_policy=attributed_stage_cleanup_v1`. Smoke tokens and
 sessions are unique across architectures and every E1/E2 session. The token
-can only restrict provisional authority inside its authenticated runner
-session; it cannot activate ordinary use and is never shipped.
+uses its setup and cleanup fields only through the separately derived setup
+and cleanup contexts. Outside the first setup case and final cleanup case it
+only restricts provisional authority inside its authenticated runner session.
+It cannot activate ordinary use and is never shipped.
 
-For `confirm_only`, the hard-coded smoke workflow prepares and confirms through
-the ordinary commands on a clean network-disabled host, then proves all apply
-operations remain disabled. For `issue_create`, it uses the hard-coded
-`prepare -> confirm -> apply` issue-create workflow. Only the exact
+Both smoke workflows first run their exact-artifact setup case, retain the
+proved-empty pre-inventory and revision-1 registry snapshot, and bind that
+snapshot into every later observation. For `confirm_only`, the hard-coded
+smoke workflow then prepares and confirms through the ordinary commands on a
+clean network-disabled host and proves all apply operations remain disabled.
+For `issue_create`, it then uses the hard-coded `prepare -> confirm -> apply`
+issue-create workflow. Only the exact
 instrumented loopback read-only fixture is reachable. The harness verifies the
 ordered preflight reads, then requires the ordinary executor to reach
 `GATE_PRODUCTION_MUTATION_DISPATCH_DENIED` at the final transport boundary
@@ -1624,11 +1847,33 @@ The terminal transition emits a compact canonical evidence object capped at
 `activation_smoke_terminal_journal`, `descriptor_sha256`,
 `provisional_authorization_sha256`, `smoke_token_sha256`,
 `smoke_receipt_context_sha256`, `architecture`, `gate_session_id`, `plan_id`,
-`receipt_id`, `receipt_sha256`, `prior_state`, `terminal_state` exactly
+`registry_snapshot_sha256`, `receipt_id`, `receipt_sha256`, `prior_state`, `terminal_state` exactly
 `activation_smoke_consumed`, `journal_revision`, and `transitioned_at`, in
 that order. `prior_state` is `confirmed` for `confirm_only` and `in_flight` for
 `issue_create`. The evidence and replay-denial observation are mandatory; a
 smoke `in_flight` record is never eligible for ordinary reconciliation.
+
+The last smoke case performs bounded cleanup and then `verify-cleanup`; no
+operation follows it except its case-final evaluation. It emits a compact
+canonical object capped at 8,192 bytes with fields, in order,
+`schema_version` integer `1`, `evidence_type` exactly
+`activation_smoke_cleanup`, `descriptor_sha256`, `smoke_token_sha256`,
+`architecture`, `gate_session_id`, `registry_snapshot_sha256`,
+`cleanup_context_sha256`, `cleanup_intent_sha256`,
+`final_cleanup_progress_sha256`, `helper_cleanup_evidence_sha256`,
+`stage_cleanup_evidence_sha256`,
+`terminal_journal_evidence_sha256`, `pre_enrollment_inventory_sha256`,
+`removed_registry_record_sha256`, `removed_signing_key_tags`,
+`journal_cleanup_sha256`, `final_empty_inventory_sha256`, `finished_at`, and
+`result` exactly `pass`. The removed record and single key tag exactly equal
+the retained setup snapshot. The five cleanup digests resolve to the immutable
+context, intent, completed prefix, and helper/runner evidence objects defined
+by the registry protocol; each repeats the same token, context, snapshot, and
+session bindings. UI-fail exact reads prove the registry,
+coordinator, and signing-key namespace absent; the no-follow filesystem probe
+proves the journal/session root empty. A copied sidecar, plan, receipt, socket,
+loopback account, registry item, coordinator item, key, or journal file makes
+the final inventory nonempty and invalidates the complete smoke set.
 
 Each architecture produces a canonical smoke evidence index capped at 65,536
 bytes with these fields in order: `schema_version` integer `1`, `evidence_type`
@@ -1642,12 +1887,21 @@ exactly `activation_smoke_pass`, `gate_id` exactly `activation_smoke`,
 null, `evidence_scopes` exactly the one-element array `exact_artifact`,
 `started_at`, `finished_at`, `result` exactly `pass`,
 `provisional_authorization_sha256`,
-`provisional_context_sha256`, `smoke_receipt_context_sha256`,
-`terminal_journal_evidence_sha256`, and `observations`.
+`provisional_context_sha256`, `setup_context_sha256`,
+`pre_enrollment_inventory_sha256`, `registry_snapshot_sha256`,
+`smoke_receipt_context_sha256`, `terminal_journal_evidence_sha256`,
+`cleanup_context_sha256`, `cleanup_intent_sha256`,
+`final_cleanup_progress_sha256`, `helper_cleanup_evidence_sha256`,
+`stage_cleanup_evidence_sha256`,
+`cleanup_evidence_sha256`, `final_empty_inventory_sha256`, and `observations`.
 Observations exactly equal the capability-specific smoke plan, including
-authority-negative, receipt-context, cleanup, ordered preflight,
-dispatch-deny, and zero-mutating-byte assertions. The per-architecture indexes
-form the canonical `activation_smoke` evidence-set manifest defined above.
+the first setup case, case-final evaluations, authority-negative,
+receipt-context, cleanup, ordered preflight, dispatch-deny, and zero-mutating-
+byte assertions. The setup `snapshot` observation and every observation after
+it carry the index's exact `registry_snapshot_sha256`. The cleanup and final
+inventory digests resolve to the retained objects above. The per-architecture
+indexes form the canonical `activation_smoke` evidence-set manifest defined
+above.
 
 ## Production activation grant
 
@@ -1756,27 +2010,39 @@ are:
 10. `approved_capability`, exactly matching the grant
 11. `gate_runner_unique`
 12. `gate_session_id`
-13. `loopback_origin`, null for `confirm_only` or `http://127.0.0.1:` followed
+13. `setup_authorization`, exactly
+    `first_exact_artifact_enrollment_only`
+14. `cleanup_authorization`, exactly `attributed_stage_cleanup_only`
+15. `loopback_origin`, null for `confirm_only` or `http://127.0.0.1:` followed
     by one canonical decimal port in `1..65535` for `issue_create`
-14. `dispatch_deny_code`, null for `confirm_only` or exactly
+16. `dispatch_deny_code`, null for `confirm_only` or exactly
     `POST_GRANT_PRODUCTION_MUTATION_DISPATCH_DENIED` for `issue_create`
-15. `issued_at`
-16. `expires_at`, no more than 30 minutes after issue
+17. `issued_at`
+18. `expires_at`, no more than 30 minutes after issue
 
 The signer recomputes all four authority digests from the exact descriptor,
 signed provisional authorization, signed activation grant, and derived final
 context before signing. The post-grant plan's descriptor, capability,
 architecture set, and `authorization_context_sha256` must match the token and
-authority pair. Tokens and sessions are fresh and globally distinct from every
+authority pair; the plan begins with the matching setup case and carries
+`stage_setup_policy=first_exact_artifact_enrollment_v1` plus
+`stage_cleanup_policy=attributed_stage_cleanup_v1`. Tokens and sessions
+are fresh and globally distinct from every
 E1, E2, and activation-smoke token/session. The candidate accepts the token
 only through the same runner-identity, audit-token, native-architecture,
 challenge-response, expiry, and mode-0700 session checks as E1. It is never
 installed, shipped, or accepted by an ordinary process outside that exact
-authenticated session.
+authenticated session. Its setup and cleanup fields are accepted only through
+their separately derived contexts in the first and final cases; neither can
+substitute for the grant-bound final production context used by the intervening
+workflow.
 
 The runner stages the real detached descriptor, provisional authorization,
 and activation grant beside the real signed app under the ordinary installation
-layout. The CLI and helper load that exact pair through the ordinary production
+layout. It first derives the setup-only context, proves the canonical empty
+inventory, performs the one exact-artifact revision-1 enrollment, and retains
+the resulting registry snapshot outside disposable state. The CLI and helper
+then load that exact authority pair through the ordinary production
 validator, independently derive and exchange the final
 `authorization_context_sha256`, and use the ordinary production
 approval-registry, Secure Enclave/Keychain, and schema-3 receipt codecs against
@@ -1785,7 +2051,9 @@ executable, provisional context, smoke context, alternate sidecar loader,
 synthetic receipt, or prevalidated authority object cannot satisfy a positive
 post-grant observation. Every receipt minted in this stage carries the actual
 final production context; the runner token restricts where it can be used but
-does not replace or alter that context.
+does not replace or alter that context. The setup snapshot observation, its
+case-final evaluation, and every later operation/final observation carry the
+retained `registry_snapshot_sha256`.
 
 The `confirm_only` plan runs the compiled ordinary `prepare -> confirm`
 workflow, proves that the resulting schema-3 receipt names the final context,
@@ -1819,7 +2087,7 @@ capped at 8,192 bytes. Its fields are, in order: `schema_version` integer `1`,
 `evidence_type` exactly `post_grant_terminal_journal`, `descriptor_sha256`,
 `provisional_authorization_sha256`, `production_activation_grant_sha256`,
 `authorization_context_sha256`, `architecture`, `gate_session_id`, `plan_id`,
-`receipt_id`, `receipt_sha256`, `nonce_sha256`, `prior_state`,
+`registry_snapshot_sha256`, `receipt_id`, `receipt_sha256`, `nonce_sha256`, `prior_state`,
 `terminal_state` exactly `post_grant_verification_consumed`,
 `journal_revision`, `transition_reason`, and `transitioned_at`.
 `prior_state` is exactly `confirmed` for `confirm_only` and `in_flight` for
@@ -1839,9 +2107,14 @@ after its final probe. Its compact canonical evidence object is capped
 at 8,192 bytes and contains, in order: `schema_version` integer `1`,
 `evidence_type` exactly `post_grant_cleanup`, `descriptor_sha256`,
 `production_activation_grant_sha256`, `architecture`, `gate_session_id`,
-`terminal_journal_evidence_sha256`, `pre_cleanup_inventory_sha256`,
-`removed_inventory_sha256`, `keychain_cleanup_evidence_sha256`,
-`post_cleanup_probe_sha256`, `finished_at`, and `result` exactly `pass`. The
+`setup_context_sha256`, `pre_enrollment_inventory_sha256`,
+`registry_snapshot_sha256`, `terminal_journal_evidence_sha256`,
+`cleanup_context_sha256`, `cleanup_intent_sha256`,
+`final_cleanup_progress_sha256`, `helper_cleanup_evidence_sha256`,
+`stage_cleanup_evidence_sha256`,
+`pre_cleanup_inventory_sha256`, `removed_inventory_sha256`,
+`keychain_cleanup_evidence_sha256`, `post_cleanup_probe_sha256`,
+`final_empty_inventory_sha256`, `finished_at`, and `result` exactly `pass`. The
 three filesystem inventory/probe digests name canonical
 fixture objects enumerating every regular file by session-root-relative
 component, mode, size, and content digest; symlinks, hard links, non-regular
@@ -1850,21 +2123,38 @@ cleanup. The removed inventory must exactly equal the pre-cleanup inventory,
 and the post-cleanup probe must prove that no plan, receipt, journal, loopback
 account, socket, or copied authority sidecar remains beneath that root. Cleanup
 does not delete or alter the immutable evidence files retained outside the
-disposable root.
+disposable root. The final empty inventory additionally proves the exact
+registry service, coordinator service, signing-key namespace, journal root,
+and mutable runner-session state are empty and matches the setup contract's
+initial inventory comparison rule.
+
+The five stage-cleanup digests resolve to the immutable context, intent,
+completed progress, helper evidence, and complete runner evidence defined by
+the registry protocol. Their token, descriptor, snapshot, architecture,
+capability, runner, and session values must equal this cleanup object. They are
+the sole authority and reconciliation record for Keychain deletion; the
+filesystem inventory fields neither widen nor reconstruct that authority.
 
 The Keychain cleanup digest names a compact canonical object capped at 8,192
 bytes with fields `schema_version` integer `1`, `evidence_type` exactly
 `post_grant_keychain_cleanup`, `descriptor_sha256`, `architecture`,
-`gate_session_id`, `registry_service`, `registry_account`, `key_tags`,
-`registry_lookup_status`, `key_lookup_statuses`, `checked_at`, and `result`
-exactly `pass`, in that order. Service, account, and tags are the exact bounded
-values produced by the approval-registry protocol during this session;
+`gate_session_id`, `registry_snapshot_sha256`, `registry_service`,
+`registry_accounts`, `coordinator_service`, `coordinator_accounts`, `key_tags`,
+`registry_lookup_statuses`, `coordinator_lookup_statuses`,
+`key_lookup_statuses`, `checked_at`, and `result` exactly `pass`, in that order.
+Services, accounts, and tags are the exact bounded values produced by the
+approval-registry/coordinator protocols during this session;
 `key_tags` are sorted bytewise and contain every created tag exactly once.
-`registry_lookup_status` is numeric `errSecItemNotFound` (`-25300`), and
+The account arrays contain every created account once in canonical byte order;
+each corresponding status array has one entry in the same order with its
+`account` then `status` fields, and status exactly numeric
+`errSecItemNotFound` (`-25300`).
 `key_lookup_statuses` has one entry per tag in the same order with fields
 `key_tag` and `status` exactly `-25300`. Any successful lookup, authentication
 cancel, transient/unknown status, unbounded enumeration, or extra matching
 item fails cleanup and quarantines the candidate.
+This object is a final absence projection of the completed
+`stage_cleanup_keychain` evidence, not an independent deletion instruction.
 
 Each architecture emits a compact canonical post-grant evidence index capped
 at 65,536 bytes with these fields in exact order:
@@ -1879,29 +2169,40 @@ at 65,536 bytes with these fields in exact order:
 8. `provisional_authorization_sha256`
 9. `production_activation_grant_sha256`
 10. `authorization_context_sha256`
-11. `gate_runner_unique`
-12. `gate_session_id`
-13. `macos_product_build_version`
-14. `architecture`
-15. `fixture_set_sha256`
-16. `fixture_executable_manifest_sha256`, null
-17. `evidence_scopes`, exactly the one-element array `exact_artifact`
-18. `started_at`
-19. `finished_at`
-20. `result`, exactly `pass`
-21. `terminal_journal_evidence_sha256`
-22. `cleanup_evidence_sha256`
-23. `observations`
+11. `setup_context_sha256`
+12. `pre_enrollment_inventory_sha256`
+13. `registry_snapshot_sha256`
+14. `gate_runner_unique`
+15. `gate_session_id`
+16. `macos_product_build_version`
+17. `architecture`
+18. `fixture_set_sha256`
+19. `fixture_executable_manifest_sha256`, null
+20. `evidence_scopes`, exactly the one-element array `exact_artifact`
+21. `started_at`
+22. `finished_at`
+23. `result`, exactly `pass`
+24. `terminal_journal_evidence_sha256`
+25. `cleanup_context_sha256`
+26. `cleanup_intent_sha256`
+27. `final_cleanup_progress_sha256`
+28. `helper_cleanup_evidence_sha256`
+29. `stage_cleanup_evidence_sha256`
+30. `cleanup_evidence_sha256`
+31. `final_empty_inventory_sha256`
+32. `observations`
 
 The observations exactly equal the capability-specific post-grant plan and use
-the Gate evidence observation/result codecs. They include ordinary authority
-loading, both-peer final-context equality, schema-3 receipt parsing and
+the Gate evidence observation/result codecs. They begin with exact-artifact
+setup and its case-final evaluation; the setup snapshot observation and every
+later observation bind the index's retained `registry_snapshot_sha256`. They
+include ordinary authority loading, both-peer final-context equality, schema-3 receipt parsing and
 signature validation, capability denials, terminal CAS, ordinary replay
 denial, cleanup, runner/session negatives, and, for `issue_create`, the exact
 read-only loopback transcript, unique dispatch code, and zero mutating bytes.
-The index digest is SHA-256 of those exact bytes. Its two terminal/cleanup
-digests must resolve to the objects above and agree with their observation
-result manifests.
+The index digest is SHA-256 of those exact bytes. Its setup, pre-inventory,
+snapshot, terminal, cleanup, and final-inventory digests must resolve to the
+objects above and agree with their observation result manifests.
 
 The per-architecture indexes form one complete compact canonical evidence-set
 manifest capped at 16,384 bytes. Its fields are, in order: `schema_version`
@@ -1910,14 +2211,22 @@ exactly `post_grant_verification`, `descriptor_sha256`,
 `provisional_authorization_sha256`, `production_activation_grant_sha256`,
 `authorization_context_sha256`, `gate_plan_sha256`, `approved_capability`,
 `fixture_set_sha256`, `evidence_scopes` exactly the one-element array
-`exact_artifact`, `architectures`, `indexes`,
+`exact_artifact`, `architectures`, `indexes`, `registry_snapshots`,
 `install_evidence_manifest_sha256`, and `result` exactly `pass`.
 `architectures` exactly equals the descriptor array. `indexes` has one entry
 per architecture in that order, with fields `architecture`,
 `evidence_index_sha256`, `post_grant_verification_token_sha256`,
-`gate_session_id`, `terminal_journal_evidence_sha256`, and
-`cleanup_evidence_sha256`, in that order. Every value must equal its token,
-plan, index, authority pair, context, and retained file.
+`gate_session_id`, `setup_context_sha256`,
+`pre_enrollment_inventory_sha256`, `registry_snapshot_sha256`,
+`terminal_journal_evidence_sha256`, `cleanup_context_sha256`,
+`cleanup_intent_sha256`, `final_cleanup_progress_sha256`,
+`helper_cleanup_evidence_sha256`, `stage_cleanup_evidence_sha256`,
+`cleanup_evidence_sha256`, and
+`final_empty_inventory_sha256`, in that order. `registry_snapshots` contains
+one entry per descriptor architecture, in that order, with fields
+`architecture` and `registry_snapshot_sha256`, and exactly projects the index
+entries. Every value must equal its token, plan, index, authority pair,
+context, and retained file.
 
 `install_evidence_manifest_sha256` is SHA-256 of the exact compact canonical
 `install-files.json` bytes. That separate object is capped at 2,097,152 bytes
@@ -1941,7 +2250,8 @@ colliding paths are invalid. `size` is a
 non-negative JSON integer no greater than the file-type cap, and `sha256` is
 the digest of the exact file bytes. The list includes every per-architecture
 evidence index and every referenced fixture, transcript, assertion, result
-manifest, terminal record, cleanup object, and inventory/probe object. Neither
+manifest, setup context, pre-enrollment inventory, registry snapshot, terminal
+record, cleanup object, final empty inventory, and inventory/probe object. Neither
 manifest is self-listed: the fixed `index.json` path is authenticated by the
 publication envelope's `post_grant_verification_evidence_set_sha256`, and the
 fixed `install-files.json` path is authenticated by the evidence-set
@@ -2044,7 +2354,8 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
 - one universal artifact descriptor and one single-architecture descriptor;
 - exact Gate 1A, Gate 1B, both capability-specific smoke plans, and both
   capability-specific post-grant plans, including every typed argv source,
-  scope mapping, and canonical execution context;
+  scope mapping, canonical operation execution context, empty operation
+  assertion array, case-final evaluation contract, and ordered final aggregate;
 - the complete Gate 1A fixture-executable manifest with both disjoint fixture
   roles, both negative-peer components, and every architecture-specific signed
   identity/code slice;
@@ -2058,9 +2369,20 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
   captures, retained output digests, and CMS-certificate multiset framing with
   duplicate DER values and digest-sort ties;
 - `confirm_only` and `issue_create` provisional authorizations, provisional
-  contexts, final grant-bound production contexts, and smoke receipt contexts;
+  contexts, final grant-bound production contexts, smoke receipt contexts,
+  both stage-only setup and cleanup contexts, canonical empty pre-enrollment/
+  final inventories, post-enrollment registry snapshots, cleanup intents and
+  progress prefixes, acknowledged `delete_attempt_started` markers,
+  same-directory exclusive-`0600` canonical marker/pending-progress
+  publication with file/directory fsync and no-follow reopen/hash evidence,
+  the dedicated operation-result digest domain and every exhaustive nullable
+  field-shape row,
+  helper/runner stage-cleanup evidence, and the three post-invocation/
+  pre-result-persistence crash outcomes: success and direct-not-found
+  reconciled by exact absence, plus ambiguous exact presence quarantined
+  without another delete;
 - both per-architecture activation-smoke token/index variants, complete smoke
-  evidence sets, production activation grants, both per-architecture
+  evidence sets and cleanup objects, production activation grants, both per-architecture
   post-grant token/index variants, terminal-journal and cleanup objects, and
   complete post-grant evidence sets plus their separately digest-bound install-
   evidence manifests with multi-component ASCII paths; and
@@ -2104,6 +2426,11 @@ independently covers:
   transcript; shell/cwd/env/stdin inheritance; prepare/confirm/apply reorder;
   dynamic-value injection; observation omission/addition/reorder; and command-
   context digest mismatch;
+- missing, early, duplicate, or reordered case-final evaluation; nonempty
+  `assertion_ids` or an assertion result on any operation observation; empty or
+  reordered final assertion IDs; final evaluation before all operation and
+  transcript-result digests exist; changed ordered aggregate; or a case/evidence
+  pass without its final evaluation;
 - changed/missing evidence scope; production-role execution in a disjoint
   case; fixture-role execution in an exact-artifact case; fixture identifier,
   manifest, architecture, unique identifier, executable hash, cdhash, or code-
@@ -2152,6 +2479,42 @@ independently covers:
   synthetic context, wrong post-grant token/grant/context/runner/architecture,
   missing terminal CAS or cleanup evidence, receipt replay after terminal
   consumption, and pre-dispatch/late-dispatch false positives;
+- missing/non-first setup case; setup token/context absent, mismatched, or used
+  for any action except the one initial exact-artifact enrollment; nonempty
+  pre-enrollment registry service, coordinator service, signing-key namespace,
+  journal root, or mutable runner-session inventory; enrollment other than
+  revision 1/generation 1; setup snapshot with wrong revision, generation,
+  SPKI, fingerprint, descriptor, architecture, runner, or session; any later
+  observation/index/evidence-set entry with a missing or different snapshot;
+  retained setup evidence placed inside disposable state; or a second setup,
+  rotation, recovery, revocation, receipt signature, permit, or network action
+  under setup authority;
+- missing, expired, unsigned, cross-stage, cross-architecture, cross-capability,
+  cross-runner, or cross-session cleanup authority; cleanup-context/token/
+  descriptor/setup-snapshot disagreement; a setup or cleanup context used to
+  sign a receipt or registry record, acquire a coordinator active record,
+  create a permit, send, or cross sessions; missing or mutable retained cleanup
+  intent/progress; reconstruction from current mutable state; incomplete,
+  reordered, duplicated, or extra expected records, key tags, delete
+  dictionaries, or delete operations; active coordinator singleton during
+  cleanup; a registry tuple other than the retained active generation;
+  deletion without the exact UI-fail pre-read and byte comparison; unknown,
+  unattributed, malformed, or byte-mismatched state; deletion outside the
+  completed prefix; a physical delete without its durable append-only
+  stage/token/context/operation-bound marker and acknowledgement; any marker
+  whose attempt is not exactly 1; duplicate/rolled-back marker state;
+  missing/partial/non-cross-bound marker and `delete_pending` progress pair;
+  temp-mode/no-follow/canonical-write/file-fsync/no-replace-publication/
+  directory-fsync/reopen/hash failure; ACK before both entries and its retained
+  transcript ledger entry are durable; rollback to a prior progress prefix;
+  delete after any pre-ACK publication crash/failure;
+  operation result under the wrong digest domain or outside the exhaustive
+  pre-read/delete/post-read/pending-marker field-shape table;
+  delete after an unresolved marker; unresolved-marker absence not terminally
+  reconciled, exact presence not quarantined for manual repair, or unknown/
+  mismatch followed by deletion; restart with different intent/marker/progress
+  bytes; or stage deletion attempted by an ordinary production or non-stage
+  process;
 - missing/changed `xcrun --find` output, executable hash, version argv, version
   exit/output digest, active-developer-directory resolution, or wrapper tool-
   capture digest; undocumented `notarytool` JSON shape substitution; and
@@ -2166,7 +2529,12 @@ independently covers:
   fetched post-grant token; and treating a retained token digest as an install-
   time authority object; and
 - cleanup before authority-negative observations, any object restaged after
-  the final cleanup probe, or a final probe that omits such restaged state; and
+  the final cleanup probe, a final inventory that does not prove all five
+  setup inventory domains empty, a final probe that omits such restaged state,
+  failure without bounded cleanup, cleanup token/context expiry or
+  unverifiability during partial cleanup, a nonempty or mismatched attributed
+  remainder, cleanup failure without whole disposable user/VM quarantine and
+  destruction, or reuse of any invalidated failure output; and
 - app-only archive creation or replacement after descriptor canonicalization
   or E1 issuance, quarantined grant reuse, publication before every native
   architecture passes post-grant verification, and a publication envelope
@@ -2193,6 +2561,33 @@ invalidates prior E1/E2 evidence.
   with the real sidecar pair, final production context, and schema-3 receipts,
   then irrevocably terminalizes those disposable receipts. Test-only command
   surfaces cannot substitute for either path.
+- Every activation-smoke and post-grant capability plan begins with exactly one
+  setup-only exact-artifact enrollment from a canonical empty five-domain
+  inventory. Its retained revision-1/generation-1 registry snapshot binds
+  every later observation and both index layers. Final cleanup proves the same
+  five domains empty; any failure invalidates all session output and either
+  proves bounded cleanup or destroys the quarantined disposable user/VM.
+- Their final deletion is available only to the distinct root-token-bound
+  `stage_cleanup` IPC authority. Before its first delete, the trusted runner
+  retains the complete attributed cleanup intent and empty pre-inventory,
+  setup transcript/snapshot, helper-created key list, expected-record bytes,
+  exact dictionaries, and delete order outside disposable state. Recovery
+  reuses only those bytes. Every physical delete is preceded by one durable,
+  acknowledged, append-only `delete_attempt_started` marker with fixed attempt
+  1. The marker and cross-bound `delete_pending` progress are each published
+  from same-directory exclusive `0600` no-follow temps through canonical
+  file-fsync, collision-safe no-replace publication, directory-fsync, and
+  no-follow exact reopen before the retained ACK may be sent. An intact
+  unresolved pair can reconcile exact absence; exact presence or unknown state
+  quarantines. A detectably missing/partial pair also quarantines. Neither path
+  rolls back or permits another delete. Every step otherwise
+  remains exact-read/byte-compare/delete under the serialized executor. Unknown
+  state is never deleted, and an expired or unverifiable partial cleanup can
+  only invalidate and destroy/quarantine the disposable environment.
+- Assertion suffixes are case-final. Operation observations carry empty
+  assertion IDs; only a separate final runner evaluation may aggregate and
+  pass them after all ordered operation/transcript results exist. Without that
+  observation the case and containing evidence set cannot pass.
 - E1, E2, provisional authorization, provisional context, smoke, activation
   grant, final production context, post-grant verification, and publication
   all bind one descriptor digest and complete per-architecture evidence sets with their exact

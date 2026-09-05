@@ -23,6 +23,18 @@ closed 23-case Gate 1A including install/migration fault cases, an 88-vector
 expiry matrix, and a closed 25-case Gate 1B with deterministic schedules through
 enrollment, close, active-delete ambiguity, and a
 competing-acquisition ABA attempt between equality read and delete. Future
+activation-smoke/post-grant plans are setup-first (5/6 and 6/6 cases by
+capability), bind a retained empty-inventory enrollment snapshot through all
+later evidence, finish with an empty-inventory cleanup proof, and accept case
+assertions only in a final runner observation after every transcript result.
+Cleanup is a separate signed `stage_cleanup` IPC authority: its immutable
+intent binds all session-attributed record/key bytes, exact dictionaries, and
+delete order before the first delete; the serialized helper reconciles each
+exact read, durably acknowledges a fixed-attempt marker before the sole delete,
+only after its cross-bound pending-progress pair is exclusively published,
+file/directory-fsynced, and exactly reopened; it never re-deletes an unresolved
+marker—absence terminalizes and other state quarantines.
+Future
 authority commands retain JSON v1 but deliberately add distinct exits 10..13,
 map corruption to existing exit 1, and never emit exit 9; remote-uncertain
 reconciliation may retain it. Journal v2 and prepared-only v1

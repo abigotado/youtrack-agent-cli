@@ -120,6 +120,14 @@ or helper discovery mechanism. Those security-sensitive contracts require a
 separate reviewed decision; no implementation may infer one from these data
 fixtures.
 
+Likewise, neither the release-stage setup context nor its distinct cleanup
+context is a receipt-signing context. The later `stage_cleanup` IPC authority
+is defined only by the registry and artifact-authorization protocols and is
+accepted solely with its exact root-signed smoke/post-grant token, retained
+setup snapshot, and immutable attributed cleanup intent. It cannot sign this
+receipt (or schema v3), acquire a permit, send, or cross sessions; no field in
+this receipt grants deletion authority.
+
 ## Identifiers and time
 
 `receipt_id` and `nonce` respectively use the literal prefixes `YTAR-` and
