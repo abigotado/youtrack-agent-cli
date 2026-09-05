@@ -91,6 +91,18 @@ Neither a receipt signature nor an `in_flight` state alone authorizes network
 I/O. The helper also requires trusted current time strictly before the
 descriptor's `helper_profile_expires_at` at confirmation, coordinator
 acquisition, permit issuance, and immediately before send.
+
+Expiry of the applicable Gate, smoke, or post-grant runner token has one closed
+state rule: before coordinator acquisition a confirmed plan becomes `expired`;
+after acquisition with proven permit absence its receipt is burned and the
+existing lease closes as `failed_before_mutation` with zero dispatch. At or
+after permit, an unresolved outcome is `ambiguous` and no new send is allowed.
+Existing durable outcomes, including `activation_smoke_consumed`, are preserved,
+never downgraded by expiry. The authenticated session may only finish the
+existing journal/close fence and allowed historical read-only reconciliation;
+this grants no new acquisition, signature, permit, registry commit, or send.
+Vectors cover token equality/after at each boundary, both sides of permit,
+durable-success preservation, and consumed-smoke preservation.
 The registry protocol's future command/exit contract preserves the JSON v1
 envelope but deliberately adds exits 10..13 for wait, trusted recovery,
 artifact replacement, and reconfirmation; corruption/operator escalation uses

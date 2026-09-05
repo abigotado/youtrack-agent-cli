@@ -190,6 +190,10 @@ authenticated runner/session and cannot create a new permit or send.
 | `in_flight` | exact permit added | remains `in_flight` | Sole send-authority linearization; every later uncertainty is ambiguous and non-replayable. |
 | `confirmed` | operator cancellation before coordinator acquisition | `canceled` | Terminal; no mutation attempt. |
 | `confirmed` | trusted time reaches descriptor `helper_profile_expires_at` before coordinator acquisition | `expired` | Absolute cutoff; Gate/install evidence and cached helper sessions do not extend it. |
+| `confirmed` | applicable Gate/smoke/post-grant runner token expires before coordinator acquisition | `expired` | No lease, permit, or dispatch; historical token bytes cannot renew live authority. |
+| `confirmed` / `in_flight` | applicable runner token expires after acquisition with proven permit absence | `failed_before_mutation` | Burn receipt and durably close/fence the existing lease with zero dispatch; an already recorded smoke hard-deny `activation_smoke_consumed` remains terminal. |
+| `in_flight` | applicable runner token expires at/after permit without a durable outcome | `ambiguous` | No new send or permit; close/fence and use bounded historical reconciliation only. |
+| any state with durable outcome | applicable runner token expires | unchanged durable outcome | Expiry never downgrades recorded success/failure or a consumed smoke receipt to ambiguity. |
 | `confirmed` | approval registry revision or active generation changed | `canceled` | Retained keys may verify history but never authorize apply. |
 | `confirmed` | descriptor, applicable authority token/grant, or context changed | `canceled` | Historical bytes remain audit evidence but never authorize apply. |
 | `confirmed` / `in_flight` | trusted time reaches descriptor `helper_profile_expires_at` after coordinator acquisition while no permit exists | `failed_before_mutation` | Recovery burns the receipt, durably closes the lease, sends zero mutation bytes, and requires a newly authorized artifact before a new plan. |

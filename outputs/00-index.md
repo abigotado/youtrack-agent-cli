@@ -19,7 +19,7 @@ fixed-active Keychain coordinator that serializes every registry commit
 with `confirmed -> in_flight -> one exact-request permit -> one send/outcome ->
 durable close`, and the descriptor-bound helper-profile expiry is checked
 strictly through the final pre-send fence. The closed Gate contract adds exact
-closed 23-case Gate 1A including install/migration fault cases, an 88-vector
+closed 23-case Gate 1A including install/migration fault cases, a 100-vector
 expiry matrix, and a closed 26-case Gate 1B with its own token-bound enrollment
 on each fresh E1/E2 host and deterministic schedules through
 enrollment, close, active-delete ambiguity, and a

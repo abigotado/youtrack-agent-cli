@@ -748,7 +748,9 @@ null during the uninterrupted path or exactly
 `restart_before_registry_commit`, `restart_after_registry_commit`, or
 `close_or_delete_ambiguous`. It is stored
 once under `closed/<lease-id>`. Permit and closed records are immutable audit
-and fencing records and are never deleted in the first release; reaching
+and fencing records and are never deleted by ordinary flows in the first
+release. The sole exception is exact attributed `stage_cleanup` under its
+root-signed smoke/post-grant authority below. In ordinary flows, reaching
 either 256-record bound blocks writes and registry ceremonies pending a new
 reviewed protocol.
 
@@ -871,9 +873,13 @@ session, architecture, capability, runner, descriptor, setup snapshot, or
 context is rejected before a Keychain read.
 Trusted current time must also be strictly before the descriptor's
 `helper_profile_expires_at` at request authentication and immediately before
-each item read/delete. These checks instantiate the existing smoke- or
-post-grant-observation profile-expiry boundary for every internal cleanup step;
-they do not create an expiry grace or recovery exception.
+each item read/delete. These are the explicit
+`profile-expiry.stage-cleanup-authenticate`, `profile-expiry.stage-cleanup-pre-read`,
+and `profile-expiry.stage-cleanup-pre-delete` boundaries in the artifact protocol.
+They apply to both smoke and post-grant cleanup, including reconciliation reads
+and the interval after a durable marker ACK but before delete. Expiry at that
+last check causes zero deletes and retains the pending marker; it cannot permit
+a retry or a grace interval. The existing quarantine/destruction policy applies.
 
 Setup and cleanup contexts are disjoint. The setup context can authorize only
 the first exact-artifact enrollment; the cleanup context can authorize only

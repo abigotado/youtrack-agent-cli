@@ -33,7 +33,7 @@ The trust and activation dependencies are now fixed:
    and clean-reset E2 Gate 1A evidence sets on every declared architecture,
    including the closed first-install/reinstall/rollback/replacement/uninstall
    set, Keychain-migration cancellation/interruption/partial-failure set, and
-   all 88 profile-expiry boundary vectors;
+   all 100 profile-expiry boundary vectors;
    only then issue the confirm-only provisional authorization, pass its
    network-disabled ordinary-command smoke set. Begin each smoke/post-grant
    capability plan with the token/context-limited exact-artifact revision-1

@@ -179,8 +179,8 @@ permits the production activation grant. A second exact-artifact verification
 then exercises the real grant-bound context and schema-v3 receipts on every
 architecture under deny-only runner restrictions before publication.
 The same descriptor must bind CMS-validated `helper_profile_expires_at`;
-the closed 88-vector matrix proves just-before/equality/after/between-checks at
-all 22 Gate, publication, install, runtime, peer-authentication, coordinator,
+the closed 100-vector matrix proves just-before/equality/after/between-checks at
+all 25 Gate, publication, install, runtime, peer-authentication, coordinator,
 registry-sign/commit, permit, and final pre-send boundaries. Equality and later
 fail without grace or evidence carry-forward.
 

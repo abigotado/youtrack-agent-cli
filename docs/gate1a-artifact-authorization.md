@@ -232,6 +232,9 @@ a closed list for the profile-expiry claim:
 | `profile-expiry.registry-commit` | accept | deny | deny | deny after final signature validation | registry revision add |
 | `profile-expiry.coordinator-permit` | accept | deny | deny | deny after `in_flight` CAS | permit add |
 | `profile-expiry.mutation-pre-send` | accept | deny | deny | deny after permit add | socket creation or mutating request byte |
+| `profile-expiry.stage-cleanup-authenticate` | accept | deny | deny | deny after stage-token/context validation | first cleanup Keychain read |
+| `profile-expiry.stage-cleanup-pre-read` | accept | deny | deny | deny after previous cleanup operation/progress acknowledgement | next cleanup item read, including reconciliation |
+| `profile-expiry.stage-cleanup-pre-delete` | accept | deny | deny | deny after durable delete-attempt marker acknowledgement | `SecItemDelete` invocation |
 
 Every boundary ID has four mandatory vectors, with no sampled-time tolerance:
 `.just-before` supplies a trusted instant exactly one nanosecond before expiry
@@ -246,7 +249,13 @@ vector specifically proves a helper launched just before expiry cannot
 authenticate a peer at equality. The coordinator-permit and mutation-pre-send
 vectors prove that an acquired lease and existing permit respectively cannot
 extend authority. The registry-sign/commit vectors prove the same under a
-registry lease after proposal construction. All 88 vector IDs are the boundary
+registry lease after proposal construction. The three cleanup boundaries apply
+to both smoke and post-grant cleanup and every item operation; their vectors
+exercise expiry between operations and after marker ACK but before delete.
+The latter invokes zero deletes and retains the pending marker; expiry cannot
+reset the attempt or authorize retry. The session is quarantined and its
+disposable environment destroyed under the existing failure policy.
+All 100 vector IDs are the boundary
 ID plus one of those four
 suffixes, and the fixture manifest must contain exactly that Cartesian product.
 Missing, duplicate, differently rounded, reordered, cached-time, or
@@ -1616,9 +1625,11 @@ registry record or receipt.
 The case reuses, without changing their field order or caps, the canonical
 `stage_pre_enrollment_empty_inventory` and
 `stage_post_enrollment_registry_snapshot` codecs defined below. For this one
-use, `stage_type` is exactly `gate1b`, `stage_token_sha256` is the exact
-`gate_token_sha256`, and `setup_context_sha256` is the exact
-`gate1b_setup_context_sha256`. The retained empty inventory must prove that
+use, `stage_type` is exactly `gate1b` in both codecs. Only the post-enrollment
+snapshot contains `stage_token_sha256` and `setup_context_sha256`; they equal
+`gate_token_sha256` and `gate1b_setup_context_sha256`, respectively. The empty
+inventory has neither field and is bound by the snapshot's
+`pre_enrollment_inventory_sha256`. The retained empty inventory must prove that
 the production registry service, coordinator service, signing-key namespace,
 journal root, and runner-session state contain no inherited Gate 1A or prior
 Gate 1B state before any enrollment work. The single ceremony must create
@@ -2666,8 +2677,8 @@ independently covers:
   actual designated requirement, certificate chain/policy,
   `SecStaticCodeCheckValidity` result, profile raw/CMS sequence, notarization,
   or staple evidence;
-- descriptor/profile expiry mismatch and the exact 88-vector Cartesian product
-  of all 22 named profile-expiry boundaries with just-before, equality, after,
+- descriptor/profile expiry mismatch and the exact 100-vector Cartesian product
+  of all 25 named profile-expiry boundaries with just-before, equality, after,
   and expiry-between-checks variants—including peer authentication—and exact
   no-side-effect assertions;
 - raw-entitlement-present/dictionary-absent, dictionary-present/raw-absent,
