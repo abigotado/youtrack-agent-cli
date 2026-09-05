@@ -250,6 +250,12 @@ while presence or unknown state quarantines for manual repair.
 Unknown/mismatched state is never deleted; expiry or uncertainty destroys the
 quarantined disposable user/VM and invalidates the run. Setup and cleanup
 contexts cannot sign, permit, send, or cross sessions.
+Gate 1B also performs its own first token-bound enrollment on every fresh
+E1/E2 host. Its snapshot is baseline provenance, while later planned registry
+transitions must validate their current ledger state. It retains no authority
+to use release-stage cleanup. Stage cleanup ACKs have an explicit bounded,
+hash-linked ledger; recovery validates all entries and referenced objects
+before selecting a head, rejecting any partial or forked history.
 Recovery is a separate trusted-UI handshake: a new exact-code CLI and helper
 session validate the descriptor and retained evidence, while old audit-token/
 session values are historical only. Its fence can classify/CAS, close, and

@@ -159,12 +159,14 @@ The helper enumerates at most 64 keys in only that private tag namespace and
 never retrieves a key by a reused tag. A candidate created before a failed or
 losing registry transition is an orphan and is never eligible for signing
 because no committed transition names it. After exact transition
-reconciliation, a separate bounded maintenance pass may delete orphaned or
-retired private keys; deletion failure leaves a non-authoritative orphan and is
-reported, never treated as transition failure or permission to reuse the key.
+reconciliation, orphaned and retired private keys remain non-authoritative and
+are never reused. This design grants no production maintenance authority to
+delete them. The orphan-delete query contract applies only to the disjoint
+Gate fixture and the separately authorized attributed release-stage cleanup.
 Retained public verification keys live in the ledger and do not require old
-private keys. Hitting the key-enumeration bound fails closed pending explicit
-operator cleanup through trusted helper UI.
+private keys. Orphaned and retired private keys still count toward the 64-key
+bound. Hitting that bound fails closed; any operator cleanup requires a future,
+separately specified and reviewed authority protocol.
 
 The approval-key registry is not a profile file or one mutable item. It is a
 bounded append-only, event-sourced ledger in the helper-private data-protection

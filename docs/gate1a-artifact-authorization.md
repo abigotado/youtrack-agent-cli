@@ -635,7 +635,8 @@ compact canonical fields are, in order:
 16. `gate_target_sha256`, null except for Gate 1B
 17. `provisional_context_sha256`, null except for activation smoke
 18. `authorization_context_sha256`, null except for post-grant verification
-19. `stage_setup_policy`, null for Gate 1A/Gate 1B or exactly
+19. `stage_setup_policy`, null for Gate 1A, exactly
+    `gate1b_first_exact_artifact_enrollment_v1` for Gate 1B, or exactly
     `first_exact_artifact_enrollment_v1` for activation smoke and post-grant
     verification
 20. `stage_cleanup_policy`, null for Gate 1A/Gate 1B or exactly
@@ -701,12 +702,18 @@ read-only `GET`/`HEAD`; the mutation dispatcher remains a pre-socket hard deny.
 The two post-grant policies have the same network restrictions as their smoke
 counterparts but require the real grant-bound final authorization context and
 the post-grant token's distinct dispatch-denial code.
-For either stage policy, `stage_setup_policy` grants no ambient registry
-authority: it is usable only by the first compiled setup case, only with the
-stage token and derived setup context, and only to create revision 1 from the
-proved empty disposable inventory described below. Rotation, recovery,
+For either setup-policy value, `stage_setup_policy` grants no ambient registry
+authority: it is usable only by the matching first compiled setup case, only
+with the root-signed token and derived setup context for that plan type, and
+only to create revision 1 from the proved empty disposable inventory described
+below. The context is a bound authorization input to the normal enrollment
+ceremony, not a signing credential or standalone signing endpoint; the helper
+still performs the ceremony's ordinary proposal and final registry signatures
+with its exact enrolled key and fresh user-presence checks. Rotation, recovery,
 revocation, a second enrollment, receipt signing, and mutation dispatch are
-outside that setup authority.
+outside setup authority. Gate 1B retains `stage_cleanup_policy=null`; the
+release-stage cleanup policy remains exclusive to activation smoke and
+post-grant verification.
 `stage_cleanup_policy` is likewise not ambient deletion authority. It permits
 only the distinct `stage_cleanup` IPC protocol over the exact retained cleanup
 intent and cleanup context; ordinary production and non-stage processes retain
@@ -819,7 +826,7 @@ entry fixes each operation's executable, argv template, timeout, and complete
 ordered ID lists; a plan never supplies or overrides different values.
 
 `case_evaluations` has exactly one entry per case in normative case order.
-The six manifests therefore contain exactly 23, 25, 5, 6, 6, and 6
+The six manifests therefore contain exactly 23, 26, 5, 6, 6, and 6
 case-evaluation entries for Gate 1A, Gate 1B, smoke confirm, smoke issue-create,
 post-grant confirm, and post-grant issue-create respectively.
 Each contains, in order, `case_id`, `observation_id` equal to the case ID plus
@@ -906,33 +913,34 @@ below must contain the same IDs once each in this exact order.
 
 The exact Gate 1B case order is:
 
-1. `gate1b.issue-create.prepare-confirm-apply-success`
-2. `gate1b.issue-create.expected-state-conflict`
-3. `gate1b.issue-create.timeout-reconcile-created`
-4. `gate1b.issue-create.timeout-reconcile-absent`
-5. `gate1b.issue-create.timeout-reconcile-conflict`
-6. `gate1b.issue-create.one-shot-no-retry`
-7. `gate1b.coordinator.apply-vs-rotate-linearization`
-8. `gate1b.coordinator.apply-vs-revoke-linearization`
-9. `gate1b.coordinator.apply-vs-recovery-linearization`
-10. `gate1b.coordinator.invalid-enrollment-contention`
-11. `gate1b.coordinator.crash-before-permit`
-12. `gate1b.coordinator.crash-after-permit-before-send`
-13. `gate1b.coordinator.crash-after-send-before-outcome`
-14. `gate1b.coordinator.crash-after-durable-outcome-before-closed-add`
-15. `gate1b.coordinator.closed-add-ambiguity`
-16. `gate1b.coordinator.crash-after-closed-before-active-delete`
-17. `gate1b.coordinator.active-delete-ambiguity`
-18. `gate1b.coordinator.active-cleanup-aba-deny`
-19. `gate1b.coordinator.restart-fence-and-close-recovery`
-20. `gate1b.authority.status-recover-contract`
-21. `gate1b.journal.v1-v2-migration-and-quarantine`
-22. `gate1b.capability.update-comment-other-deny`
-23. `gate1b.target.origin-account-project-deny`
-24. `gate1b.receipt.context-and-replay-deny`
-25. `gate1b.authority.fail-closed-matrix`
+1. `gate1b.setup-exact-artifact-enrollment`
+2. `gate1b.issue-create.prepare-confirm-apply-success`
+3. `gate1b.issue-create.expected-state-conflict`
+4. `gate1b.issue-create.timeout-reconcile-created`
+5. `gate1b.issue-create.timeout-reconcile-absent`
+6. `gate1b.issue-create.timeout-reconcile-conflict`
+7. `gate1b.issue-create.one-shot-no-retry`
+8. `gate1b.coordinator.apply-vs-rotate-linearization`
+9. `gate1b.coordinator.apply-vs-revoke-linearization`
+10. `gate1b.coordinator.apply-vs-recovery-linearization`
+11. `gate1b.coordinator.invalid-enrollment-contention`
+12. `gate1b.coordinator.crash-before-permit`
+13. `gate1b.coordinator.crash-after-permit-before-send`
+14. `gate1b.coordinator.crash-after-send-before-outcome`
+15. `gate1b.coordinator.crash-after-durable-outcome-before-closed-add`
+16. `gate1b.coordinator.closed-add-ambiguity`
+17. `gate1b.coordinator.crash-after-closed-before-active-delete`
+18. `gate1b.coordinator.active-delete-ambiguity`
+19. `gate1b.coordinator.active-cleanup-aba-deny`
+20. `gate1b.coordinator.restart-fence-and-close-recovery`
+21. `gate1b.authority.status-recover-contract`
+22. `gate1b.journal.v1-v2-migration-and-quarantine`
+23. `gate1b.capability.update-comment-other-deny`
+24. `gate1b.target.origin-account-project-deny`
+25. `gate1b.receipt.context-and-replay-deny`
+26. `gate1b.authority.fail-closed-matrix`
 
-This closed Gate 1B list contains exactly 25 cases; the compiled case table
+This closed Gate 1B list contains exactly 26 cases; the compiled case table
 below must contain the same IDs once each in this exact order.
 
 For activation smoke, `confirm_only` has exactly these cases:
@@ -1039,6 +1047,7 @@ one is a Gate failure.
 
 | Gate 1B case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
+| `gate1b.setup-exact-artifact-enrollment` | `pre-enrollment-inventory`, `enroll`, `snapshot` | `.primary`, `.pre-enrollment-empty`, `.gate1b-setup-only-authority`, `.registry-baseline-snapshot` | `ipc`, `ui`, `security_framework` |
 | `gate1b.issue-create.prepare-confirm-apply-success` | `prepare`, `confirm`, `apply` | `.primary`, `.one-created-issue` | `network`, `ipc`, `ui` |
 | `gate1b.issue-create.expected-state-conflict` | `prepare`, `confirm`, `mutate-fixture`, `apply` | `.primary`, `.zero-create` | `network`, `ipc`, `ui` |
 | `gate1b.issue-create.timeout-reconcile-created` | `prepare`, `confirm`, `apply-timeout`, `reconcile` | `.primary`, `.one-created-issue` | `network`, `ipc`, `ui` |
@@ -1099,6 +1108,20 @@ one is a Gate failure.
 | `post-grant.issue-create.receipt-terminal-replay-deny` | `consume`, `replay` | `.primary`, `.terminal-state`, `.replay-denied` | `network`, `ipc`, `security_framework` |
 | `post-grant.issue-create.authority-negatives` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `network`, `ipc`, `security_framework` |
 | `post-grant.issue-create.cleanup` | `derive-cleanup-context`, `retain-cleanup-intent`, `stage-cleanup`, `verify-cleanup` | `.primary`, `.cleanup-intent-retained`, `.stage-cleanup-authority`, `.delete-attempt-marked-before-invocation`, `.unresolved-attempt-no-redelete`, `.attributed-deletes-only`, `.cleanup-complete`, `.final-inventory-empty` | `network`, `ipc`, `security_framework` |
+
+The command-contract compiler has one closed Gate 1B setup route. Only
+`gate1b.setup-exact-artifact-enrollment` may contain
+`pre-enrollment-inventory`, `enroll`, and `snapshot`, in that order.
+`pre-enrollment-inventory` and `snapshot` execute as
+`gate_runner`/`gate_runner`; `enroll` executes as `cli`/`outer`, with the
+descriptor-pinned helper reachable only through the already authenticated
+preopened IPC channel. Their argv templates contain only compiled literals and
+digest-bound fixture paths; the Gate token and setup context arrive through
+that authenticated runner session and are never argv, environment, stdin, or
+caller-selected path values. The smoke and post-grant setup cases retain their
+same role and argv routing but accept only their own stage tokens and contexts;
+they cannot accept the Gate 1B context, and no later Gate 1B command template
+can route to setup authority.
 
 For each step and transcript kind, the transcript ID is the case ID, one dot,
 the step ID, one dot, and the kind. Every operation step's `assertion_ids` is
@@ -1406,12 +1429,14 @@ registry state. The old-build negative peer may appear only in the exact
 runtime mixed-build rejection substeps and must gain no authority. Network
 creation is denied by the process sandbox. A Gate 1B E1 token is issued
 only for a candidate that has already completed the two-pass Gate 1A sequence;
-it permits the ordinary one-shot `issue.create` path only against the exact
-disposable target named by `gate_target_sha256`. Every other capability or
-origin fails closed. A pass records the descriptor, Gate ID, token, plan and
-target digests, fixture hashes and executable manifest, per-observation scope
-and executable identity, OS/architecture, times, and result in immutable
-evidence.
+its first case permits exactly one setup-authorized enrollment on that E1
+run's otherwise empty disposable host, after which the ordinary one-shot
+`issue.create` path is permitted only against the exact disposable target
+named by `gate_target_sha256`. The setup context cannot exercise that runtime
+authority. Every other capability or origin fails closed. A pass records the
+descriptor, Gate ID, token, plan and target digests, fixture hashes and
+executable manifest, per-observation scope and executable identity,
+OS/architecture, times, and result in immutable evidence.
 
 One distinct E1 token and fresh runner session is required for every declared
 architecture. A token is invalid on a different architecture, and passing one
@@ -1444,10 +1469,13 @@ E2 has the same 30-minute maximum and runner/session checks as E1. The run
 starts from another clean host or freshly reverted snapshot and repeats every
 ordered observation in the same content-addressed Gate plan, including the
 exact artifact/fixture scope partition and a fresh disjoint fixture namespace.
-Gate 1A remains network-free. Gate 1B again permits only the exact disposable target, performs
-its real one-shot write/reconciliation cases, and must start from a fresh
-project fixture. It records the E2 token, prior E1 evidence, descriptor, full
-rerun evidence, network transcript, and target reset. A partial, cached, or
+Gate 1A remains network-free. Gate 1B again permits only the exact disposable
+target, performs its own first setup-authorized enrollment and then its real
+one-shot write/reconciliation cases, and must start from a fresh project
+fixture and a fresh empty disposable host. No E1 registry, coordinator,
+signing-key, journal, runner-session, or setup-context state is inherited. It
+records the E2 token, prior E1 evidence, descriptor, full rerun evidence,
+network transcript, and target reset. A partial, cached, inherited, or
 smoke-only second pass is invalid.
 
 Every declared architecture receives its own E2 token after that
@@ -1460,6 +1488,87 @@ flags. A Gate 1B token can exist only after the same descriptor's Gate 1A E1
 and E2 evidence validate. The ordinary provisional/grant path rejects all Gate
 token types and domains. The release binary contains no environment switch
 that converts a Gate token into production authority.
+
+### Gate 1B first exact-artifact enrollment
+
+Each Gate 1B E1 or E2 run begins with
+`gate1b.setup-exact-artifact-enrollment` on its own clean-reset disposable
+macOS user or VM. The root-signed Gate token and plan value
+`stage_setup_policy=gate1b_first_exact_artifact_enrollment_v1` allow the
+authenticated runner and exact artifact to derive one compact canonical setup
+context capped at 4,096 bytes. Its fields are, in order:
+
+1. `schema_version`, integer `1`
+2. `context_type`, exactly `gate1b_first_exact_artifact_enrollment`
+3. `descriptor_sha256`
+4. `gate_plan_sha256`
+5. `gate_target_sha256`
+6. `gate_token_type`, exactly `gate_e1` or `gate_e2`
+7. `gate_token_sha256`, the sole Gate token ID and SHA-256 of the exact signed
+   Gate token bytes
+8. `prior_e1_evidence_sha256`, null for E1 and exactly the E2 token's
+   `e1_evidence_sha256` value for E2
+9. `prerequisite_gate1a_e2_evidence_set_sha256`
+10. `architecture`
+11. `allowed_capability`, exactly `issue_create_gate`
+12. `gate_runner_unique`
+13. `gate_session_id`
+14. `setup_authorization`, exactly
+    `gate1b_first_exact_artifact_enrollment_only`
+
+Every field must exactly equal the Gate plan and token; there are no
+extensions or alternate token identifiers. `gate1b_setup_context_sha256` is
+plain SHA-256 over those exact bytes. The outer CLI and helper accept this
+context only as an authorization input to the normal first-enrollment ceremony
+inside that token's authenticated session. It is not a private key, signing
+credential, general signing endpoint, or substitute registry authority. The
+ordinary ceremony may perform its required proposal and final signatures only
+with the newly generated exact signing key and its normal fresh
+Security.framework user-presence checks. The context itself cannot sign any
+registry record or receipt.
+
+The case reuses, without changing their field order or caps, the canonical
+`stage_pre_enrollment_empty_inventory` and
+`stage_post_enrollment_registry_snapshot` codecs defined below. For this one
+use, `stage_type` is exactly `gate1b`, `stage_token_sha256` is the exact
+`gate_token_sha256`, and `setup_context_sha256` is the exact
+`gate1b_setup_context_sha256`. The retained empty inventory must prove that
+the production registry service, coordinator service, signing-key namespace,
+journal root, and runner-session state contain no inherited Gate 1A or prior
+Gate 1B state before any enrollment work. The single ceremony must create
+revision 1/generation 1, durably close and remove its coordinator active
+record, and retain the exact post-enrollment snapshot outside disposable
+mutable state before the setup case can pass.
+
+Entry to this setup authority is permitted only for the first case's
+`enroll` operation after that case's canonical empty-inventory observation.
+The `pre-enrollment-inventory` and `snapshot` operations are read-only runner
+evidence operations. Setup authority ends when the snapshot and case-final
+evaluation have been retained, or immediately on any failure or timeout. It
+can never authorize prepare, confirm, apply, permit, send, receipt signing,
+rotation, revocation, recovery, a second enrollment, or cleanup/deletion.
+Every later Gate 1B case enters through ordinary Gate E1/E2 runtime authority
+and the normal registry lifecycle, never through the setup context.
+
+The snapshot is immutable baseline provenance, not a promise that current
+registry state remains at revision 1/generation 1. Planned later rotate,
+revoke, and recover operations may advance registry state under their own
+ordinary Gate authority and transition evidence. Their observations continue
+to bind the retained baseline `registry_snapshot_sha256` while their own
+registry evidence describes the current state; neither value may be
+substituted for the other.
+
+Gate 1B has no item-attributed cleanup authority:
+`stage_cleanup_policy`, every cleanup-context/intent/progress field, and the
+`stage_cleanup` IPC operation are null or absent as their containing schema
+requires. On success, failure, timeout, or partial enrollment, the trusted
+runner destroys or reverts the whole disposable host at the stage boundary.
+It never derives the activation-smoke/post-grant cleanup context and never
+performs a per-item production Keychain or journal delete. A reset whose
+completion is not independently proved invalidates every output from that
+run. E1 and E2 therefore each execute this setup from a separate proved-empty
+host; the E1 snapshot is evidence input to E2 authorization but no E1 mutable
+state is carried into the E2 run.
 
 ## Gate evidence codec
 
@@ -1483,22 +1592,32 @@ canonical evidence index. The index is capped at 65,536 bytes. Its fields are:
 15. `fixture_set_sha256`
 16. `fixture_executable_manifest_sha256`, the Gate 1A plan value or null for
     Gate 1B
-17. `evidence_scopes`, exactly the ordered unique case scopes in the plan
-18. `started_at`
-19. `finished_at`
-20. `result`, exactly `pass`
-21. `observations`, an ordered JSON array
+17. `setup_context_sha256`, null for Gate 1A and the exact
+    `gate1b_setup_context_sha256` for Gate 1B
+18. `pre_enrollment_inventory_sha256`, null for Gate 1A and required for
+    Gate 1B
+19. `registry_snapshot_sha256`, null for Gate 1A and the retained immutable
+    baseline snapshot digest for Gate 1B
+20. `evidence_scopes`, exactly the ordered unique case scopes in the plan
+21. `started_at`
+22. `finished_at`
+23. `result`, exactly `pass`
+24. `observations`, an ordered JSON array
 
 Observation order is the order frozen by the Gate plan. Each entry contains
 `observation_id`, `evidence_scope`, `executable_role`, `executable_component`,
 `executable_identity_sha256`, `command_sha256`, `stdout_sha256`,
 `stderr_sha256`, `exit_code`, `registry_snapshot_sha256`, `assertion_ids`,
 `assertion_results_sha256`, and `transcript_results_sha256`, in that order.
-`registry_snapshot_sha256` is null for Gate 1A/Gate 1B and for activation-
-smoke/post-grant setup operations before snapshot creation. It equals the exact
-retained post-enrollment snapshot for the setup `snapshot` operation, its
-final evaluation, and every later stage observation. Scope and role exactly
-match the compiled case, step, or case-final evaluation.
+`registry_snapshot_sha256` is null for every Gate 1A observation, for the Gate
+1B setup case's `pre-enrollment-inventory` and `enroll` operations, and for
+activation-smoke/post-grant setup operations before snapshot creation. It
+equals the exact retained post-enrollment snapshot for each setup `snapshot`
+operation, its final evaluation, and every later observation in that Gate 1B
+or release-stage run. A Gate 1B transition observation also retains its own
+current-state evidence; advancing the registry does not change or null this
+baseline provenance digest. Scope and role exactly match the compiled case,
+step, or case-final evaluation.
 `executable_identity_sha256` hashes the complete exact
 descriptor code-slice entry (`cli` maps to `outer`, `helper` to `helper`),
 fixture-executable slice for `fixture_cli`/`fixture_helper`, negative-peer slice
@@ -1550,9 +1669,10 @@ that can substitute for it.
 
 Gate 1A observations include every approval-protocol, code-identity, Keychain,
 UI-presence, fail-closed, restart, and clean-host test. Gate 1B observations
-include its ordinary CLI live-write, helper-owned coordinator, apply-versus-
-registry linearization, lease fencing, every pre/post-permit crash boundary,
-one-shot send, fault, and reconciliation cases.
+begin with the empty-inventory, one-time enrollment, and retained baseline
+snapshot observations, then include its ordinary CLI live-write, helper-owned
+coordinator, apply-versus-registry linearization, lease fencing, every
+pre/post-permit crash boundary, one-shot send, fault, and reconciliation cases.
 E2 contains the complete repeated observation set for its Gate ID. Missing,
 duplicated, reordered, or additional observations are a failure against the
 content-addressed Gate plan.
@@ -1572,25 +1692,35 @@ capped at 16,384 bytes. Its fields are `schema_version` integer `1`,
 `provisional_context_sha256`, `fixture_executable_manifest_sha256`,
 `evidence_scopes`, `architectures`, `indexes`, `registry_snapshots`, and
 `result` exactly `pass`, in that order. Gate sets use null provisional context,
-smoke uses null Gate target, and `registry_snapshots` is null for Gate sets.
+smoke uses null Gate target, and `registry_snapshots` is null only for Gate 1A.
 The fixture-executable digest is required only for Gate 1A. Gate 1A
 scope order is exactly `exact_artifact`, then `disjoint_fixture`; Gate 1B and
 smoke contain only `exact_artifact`. `architectures` exactly equals the
 descriptor array.
-For Gate sets, `indexes` has one entry per architecture in that same order,
+For Gate 1A sets, `indexes` has one entry per architecture in that same order,
 with fields `architecture`, `evidence_index_sha256`, `gate_token_sha256`, and
-`gate_session_id` in order. For activation smoke, each entry appends
+`gate_session_id` in order. Gate 1B uses the same four fields followed by
+`setup_context_sha256`, `pre_enrollment_inventory_sha256`, and
+`registry_snapshot_sha256`, in that order. For activation smoke, each entry
+uses the Gate 1A four-field prefix and appends
 `setup_context_sha256`, `pre_enrollment_inventory_sha256`,
 `registry_snapshot_sha256`, `cleanup_context_sha256`,
 `cleanup_intent_sha256`, `final_cleanup_progress_sha256`,
+`final_cleanup_ack_ledger_sha256`, `final_cleanup_ack_ledger_entry_count`,
 `helper_cleanup_evidence_sha256`, `stage_cleanup_evidence_sha256`,
 `cleanup_evidence_sha256`, and `final_empty_inventory_sha256`, in that order.
-Its non-null
-`registry_snapshots` array has one entry per descriptor architecture, in that
-order, with fields `architecture` and `registry_snapshot_sha256`; it must
-exactly project the matching index entries. Every tuple must match its
-canonical index, root-signed token, and retained setup/cleanup evidence. All
-token and session IDs are unique across all sets.
+The non-null
+`registry_snapshots` array for Gate 1B and activation smoke has one entry per
+descriptor architecture, in that order, with fields `architecture` and
+`registry_snapshot_sha256`; it must exactly project the matching index entries.
+For Gate 1B, each index tuple must exactly project the generated setup-context,
+empty-inventory, and baseline-snapshot digests from its canonical index and
+retained evidence. Only their pre-run descriptor, plan, target, token,
+architecture, runner, and session inputs must match the root-signed Gate token;
+the token does not contain these post-run digests. No cleanup field is added.
+For activation smoke, every
+tuple must match its canonical index, root-signed token, and retained
+setup/cleanup evidence. All token and session IDs are unique across all sets.
 
 An evidence-set digest is SHA-256 over the exact manifest bytes. A Gate stage
 passes only as the complete set; no per-architecture index, subset, combined
@@ -1689,9 +1819,13 @@ a second compact canonical context capped at 4,096 bytes with fields, in order,
 and `cleanup_authorization` exactly `attributed_stage_cleanup_only`.
 `cleanup_context_sha256` is plain SHA-256 of those exact bytes. It is accepted
 only by the final case's distinct `stage_cleanup` IPC operation and only while
-the root-signed stage token remains valid. Neither setup nor cleanup context can
-sign a registry/receipt, acquire or exercise a permit, send, cross a session,
-or substitute for smoke receipt/final production authority.
+the root-signed stage token remains valid. Neither setup nor cleanup context is
+a signing credential or standalone signing endpoint. The setup context is only
+the bound authorization input to the normal first-enrollment ceremony, whose
+required registry signatures still use the generated signing key and fresh
+user-presence checks; neither context itself can sign a registry record or
+receipt, acquire or exercise a permit, send, cross a session, or substitute for
+smoke receipt/final production authority.
 
 Before any registry, coordinator, signing-key, journal, plan, receipt, socket,
 or loopback state is created, the first case emits a compact canonical
@@ -1734,6 +1868,13 @@ SHA-256 of these exact bytes. The snapshot operation, setup final evaluation,
 every later observation, the per-architecture evidence index, and its
 evidence-set entry all carry this same digest; no later enumeration may silently
 substitute current registry state for it.
+
+When these two evidence codecs are reused with `stage_type=gate1b`, this is the
+end of their shared contract: none of the cleanup context, cleanup inventory,
+cleanup intent, cleanup progress, or attributed-deletion rules below applies.
+Those rules remain exclusive to `stage_type=activation_smoke` and
+`stage_type=post_grant_verification`; Gate 1B uses only whole-host
+destroy/revert as specified above.
 
 The pre-enrollment inventory, setup context, registry snapshot, every result
 they reference, and failure evidence are written to immutable
@@ -1860,16 +2001,18 @@ canonical object capped at 8,192 bytes with fields, in order,
 `activation_smoke_cleanup`, `descriptor_sha256`, `smoke_token_sha256`,
 `architecture`, `gate_session_id`, `registry_snapshot_sha256`,
 `cleanup_context_sha256`, `cleanup_intent_sha256`,
-`final_cleanup_progress_sha256`, `helper_cleanup_evidence_sha256`,
+`final_cleanup_progress_sha256`, `final_cleanup_ack_ledger_sha256`,
+`final_cleanup_ack_ledger_entry_count`, `helper_cleanup_evidence_sha256`,
 `stage_cleanup_evidence_sha256`,
 `terminal_journal_evidence_sha256`, `pre_enrollment_inventory_sha256`,
 `removed_registry_record_sha256`, `removed_signing_key_tags`,
 `journal_cleanup_sha256`, `final_empty_inventory_sha256`, `finished_at`, and
 `result` exactly `pass`. The removed record and single key tag exactly equal
-the retained setup snapshot. The five cleanup digests resolve to the immutable
-context, intent, completed prefix, and helper/runner evidence objects defined
-by the registry protocol; each repeats the same token, context, snapshot, and
-session bindings. UI-fail exact reads prove the registry,
+the retained setup snapshot. The six cleanup digests resolve to the immutable
+context, intent, completed prefix, ACK-ledger container, and helper/runner
+evidence objects defined by the registry protocol. The canonical entry count
+equals the container's count, and their token, context, snapshot, and session
+bindings agree. UI-fail exact reads prove the registry,
 coordinator, and signing-key namespace absent; the no-follow filesystem probe
 proves the journal/session root empty. A copied sidecar, plan, receipt, socket,
 loopback account, registry item, coordinator item, key, or journal file makes
@@ -1891,7 +2034,8 @@ null, `evidence_scopes` exactly the one-element array `exact_artifact`,
 `pre_enrollment_inventory_sha256`, `registry_snapshot_sha256`,
 `smoke_receipt_context_sha256`, `terminal_journal_evidence_sha256`,
 `cleanup_context_sha256`, `cleanup_intent_sha256`,
-`final_cleanup_progress_sha256`, `helper_cleanup_evidence_sha256`,
+`final_cleanup_progress_sha256`, `final_cleanup_ack_ledger_sha256`,
+`final_cleanup_ack_ledger_entry_count`, `helper_cleanup_evidence_sha256`,
 `stage_cleanup_evidence_sha256`,
 `cleanup_evidence_sha256`, `final_empty_inventory_sha256`, and `observations`.
 Observations exactly equal the capability-specific smoke plan, including
@@ -2110,7 +2254,8 @@ at 8,192 bytes and contains, in order: `schema_version` integer `1`,
 `setup_context_sha256`, `pre_enrollment_inventory_sha256`,
 `registry_snapshot_sha256`, `terminal_journal_evidence_sha256`,
 `cleanup_context_sha256`, `cleanup_intent_sha256`,
-`final_cleanup_progress_sha256`, `helper_cleanup_evidence_sha256`,
+`final_cleanup_progress_sha256`, `final_cleanup_ack_ledger_sha256`,
+`final_cleanup_ack_ledger_entry_count`, `helper_cleanup_evidence_sha256`,
 `stage_cleanup_evidence_sha256`,
 `pre_cleanup_inventory_sha256`, `removed_inventory_sha256`,
 `keychain_cleanup_evidence_sha256`, `post_cleanup_probe_sha256`,
@@ -2128,9 +2273,10 @@ registry service, coordinator service, signing-key namespace, journal root,
 and mutable runner-session state are empty and matches the setup contract's
 initial inventory comparison rule.
 
-The five stage-cleanup digests resolve to the immutable context, intent,
-completed progress, helper evidence, and complete runner evidence defined by
-the registry protocol. Their token, descriptor, snapshot, architecture,
+The six stage-cleanup digests resolve to the immutable context, intent,
+completed progress, ACK-ledger container, helper evidence, and complete runner
+evidence defined by the registry protocol. The canonical entry count equals
+the container's count. Their token, descriptor, snapshot, architecture,
 capability, runner, and session values must equal this cleanup object. They are
 the sole authority and reconciliation record for Keychain deletion; the
 filesystem inventory fields neither widen nor reconstruct that authority.
@@ -2186,11 +2332,13 @@ at 65,536 bytes with these fields in exact order:
 25. `cleanup_context_sha256`
 26. `cleanup_intent_sha256`
 27. `final_cleanup_progress_sha256`
-28. `helper_cleanup_evidence_sha256`
-29. `stage_cleanup_evidence_sha256`
-30. `cleanup_evidence_sha256`
-31. `final_empty_inventory_sha256`
-32. `observations`
+28. `final_cleanup_ack_ledger_sha256`
+29. `final_cleanup_ack_ledger_entry_count`
+30. `helper_cleanup_evidence_sha256`
+31. `stage_cleanup_evidence_sha256`
+32. `cleanup_evidence_sha256`
+33. `final_empty_inventory_sha256`
+34. `observations`
 
 The observations exactly equal the capability-specific post-grant plan and use
 the Gate evidence observation/result codecs. They begin with exact-artifact
@@ -2220,6 +2368,7 @@ per architecture in that order, with fields `architecture`,
 `pre_enrollment_inventory_sha256`, `registry_snapshot_sha256`,
 `terminal_journal_evidence_sha256`, `cleanup_context_sha256`,
 `cleanup_intent_sha256`, `final_cleanup_progress_sha256`,
+`final_cleanup_ack_ledger_sha256`, `final_cleanup_ack_ledger_entry_count`,
 `helper_cleanup_evidence_sha256`, `stage_cleanup_evidence_sha256`,
 `cleanup_evidence_sha256`, and
 `final_empty_inventory_sha256`, in that order. `registry_snapshots` contains
@@ -2227,6 +2376,16 @@ one entry per descriptor architecture, in that order, with fields
 `architecture` and `registry_snapshot_sha256`, and exactly projects the index
 entries. Every value must equal its token, plan, index, authority pair,
 context, and retained file.
+
+Every smoke/post-grant cleanup index and evidence-set tuple binds the final
+cleanup ACK-ledger container digest and entry count to both helper and complete
+stage-cleanup evidence. The count is a canonical integer equal to final progress
+revision plus one, bounded by `2N+1` (seven for confirm, eleven for issue-create).
+The complete entry chain, canonical container, and all referenced intent,
+progress, marker, and result bytes must be retained; the install evidence tree
+includes those objects under its ordinary closed manifest rules. Verification
+uses the registry protocol's exact codecs and rejects any missing reference,
+fork, or digest/count disagreement before accepting an evidence index.
 
 `install_evidence_manifest_sha256` is SHA-256 of the exact compact canonical
 `install-files.json` bytes. That separate object is capped at 2,097,152 bytes
@@ -2360,7 +2519,9 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
   roles, both negative-peer components, and every architecture-specific signed
   identity/code slice;
 - Gate 1A and Gate 1B per-architecture E1/E2 tokens, evidence indexes, and
-  complete evidence-set manifests;
+  complete evidence-set manifests, including Gate 1B E1- and E2-bound setup
+  contexts, empty pre-enrollment inventories, immutable baseline registry
+  snapshots, and their exact index/evidence-set tuple projections;
 - every exact Security.framework key/registry/coordinator dictionary
   projection, coordinator active/permit/closed record, apply-first and
   registry-first linearization, and pre/post-permit restart outcome;
@@ -2373,6 +2534,8 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
   both stage-only setup and cleanup contexts, canonical empty pre-enrollment/
   final inventories, post-enrollment registry snapshots, cleanup intents and
   progress prefixes, acknowledged `delete_attempt_started` markers,
+  canonical ACK-ledger genesis/entries/container with both ACK kinds and every
+  valid bounded head, including final helper/index/set digest-count equality,
   same-directory exclusive-`0600` canonical marker/pending-progress
   publication with file/directory fsync and no-follow reopen/hash evidence,
   the dedicated operation-result digest domain and every exhaustive nullable
@@ -2479,16 +2642,31 @@ independently covers:
   synthetic context, wrong post-grant token/grant/context/runner/architecture,
   missing terminal CAS or cleanup evidence, receipt replay after terminal
   consumption, and pre-dispatch/late-dispatch false positives;
-- missing/non-first setup case; setup token/context absent, mismatched, or used
-  for any action except the one initial exact-artifact enrollment; nonempty
+- missing/non-first Gate 1B setup case or a Gate 1B plan with null, release-
+  stage, or changed setup policy; Gate 1B setup under anything other than the
+  exact E1/E2 token and derived context, including a wrong token type/digest,
+  prior-E1 evidence, Gate 1A prerequisite, plan, target, descriptor,
+  architecture, capability, runner, or session; Gate 1A state inherited into
+  Gate 1B, E1 mutable state inherited into E2, or a Gate 1B setup context
+  routed by any later command template; missing/non-first release-stage setup
+  case; setup token/context absent, mismatched, or used for any action except
+  the one initial exact-artifact enrollment; nonempty
   pre-enrollment registry service, coordinator service, signing-key namespace,
   journal root, or mutable runner-session inventory; enrollment other than
   revision 1/generation 1; setup snapshot with wrong revision, generation,
   SPKI, fingerprint, descriptor, architecture, runner, or session; any later
   observation/index/evidence-set entry with a missing or different snapshot;
-  retained setup evidence placed inside disposable state; or a second setup,
-  rotation, recovery, revocation, receipt signature, permit, or network action
-  under setup authority;
+  a Gate 1B index without its setup-context/inventory/snapshot tuple, a Gate 1B
+  evidence-set snapshot projection mismatch, or a non-null Gate 1A setup or
+  snapshot field; retained setup evidence placed inside disposable state; a
+  baseline snapshot treated as current state after an evidenced
+  rotate/revoke/recover transition or current state substituted for baseline;
+  or a second setup, rotation, recovery, revocation, receipt signature,
+  permit, or network action under setup authority;
+- non-null Gate 1B cleanup policy or cleanup evidence field; a Gate 1B cleanup
+  context, cleanup intent, attributed per-item delete, or `stage_cleanup` IPC
+  operation; failure to prove whole-host destroy/revert after any Gate 1B run;
+  or accepting any output from an uncertain Gate 1B reset;
 - missing, expired, unsigned, cross-stage, cross-architecture, cross-capability,
   cross-runner, or cross-session cleanup authority; cleanup-context/token/
   descriptor/setup-snapshot disagreement; a setup or cleanup context used to
@@ -2506,7 +2684,12 @@ independently covers:
   missing/partial/non-cross-bound marker and `delete_pending` progress pair;
   temp-mode/no-follow/canonical-write/file-fsync/no-replace-publication/
   directory-fsync/reopen/hash failure; ACK before both entries and its retained
-  transcript ledger entry are durable; rollback to a prior progress prefix;
+  canonical ACK-ledger entry are durable; rollback to a prior progress prefix;
+  wrong/missing genesis, ACK kind/nullability, predecessor, sequence, revision
+  filename, entry or aggregate cap; duplicate/forked/gapped/truncated history,
+  terminal successor, extra or partial namespace object, cross-session replay,
+  wrong final ledger digest/count, or choosing a head before complete namespace
+  validation; namespace-ancestor fsync failure or concurrent runner writes;
   delete after any pre-ACK publication crash/failure;
   operation result under the wrong digest domain or outside the exhaustive
   pre-read/delete/post-read/pending-marker field-shape table;
@@ -2561,6 +2744,15 @@ invalidates prior E1/E2 evidence.
   with the real sidecar pair, final production context, and schema-3 receipts,
   then irrevocably terminalizes those disposable receipts. Test-only command
   surfaces cannot substitute for either path.
+- Every Gate 1B E1 and E2 run begins with exactly one setup-only
+  exact-artifact enrollment from a canonical empty five-domain inventory, with
+  no Gate 1A or prior-pass mutable state. Its token-bound context is only an
+  authorization input to the normal enrollment ceremony. The retained
+  revision-1/generation-1 snapshot is immutable baseline provenance in every
+  later observation and both index layers; later ordinary-authority registry
+  transitions record their own current state without replacing that baseline.
+  Gate 1B has no attributed cleanup authority and ends by proved whole-host
+  destroy/revert; E1 state is never inherited by E2.
 - Every activation-smoke and post-grant capability plan begins with exactly one
   setup-only exact-artifact enrollment from a canonical empty five-domain
   inventory. Its retained revision-1/generation-1 registry snapshot binds

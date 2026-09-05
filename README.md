@@ -91,6 +91,8 @@ provisional authorization remains deny-only. A later offline-root-signed
 activation grant is issued only over the complete per-architecture pre-grant
 smoke evidence, and the real grant-bound production context must then pass a
 second per-architecture ordinary-command verification before publication.
+Every fresh Gate 1B E1/E2 run begins with its own token-bound enrollment and
+retains that baseline snapshot as provenance in its complete evidence set.
 Each activation-smoke and post-grant capability plan starts with a setup-only
 exact-artifact enrollment from a canonical empty disposable inventory, binds
 the retained revision-1 registry snapshot through every later observation and
@@ -106,6 +108,10 @@ exact read and byte comparison under the serialized helper executor. One
 durable acknowledged `delete_attempt_started` marker precedes its sole physical
 delete; an unresolved marker can only prove absence or quarantine. Unknown
 state is quarantined, never deleted.
+Cleanup acknowledgements form a bounded hash-linked ledger, including genesis
+and every progress revision. Recovery validates the entire ledger and its
+referenced objects before selecting a head; a partial or forked history cannot
+authorize deletion.
 The future write path is additionally gated by one launchd-managed helper, its
 serialized authority executor, and a helper-owned fixed-active Keychain
 coordinator: registry commits cannot overlap an apply, acquisition cannot race

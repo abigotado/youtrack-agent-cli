@@ -57,8 +57,11 @@ The trust and activation dependencies are now fixed:
    durable close before releasing registry serialization.
 6. Produce an unpublished exact candidate with ordinary `issue.create` apply
    wired, rerun the two-pass Gate 1A sequence for its new descriptor, then run
-   the closed 25-case two-pass live Gate 1B on a disposable YouTrack 2026.2
-   project, including
+   the closed 26-case two-pass live Gate 1B on a disposable YouTrack 2026.2
+   project. Each fresh E1/E2 host starts with the compiled token-bound enrollment
+   case and retains its baseline registry snapshot in observations, index, and
+   evidence set. Later transition evidence records the planned registry changes;
+   the baseline remains enrollment provenance. The suite includes
    Remote MCP/OAuth host tests, both apply-first and registry-first
    rotation/revocation/recovery orderings, invalid-enrollment contention before
    ledger read, crash before permit, crash after permit before send, crash after

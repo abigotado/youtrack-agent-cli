@@ -45,7 +45,7 @@ integers are base-10 digits with no sign and no leading zero, except the value
 zero itself. Nullable fields are exactly JSON `null`, never an empty string.
 Booleans are exactly `true` or `false`. Core registry and coordinator authority
 objects have no arrays or nested objects. The separately named stage-cleanup
-intent, progress, and evidence objects are bounded artifact containers and use
+intent, progress, ACK-ledger, and evidence objects are bounded artifact containers and use
 only the exact ordered arrays/entries defined in their section; this exception
 does not widen any core object.
 
@@ -86,11 +86,15 @@ base64url decoding, signature verification, or display:
 | final record body | 4,096 |
 | complete stored record | 4,352 |
 | commit authorization or reconciliation request | 6,144 |
-| stage-cleanup IPC request | 524,288 |
+| stage-cleanup IPC request | 1,048,576 |
 | stage-cleanup IPC result | 131,072 |
 | stage-cleanup context | 4,096 |
 | stage-cleanup intent | 262,144 |
 | stage-cleanup progress or evidence | 65,536 |
+| stage-cleanup delete-attempt or operation-result object | 65,536 |
+| stage-cleanup ACK-ledger entry | 8,192 |
+| stage-cleanup ACK-ledger container | 131,072 |
+| stage-cleanup retained namespace aggregate bytes | 2,097,152 |
 | one Keychain registry item, including metadata returned by Security.framework | 8,192 |
 | one coordinator active, permit, or closed item, including metadata | 8,192 |
 | complete ledger records | 256 |
@@ -226,8 +230,12 @@ releasing the coordinator; any mismatch or noncanonical result prevents send.
 
 Registry revision and coordinator permit/closed deletion are forbidden outside
 the exact stage-cleanup authority below and have no ordinary-flow dictionary.
-Exact orphan
-private-key deletion uses only `kSecClassKey`, EC key type, exact application
+The following exact private-key deletion dictionary is usable only in a
+disjoint Gate fixture namespace or through the signed smoke/post-grant
+stage-cleanup authority. It supplies no ordinary production orphan/retired-key
+maintenance operation. Ordinary production retains such keys and reports
+unresolved state without deleting them. The dictionary uses only
+`kSecClassKey`, EC key type, exact application
 tag CFData, key size 256, Secure Enclave token ID, resolved access group, and
 the data-protection-Keychain flag plus
 `kSecUseAuthenticationUI=kSecUseAuthenticationUIFail`; it contains no
@@ -238,7 +246,9 @@ deletion completed. `errSecSuccess` is accepted only with exactly one typed
 `SecKey`; because the fixed query already contains the exact tag, EC key type,
 access group, data-protection flag, and match-one constraint, that result proves
 the orphan still exists and returns
-`REGISTRY_ORPHAN_KEY_DELETE_AMBIGUOUS` without repeating deletion. Any other
+`REGISTRY_ORPHAN_KEY_DELETE_AMBIGUOUS` in the disjoint fixture flow without
+repeating deletion; signed stage cleanup uses its canonical quarantined result
+below. Any other
 OSStatus, CFType, count, or projection returns the same stable code with an
 internal reason and blocks cleanup.
 This reconciliation never uses a generic-password exact-account read. Exact
@@ -328,7 +338,11 @@ followed by the complete canonical object. The proposal digest includes its
 `proposal_signature`. The record
 digest used by commit authorization is SHA-256 over the commit domain followed
 by the complete stored record.
-Stage-cleanup request, intent, progress, delete-attempt, operation-result, and
+The two additional digest domains are `YTA-STAGE-CLEANUP-ACK-ENTRY-V1` and
+`YTA-STAGE-CLEANUP-ACK-LEDGER-V1`, each followed by one NUL byte, for a
+canonical ACK-ledger entry and container respectively.
+
+Stage-cleanup request, intent, progress, delete-attempt, operation-result, ACK-ledger entry/container, and
 evidence digests use their matching domains followed by the complete canonical
 object. `operation_result_sha256` specifically means the operation-result
 domain followed by the exact canonical operation-result bytes. A setup or cleanup context
@@ -945,6 +959,11 @@ For each operation, `expected_item_sha256` is plain SHA-256 of the exact stored
 value bytes or key-projection bytes, independent of the record's domain digest,
 so it is the digest used by the pre/post-read equality checks.
 
+Let `N` be the exact intent operation count: `3` for `confirm_only` and `5`
+for `issue_create`. Every progress history contains at most `2N+1` records,
+including revision zero, because each operation has at most one marker and
+one terminal result. Progress revisions are exactly `0..2N`.
+
 Initial progress is retained before deletion with fields, in order,
 `schema_version` integer `1`, `progress_type` exactly `stage_cleanup_progress`,
 `cleanup_intent_sha256`, `gate_session_id`, `previous_progress_sha256` null,
@@ -976,7 +995,7 @@ last marker digest in `pending_delete_attempt_sha256`. Missing, forked,
 rolled-back, reordered, or
 non-prefix progress is unverifiable and quarantines the session.
 
-The IPC request is compact canonical JSON capped at 524,288 bytes with fields,
+The IPC request is compact canonical JSON capped at 1,048,576 bytes with fields,
 in order, `schema_version` integer `1`, `message_type` exactly `stage_cleanup`,
 `stage_type`, `stage_token_sha256`, `stage_token_base64url`,
 `setup_context_sha256`, `cleanup_context_sha256`,
@@ -984,13 +1003,19 @@ in order, `schema_version` integer `1`, `message_type` exactly `stage_cleanup`,
 `approved_capability`, `gate_runner_unique`, `gate_session_id`,
 `registry_snapshot_sha256`, `cleanup_intent_sha256`,
 `cleanup_intent_base64url`, `cleanup_progress_sha256`,
-`cleanup_progress_base64url`, `requested_at`, and `expires_at`. The exact token,
-cleanup context, intent, and progress bytes must decode, re-encode, hash, and
-cross-bind. Request expiry is after issue, at most five minutes later, and no
+`cleanup_progress_base64url`, `pending_delete_attempt_base64url`, `cleanup_ack_ledger_sha256`,
+`cleanup_ack_ledger_base64url`, `requested_at`, and `expires_at`. The exact token,
+cleanup context, intent, progress, and ACK-ledger container bytes must decode, re-encode, hash, and
+cross-bind. `pending_delete_attempt_base64url` is null unless supplied progress
+is `delete_pending`; in that state it is the exact canonical marker bytes,
+capped at 65,536 decoded bytes, and its domain digest must equal progress's
+non-null pending marker digest and the ledger head's marker digest. Request
+expiry is after issue, at most five minutes later, and no
 later than token/intent expiry. The terminal response is capped at
 131,072 bytes and contains `schema_version`, `message_type` exactly
 `stage_cleanup_result`, `request_sha256`, `cleanup_intent_sha256`,
-`final_cleanup_progress_sha256`, `status` exactly `complete` or `quarantined`,
+`final_cleanup_progress_sha256`, `final_cleanup_ack_ledger_sha256`,
+`final_cleanup_ack_ledger_entry_count`, `status` exactly `complete` or `quarantined`,
 `next_operation_index`, `helper_cleanup_evidence_sha256` and
 `helper_cleanup_evidence_base64url` both null unless complete, and `finished_at`,
 in that order. The returned evidence bytes must match their digest; `complete`
@@ -1110,7 +1135,8 @@ These rows are the complete canonical encoder/decoder state space.
 
 A crash after invocation but before result persistence leaves the durable
 pending marker as the authority. Recovery reuses the identical token,
-cleanup-context, intent, marker, and longest valid progress prefix. Delete
+cleanup-context, intent, marker, and unique complete ACK-ledger history defined
+below. Delete
 success and direct not-found both reconcile only through exact absence and a
 terminal `reconciled_absent` result; an ambiguous invocation whose item remains
 exactly present quarantines for manual repair. The helper never rebuilds
@@ -1132,17 +1158,103 @@ fields `schema_version` integer `1`, `message_type` exactly
 `stage_cleanup_progress_ack`, `cleanup_intent_sha256`,
 `proposed_progress_sha256`, `progress_revision`, `next_operation_index`,
 `gate_session_id`, and `acknowledged_at`, in that order. The helper verifies the
-acknowledged digest and counters before the next read/delete. A missing,
+acknowledged digest and counters and derives the identical next ACK-ledger
+entry/container before the next read/delete. A missing,
 changed, duplicate, reordered, or early acknowledgement closes the exchange
 without another operation. On reconnect, the runner sends a new initial
-request containing the longest durably retained valid prefix; neither peer
+request containing the unique completely validated ACK-ledger head and its
+progress; neither peer
 manufactures or rolls back an acknowledgement.
 
-Marker/progress publication uses the same durable no-follow pattern as the
-journal protocol, in the already preopened mode-`0700` retained-evidence
-directory outside disposable state. The exact final basenames are
-`delete-attempt-<delete_attempt_started_sha256>.json` and
-`cleanup-progress-<delete_pending_progress_sha256>.json`. For each object the
+#### Canonical ACK ledger and durable publication
+
+The trusted runner owns one fixed retained namespace at
+`stage-cleanup/<cleanup_intent_sha256>/<gate_session_id>/`, relative to its
+preopened retained-evidence root outside disposable state. The digest and
+43-character canonical session ID are the only variable path components;
+they cannot contain a separator. Every directory is same-user, mode `0700`,
+opened without following symlinks and checked before use. Before publishing
+genesis or any ACK, each newly created path component is exclusively created
+with `mkdirat` mode `0700` relative to its checked parent, opened and verified,
+then both the new directory and its parent are `fsync`ed. The child is reopened
+without following symlinks from that parent and its owner/mode/type/device/inode
+must equal the created directory. This proceeds from the retained root outward;
+an existing component is accepted only by the same no-follow identity checks,
+never replaced. Any creation, directory/parent-fsync, or reopen failure closes
+the exchange before an ACK. Durability of a file's immediate directory does
+not substitute for durability of its ancestor links.
+
+The trusted runner reuses the repository's persistent OS advisory-lock pattern
+for a fixed `stage-cleanup-writer.lock` regular file directly under the retained
+root, outside all cleanup namespaces. It opens the same-user mode-`0600`,
+single-link file with no-follow and close-on-exec, exclusively creates and
+file/parent-fsyncs it if absent, and verifies the reopened identity. It acquires
+`flock(LOCK_EX|LOCK_NB)` before namespace creation or inspection and holds that
+descriptor and exclusive lock through the whole cleanup exchange and evidence
+publication. Contention or lock error performs no cleanup action. This
+serializes every trusted runner process using that retained root, including
+restarts; the lock file is never unlinked or replaced, and a crashed owner loses
+its kernel lock without any stale-PID or timeout-based ownership override. A
+new owner revalidates the complete namespace after acquiring the lock.
+Cleanup cannot
+delete, rename, or reuse the namespace. It contains only the exact intent,
+progress, marker, result, and ACK-ledger entry files defined here. Final helper
+and complete evidence, transcript manifests, and container snapshots reside
+outside this namespace and do not widen its file allowlist.
+
+Each ledger entry is a canonical object capped at 8,192 bytes. Its exact fields
+in order are `schema_version` integer `1`, `entry_type` exactly
+`stage_cleanup_ack_entry`, `cleanup_intent_sha256`, `gate_session_id`,
+`progress_revision`, `previous_entry_sha256`, `prior_progress_sha256`,
+`proposed_progress_sha256`, `ack_kind`, `ack_base64url`, `operation_index`,
+`delete_attempt_started_sha256`, and `operation_result_sha256`. Digests use the
+domains above; ACK bytes are the exact canonical wire ACK, unpadded base64url
+encoded, with a decoded cap of 4,096 bytes. The closed nullability rules are:
+
+| Entry | Exact required/null fields |
+| --- | --- |
+| Genesis, revision `0` | `proposed_progress_sha256` is the retained initial progress digest; `previous_entry_sha256`, `prior_progress_sha256`, `ack_kind`, `ack_base64url`, `operation_index`, and both marker/result digests are all null. There is no fabricated genesis ACK. |
+| Marker, revision `1..2N` | predecessor and prior/proposed progress digests are non-null; `ack_kind=stage_cleanup_delete_attempt_ack`; ACK bytes and operation index `0..N-1` are non-null; marker digest is non-null and result digest is null. |
+| Result, revision `1..2N` | predecessor and prior/proposed progress digests are non-null; `ack_kind=stage_cleanup_progress_ack`; ACK bytes and operation index `0..N-1` are non-null; result digest is non-null and marker digest is null, even when the result references a prior marker. |
+
+Every entry after genesis advances exactly one progress revision, binds the
+immediate preceding entry's domain digest, and sets `prior_progress_sha256` to
+that entry's `proposed_progress_sha256`. Intent and session are identical
+throughout. Marker ACK fields equal the entry's intent/session/revision,
+operation, marker, and proposed progress. Result ACK fields equal the entry's
+intent/session/revision and proposed progress, and its `next_operation_index`
+equals the referenced result progress. The referenced result's operation index
+equals the entry's. The runner validates the complete referenced objects and
+the progress transition rules above before publishing the entry. A marker
+entry can follow only `in_progress`; a result entry follows `in_progress` for
+initial absence/rejection or `delete_pending` for the identical pending marker.
+No entry can follow `complete` or `quarantined` progress. There are exactly as
+many entries as progress records: `1..2N+1`, thus at most seven for
+`confirm_only` or eleven for `issue_create`.
+
+The bounded transport/evidence container has exact fields, in order,
+`schema_version` integer `1`, `ledger_type` exactly `stage_cleanup_ack_ledger`,
+`cleanup_intent_sha256`, `gate_session_id`, `entries_base64url`, `entry_count`,
+and `head_entry_sha256`. The sole array contains exact canonical entry bytes,
+each unpadded base64url encoded, in increasing revision order starting at zero;
+its length equals `entry_count` and the head digest equals its last entry's
+domain digest. The whole container is capped at 131,072 bytes before decoding.
+It is reconstructed only from a completely validated namespace, never from a
+caller-selected prefix. Its domain digest is `cleanup_ack_ledger_sha256`.
+
+The exact final basenames are `cleanup-intent-<cleanup_intent_sha256>.json`,
+`cleanup-progress-<progress_sha256>.json`,
+`delete-attempt-<delete_attempt_started_sha256>.json`,
+`operation-result-<operation_result_sha256>.json`, and
+`ack-entry-<revision4>-<entry_sha256>.json`. `revision4` is the four-digit,
+zero-padded decimal revision (`0000` through at most `0010`); the JSON revision
+retains the ordinary no-leading-zero grammar. There is one intent, one progress
+per entry, at most `N` markers, and at most `N` results: at most `6N+3` final
+files (21 or 33), with aggregate capped at 2,097,152 bytes. Per-object caps
+apply before parsing; filenames never substitute for content validation.
+
+All these objects use the same durable no-follow publication pattern as the
+journal protocol. For each object the
 runner opens a fresh same-directory random temporary basename with
 `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC` and mode `0600`, verifies by
 `fstat` that it is a same-user regular file with link count one and exact mode,
@@ -1157,8 +1269,15 @@ relative to that same directory with
 `O_RDONLY|O_CLOEXEC|O_NOFOLLOW`, repeats owner/mode/type/link-count and size
 checks, reads the exact capped bytes from that one descriptor, repeats
 `fstat`, and requires byte-for-byte canonical equality and the expected domain
-digest. The marker is published and verified first; the cross-bound
-`delete_pending` progress is then published and verified by the same sequence.
+digest. Initial publication is intent, initial progress, then genesis entry;
+all three must be durably reopened before the initial request. For a marker,
+the marker is published and verified first, followed by cross-bound
+`delete_pending` progress, followed by its ACK entry. For a result, the result
+is published and verified first, followed by successor progress, followed by
+its ACK entry. The runner constructs the exact ACK before constructing its
+entry, and durably reopens that entry before transmitting the ACK. This applies
+to every marker ACK and every result ACK, including terminal progress. There
+is no separate unstructured ACK file or mutable head pointer.
 
 The pending progress is valid only when it advances the supplied prior valid
 prefix by exactly one revision, sets `previous_progress_sha256` to that prior
@@ -1167,32 +1286,59 @@ arrays unchanged, appends the one marker digest, sets both
 `pending_delete_attempt_sha256` to that digest and `state=delete_pending`, and
 matches the marker's stage/token/setup-context/cleanup-context/descriptor/
 architecture/capability/runner/session/snapshot/intent/operation/dictionary
-fields. Before sending the ACK, the runner also publishes the exact ACK bytes
-append-only in its retained IPC transcript ledger with the same file/fsync/
-collision-safe-publication/directory-fsync/reopen verification. Thus a sent ACK
+fields. The canonical entry is the append-only custody of the exact ACK bytes.
+Thus a sent ACK
 is durable evidence that both final pair entries existed and cross-bound to the
 valid prior prefix; an in-memory or merely written-but-not-reopened pair can
 never authorize `SecItemDelete`.
 
-Recovery begins from the longest durable ACK ledger entry, never merely the
-largest progress filename. Every acknowledged marker/pending-progress pair
-must still exist and pass the same no-follow reopen, exact-byte/hash, and
-cross-binding checks. A missing member, one-member/temporary-only partial
-publication, non-cross-bound pair, collision, changed metadata, or reopen
-mismatch quarantines the complete session and prohibits deletion; recovery
-never rolls back to the preceding prefix. Unacknowledged partial final entries
-or leftover temporary names likewise quarantine rather than being ignored or
-promoted.
+Before an initial/resumed request, the trusted runner enumerates the complete
+namespace with the file-count/aggregate bounds above, before selecting a head.
+It rejects every extra basename, nested directory, symlink, temporary name,
+partial file, duplicate revision (including two different digests), gap,
+noncanonical revision/name, bad predecessor, or digest mismatch. It then
+requires exactly one genesis and the unique contiguous sequence `0..k`, checks
+every entry and all referenced progress/marker/result files through the same
+no-follow reopen and canonical-byte checks, validates all transitions, and
+requires exact set equality between present final files and this complete
+history's references plus intent. Unreferenced progress/marker/result files
+are failed partial publication, never candidates to promote. Terminal
+successors, a missing reference, cross-intent/session reference, metadata
+change, or collision quarantines the whole session. Recovery never picks one
+fork, skips a bad file, or silently shortens the history to a valid prefix.
+The single head is selected only after these checks, and supplied current
+progress must equal its referenced proposed progress.
+
+The runner is trusted to attest that this complete durable store was checked
+before opening the authenticated helper request. The helper independently
+validates the supplied canonical container, complete entry/ACK chain, exact
+intent/session/revision/counter bindings, and head/current-progress equality.
+It validates the supplied pending marker bytes on resumed pending progress,
+and derives each subsequent entry and container from the exact ACK
+it receives and the result/progress it already constructed. It therefore
+agrees on the final ledger digest/count without accepting a runner-supplied
+final digest as proof. Historical referenced-object filesystem validation is
+the trusted runner's responsibility; no untrusted path becomes helper input.
+A durable entry whose ACK was not transmitted still counts: recovery resumes
+from its progress, consumes its pending marker, and never reissues that
+operation's delete. Missing an ACK on a live connection closes the exchange.
 
 There is no digest cycle: the marker binds only the already fixed stage,
 intent, and operation; pending progress binds the prior progress and marker;
-the ACK binds both final marker and pending-progress digests. Successful
+the ACK binds both final marker and pending-progress digests; the ledger entry
+then binds the exact ACK, predecessor entry, and progress references; the
+container binds the entries. ACKs never include their own entry/container
+digest. Successful
 exclusive publication, directory `fsync`, and no-follow reopen/hash comparison
 is the storage-model durability boundary. A crash or injected directory-fsync/
 reopen failure before the ACK means the helper receives no authority to delete.
 Loss after that boundary is not modeled as a normal power-loss outcome; if a
-later durable ACK ledger entry makes a missing/corrupt pair detectable, it is
-local corruption and quarantines without another delete.
+retained ACK entry, object, transcript, or evidence commitment makes a
+missing/corrupt suffix detectable, it is local corruption and quarantines
+without another delete. A deliberately restored internally complete older
+namespace together with all independent commitments is outside this trusted
+runner/durable-storage model, as with the registry snapshot rollback
+non-property above; this ledger does not claim an external monotonic anchor.
 
 The helper cleanup evidence is compact canonical JSON capped at 65,536 bytes
 with fields, in order, `schema_version` integer `1`, `evidence_type` exactly
@@ -1202,13 +1348,17 @@ with fields, in order, `schema_version` integer `1`, `evidence_type` exactly
 `gate_runner_unique`, `gate_session_id`, `pre_enrollment_inventory_sha256`,
 `setup_transcript_manifest_sha256`, `registry_snapshot_sha256`,
 `cleanup_intent_sha256`, `final_progress_sha256`,
+`final_cleanup_ack_ledger_sha256`, `final_cleanup_ack_ledger_entry_count`,
 `delete_attempt_started_sha256s`, `operation_result_sha256s`,
 `completed_operation_result_sha256s`,
 `final_registry_accounts`,
 `final_coordinator_accounts`, `final_key_tags`, `started_at`, `finished_at`, and
 `result` exactly `pass`. Completed-result digests exactly equal the complete
 ordered operation list; operation-result and marker arrays equal the retained
-progress history. Every marker precedes its matching physical delete, has
+progress history. The final ledger digest/count equal the helper's derived
+canonical container and its entry count, which is final progress revision plus
+one. The runner must match those fields to its independently reconstructed
+complete namespace before accepting helper evidence. Every marker precedes its matching physical delete, has
 fixed attempt 1, and occurs at most once; an operation completed from initial
 absence has no marker.
 The three final arrays are empty and coordinator `active` is
@@ -1224,7 +1374,8 @@ immutable storage outside disposable state. It contains, in order,
 `approved_capability`, `gate_runner_unique`, `gate_session_id`,
 `pre_enrollment_inventory_sha256`, `setup_transcript_manifest_sha256`,
 `registry_snapshot_sha256`, `cleanup_intent_sha256`,
-`final_cleanup_progress_sha256`, `helper_cleanup_evidence_sha256`,
+`final_cleanup_progress_sha256`, `final_cleanup_ack_ledger_sha256`,
+`final_cleanup_ack_ledger_entry_count`, `helper_cleanup_evidence_sha256`,
 `final_empty_inventory_sha256`, `finished_at`, and `result` exactly `pass`.
 Only this complete object may be bound by the stage index. Its final inventory
 proves registry, coordinator, key, journal, and mutable runner state empty; the
@@ -1433,7 +1584,7 @@ than disguised as existing exit 9:
 | `HELPER_PROFILE_EXPIRED` | 12 | `authorized helper profile has expired` | `install a newly authorized artifact; recovery cleanup only` |
 | `APPLY_PRE_PERMIT_ABORTED` | 13 | `mutation stopped before permit issuance` | `prepare a new plan and obtain a new confirmation` |
 | `AUTHORITY_STATE_CORRUPT` | 1 | `local authority state is corrupt` | `stop and request operator repair; do not retry or delete state` |
-| `REGISTRY_ORPHAN_KEY_DELETE_AMBIGUOUS` | 1 | `orphan key cleanup is ambiguous` | `stop and request operator repair; do not repeat deletion` |
+| `REGISTRY_ORPHAN_KEY_DELETE_AMBIGUOUS` (disjoint Gate fixture only) | 1 | `orphan key cleanup is ambiguous` | `stop and request operator repair; do not repeat deletion` |
 | `JOURNAL_V1_AUTHORITY_STATE_QUARANTINED` | 1 | `legacy authority journal state is quarantined` | `stop and request operator repair; do not migrate or retry it` |
 | `AUTHORITY_RECOVERY_DENIED` | 1 | `authority recovery evidence is invalid` | `stop and request operator repair; do not force clear state` |
 
@@ -1530,7 +1681,7 @@ for every exact key-generation, signing-key lookup with a fresh zero-reuse
 context-free-API `SecKeyCreateSignature` call followed by context invalidation
 on every outcome, noninteractive existence lookup with UI fail and no context,
 key-enumeration, registry
-add/enumeration/exact-read, orphan-key delete, coordinator add/enumeration/
+add/enumeration/exact-read, disjoint-fixture private-key delete, coordinator add/enumeration/
 exact-read/pre-send-probe, and active-delete dictionary above. Positive coordinator vectors
 cover apply active records, registry-commit active records bound only to a
 pre-read canonical registry intent, later candidate validation under that
@@ -1542,7 +1693,8 @@ ambiguity. They also cover the one-per-user launchd helper topology, serialized
 authority-executor guard acquisition/release, restart startup classification,
 and a competitor queued after byte-equal active read but before delete that
 performs zero Keychain operations until guard release and acquires only after
-old active is absent. Private-key deletion vectors separately cover delete success,
+old active is absent. Private-key deletion vectors in the disjoint fixture or
+exact signed stage-cleanup authority separately cover delete success,
 ambiguous delete followed by typed `SecKey`, ambiguous delete followed by
 `errSecItemNotFound`, wrong CFType, multiple results,
 and every other OSStatus; coordinator-active deletion vectors separately cover
@@ -1568,7 +1720,23 @@ progress publication at file-fsync, no-replace publication, directory-fsync,
 and reopen checkpoints before ACK and proves zero `SecItemDelete` calls. A
 detectable ACK-ledger/pair loss or mismatch is a corruption vector that
 quarantines without rollback or delete; it is not modeled as successful
-directory-fsync durability loss. Fixture
+directory-fsync durability loss. Additional fixtures encode genesis with its
+explicit null ACK fields; all-marker and all-initial-absence successful
+histories for both `N=3` and `N=5`; terminal quarantine histories; every exact
+entry and container byte/digest; canonical zero-padded filenames; and matching
+helper/complete evidence ledger digest/count. Fault vectors interrupt both
+ancestor creation at mkdir, child/parent-fsync and no-follow reopen, and both
+marker-ACK and result-ACK entry publication at write, file-fsync, exclusive
+publish, directory-fsync, and reopen, proving no ACK transmission before
+durability. They also stop after entry durability but before ACK transmission
+and prove restart adopts that entry without another delete. Concurrent-runner
+vectors prove a lock contender performs zero namespace/cleanup operations and
+the successor revalidates the entire namespace after a crashed owner exits.
+Recovery vectors
+reject extra/temp/partial files, duplicates, gaps, forks, bad links, missing or
+unreferenced objects, cross-session references, terminal successors, exceeded
+count/byte bounds, and a truncated entry suffix with retained object/transcript
+evidence; none selects a shorter head. Fixture
 manifests name symbolic Security.framework constants and
 typed CF values; implementations construct native dictionaries and compare the
 bounded projection rather than relying on CFDictionary iteration order. No
@@ -1654,7 +1822,13 @@ Negative vectors must independently cover:
   no-follow violation, noncanonical write, missing file/directory fsync,
   replacement publication, name collision with different bytes, publication
   or reopen/hash failure, non-cross-bound pair, or acknowledgement before both
-  entries and the ACK ledger entry are durably reopened;
+  entries and the ACK ledger entry are durably reopened; result ACK transmitted
+  before its canonical entry is durable; wrong genesis nullability, ACK kind
+  or exact bytes, predecessor/prior/proposed binding, operation/digest union,
+  filename revision/digest, entry/container count or head; extra/temp/partial
+  namespace member, fork, gap, duplicate, unreferenced object, terminal
+  successor, or detectable suffix truncation accepted by shortening history;
+  changed final helper/complete-evidence ledger digest or count;
   a second delete after any marker, including an unresolved one; coordinator
   active present; enrolled registry tuple not
   equal to the retained active generation; missing pre-read or byte comparison;
@@ -1664,7 +1838,9 @@ Negative vectors must independently cover:
   with changed bytes; stage-token/intent or helper-profile expiry, or other
   unverifiability after partial cleanup, treated
   as pass; incomplete final inventory; or any such delete from an ordinary
-  production, Gate, or non-stage flow.
+  production or non-stage flow (disjoint Gate fixture deletion remains limited
+  to fixture identities). Ordinary orphan/retired-key maintenance attempts
+  must perform zero delete calls.
 
 Go and Swift must parse and re-encode every positive byte identically and
 reject every negative vector with the same stable reason class. Gate 1A runs

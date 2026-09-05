@@ -78,6 +78,11 @@ evaluation may emit the ordered aggregate after all transcripts exist. Every
 failure runs bounded cleanup, and an unproved cleanup destroys the quarantined
 disposable user/VM while invalidating all session output.
 
+Gate 1B independently enrolls its fresh E1/E2 host in the first compiled case.
+Its retained baseline snapshot records enrollment provenance through later
+observations and evidence sets; planned registry transitions retain their own
+successor evidence. Gate 1B does not acquire release-stage cleanup authority.
+
 Cleanup itself is a distinct root-token-bound `stage_cleanup` IPC authority,
 not a consequence of the setup context or ordinary maintenance. Its immutable
 pre-delete intent binds the empty pre-inventory, setup transcript/snapshot,
@@ -87,6 +92,9 @@ executor the helper requires coordinator active absent, exact-reads and
 byte-compares each item, and durably acknowledges a fixed-attempt marker before
 its sole delete only after the marker and cross-bound `delete_pending` progress
 are exclusively published, file/directory-fsynced, and exactly reopened.
+Genesis and every progress ACK are retained in one bounded hash-linked ledger.
+Recovery validates its full namespace, references, and unique contiguous chain;
+missing, extra, partial, or forked history quarantines without shortening it.
 Restart with an unresolved marker terminalizes exact absence
 or quarantines presence/unknown state without another delete. Unknown or expired partial state is quarantined
 and the disposable environment is destroyed; it is never broadly deleted.

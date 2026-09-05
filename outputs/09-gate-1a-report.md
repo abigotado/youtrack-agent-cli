@@ -164,7 +164,9 @@ delete, active-delete ambiguity, an acquisition queued between equality read
 and delete with zero competing Keychain work until guard release, and exact Security.framework dictionary and
 bounded-projection vectors. Those concurrency cases use the signed plan's exact
 two-party binary barrier schedule and content-addressed event trace, never
-sleeps or scheduler timing. The closed 25-case Gate 1B set also exercises exact
+sleeps or scheduler timing. The closed 26-case Gate 1B set starts with its own
+token-bound enrollment on each fresh E1/E2 host and retains the baseline snapshot
+as provenance through every later observation, index, and evidence set. It also exercises exact
 authority status/recover JSON v1 shapes with required invocation `meta`, exits
 10..13 plus corruption exit 1, closed inherited flags, trusted recovery UI, and
 journal v1-to-v2 migration/quarantine interruptions.
