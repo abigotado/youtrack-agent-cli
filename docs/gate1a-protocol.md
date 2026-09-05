@@ -24,7 +24,10 @@ contract changes:
 - `authorization_context_sha256` is inserted immediately after
   `registry_revision` in both unsigned and signed canonical JSON. It is the
   lowercase SHA-256 of the exact canonical authorization-context object
-  defined by the artifact-authorization protocol;
+  defined by the artifact-authorization protocol: canonical
+  `gate_receipt_context_v1` during an authenticated Gate 1A/Gate 1B E1/E2
+  session, smoke receipt context during activation smoke, or grant-bound final
+  context during production/post-grant verification;
 - `key_generation` is exactly `YTAG-` followed by the 20-digit decimal ledger
   revision that introduced the key (`00000000000000000001` through
   `00000000000000000256`), replacing the broader pre-Gate v2 label grammar;
@@ -43,27 +46,42 @@ frame are specified in [Gate 1A native approval boundary](gate1a-native-boundary
 The registry generation and transition authority are specified by the
 [Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md), and
 `registry_revision` and `authorization_context_sha256` are accepted only with
-the descriptor and exact provisional/smoke or provisional/activation pair
-authorized by [Gate artifact authorization](gate1a-artifact-authorization.md).
+the descriptor and exact root-signed Gate token/context, provisional/smoke
+pair, or provisional/activation pair authorized by
+[Gate artifact authorization](gate1a-artifact-authorization.md). The Gate
+branch exists before provisional authorization and is accepted only through
+the matching authenticated Gate runner session; production, smoke, and
+post-grant modes reject it.
 Both authenticated peers agree on that context digest before the helper may
 display or sign. Confirmation and the `confirmed -> in_flight` transition
 require the same currently active context. Once a request is `in_flight`,
 read-only reconciliation verifies the persisted historical context and receipt
 but does not require that context to remain active. Before `in_flight`, the
-journal atomically retains one closed stage-tagged authority set. An
-`activation_smoke` set contains the exact descriptor, signed provisional
+journal atomically retains one closed stage-tagged authority set. An E1/E2
+`gate` set contains the exact descriptor, exact root-signed Gate token,
+canonical `gate_receipt_context_v1`, complete bounded genesis-to-current
+registry chain, receipt, and digests; it contains no provisional authorization,
+smoke token, activation grant, or production authority. An `activation_smoke`
+set contains the exact descriptor, signed provisional
 authorization, signed smoke token, provisional context, smoke receipt context,
 receipt, and digests; it contains no activation grant and a pre-socket hard
 denial is terminalized as `activation_smoke_consumed`, never reconciled. A
 `production` or `post_grant_verification` set instead contains the exact
 descriptor, signed provisional authorization, signed activation grant, final
 grant-bound context, receipt, and digests. Historical verification rebuilds
-the matching pinned-root signature/hash chain; the receipt digest alone is not
-sufficient, and fields from different stage types cannot be mixed.
+the matching pinned-root signature/hash chain and replays the complete retained
+registry chain to derive the verification key; a receipt digest, lone terminal
+record, or caller-selected SPKI is not sufficient, and fields from different
+stage types cannot be mixed. Live Gate confirmation/acquisition/permit/send
+requires an unexpired E1/E2 token and the same authenticated runner session.
+After `in_flight`, later token expiry does not invalidate historical evidence,
+but Gate 1B may use it only for bounded read-only reconciliation in that still-
+authenticated session; it cannot authorize a new permit or send.
 
-Schema v3 receipts are consumed only through the helper-owned apply-authority
+Schema v3 apply receipts are consumed only through the helper-owned apply-authority
 coordinator defined by the registry protocol. The receipt's revision, active
-generation, final context, exact request digest, plan ID, journal revision, and
+generation, applicable authorization context, exact request digest, plan ID,
+journal revision, and
 connected CLI audit token are copied into the active/permit chain. The durable
 `confirmed -> in_flight` CAS precedes the sole permit; the permit precedes the
 sole send; the helper excludes every registry commit until a durable closed

@@ -101,14 +101,18 @@ The shipped baseline requirements contain the literal Team ID and build
 number; production code never expands an environment variable at runtime.
 Those requirements establish publisher and coarse build identity, but they are
 not exact-artifact authority. Both sides additionally require the matching
-provisional authorization and smoke or production activation context from the
-separately pinned offline Ed25519 root and compare the running self
+root-signed E1/E2 token and canonical `gate_receipt_context_v1` inside an
+authenticated pre-provisional Gate session, or the matching provisional
+authorization and smoke or production activation context in those later modes,
+from the separately pinned offline Ed25519 root and compare the running self
 and connection-bound peer `kSecCodeInfoUnique` / `kSecCodeInfoCdHashes` values
 with its exact per-architecture allowlist. The peer is resolved from the audit
 token with `SecCodeCopyGuestWithAttributes`; PID and filesystem paths are
 diagnostic only. Missing, expired, wrong-domain, wrong-capability,
 wrong-artifact, provisional-only, mismatched-context, or differently signed
 authority objects fail before protocol bytes or registry state are accepted.
+Production, smoke, and post-grant modes reject the Gate context and retained
+Gate authority branch; Gate mode rejects the later-mode contexts.
 
 The root public key, key ID, signature domains, canonical sidecar bytes,
 safe-read rules, and candidate-to-production lifecycle are fixed in
@@ -332,26 +336,39 @@ activation grant, and final context. A pre-grant smoke set instead contains the
 descriptor, signed provisional authorization, signed smoke token, provisional
 context, and smoke receipt context; it contains no grant and any hard-denied
 `in_flight` attempt is moved to the non-reconcilable terminal state
-`activation_smoke_consumed`. Confirmation stores the matching set in the same
+`activation_smoke_consumed`. A pre-provisional E1/E2 Gate set instead contains
+the exact descriptor, signed Gate token, canonical `gate_receipt_context_v1`,
+and complete bounded genesis-to-current registry chain required to derive the
+receipt key; it contains no provisional, smoke, grant, final-context, or
+production authority. Confirmation stores the matching set in the same
 revision CAS that moves `prepared` to `confirmed`. Apply reopens and fully
 revalidates those bytes against the pinned root and current stage context, then
 carries the unchanged set through the atomic `confirmed -> in_flight`
 transition. The copies are binding evidence, never trust roots. Audit may
-reparse either stage type; reconciliation accepts only production/post-grant
-sets for already `in_flight` ordinary work and never accepts a smoke set. The
-verifier applies protocol bounds, verifies the two matching root signatures,
-rebuilds either the descriptor/provisional/smoke-token/context chain or the
-descriptor/provisional/grant/final-context chain and capability, and matches
-its SPKI to an active or retained generation solely to establish historical
-authenticity. That read-only result never authorizes a new network mutation.
+reparse every closed branch; ordinary reconciliation accepts only production/
+post-grant sets for already `in_flight` ordinary work and never accepts a smoke
+or Gate set. Controlled Gate 1B reconciliation accepts its Gate branch only
+under the still-authenticated matching runner/session and only for bounded
+reads. The verifier applies protocol bounds and rebuilds the matching pinned-
+root chain. For Gate, it verifies the signed token/context tuple and replays the
+complete retained registry chain to derive the SPKI; a lone final record or
+caller-selected SPKI cannot authenticate the receipt. For later modes it
+rebuilds either the descriptor/provisional/smoke-token/context or descriptor/
+provisional/grant/final-context chain and capability. A Gate token that expired
+after the recorded live boundary remains historical evidence, but no
+historical result authorizes a new confirmation, permit, send, or network
+mutation.
 
-For apply authorization, the signed receipt's registry revision must equal the
+For production/post-grant apply authorization, the signed receipt's registry revision must equal the
 current complete ledger revision and its generation, SPKI, and fingerprint
 must equal the one current `active` generation. Its authorization-context
 digest must equal the currently active provisional-authorization/activation-
 grant pair. The current status must explicitly permit apply. Any intervening
 registry or activation transition makes a still-confirmed receipt ineligible;
 status/apply cancels the plan rather than falling back to retained authority.
+The controlled Gate 1B apply path enforces the same current-registry checks but
+requires its exact unexpired `gate_receipt_context_v1` and matching E1/E2 runner
+session instead of any provisional/grant pair. Gate 1A remains network-free.
 The single per-user launchd-managed helper admits all authority work through
 one non-reentrant serialized executor. Its guard spans active acquisition,
 the complete leased operation, durable close, and exact-read/delete cleanup;

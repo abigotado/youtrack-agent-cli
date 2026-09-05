@@ -143,14 +143,32 @@ The pinned production requirements are exact, not caller-configurable. Their
 full Developer ID Application expressions and identifiers are frozen in the
 [trust-root ADR](gate1a-trust-root.md#signed-bundle-and-identifiers).
 They are only the coarse publisher/build predicate. Exact authority also
-requires the offline-root-signed descriptor, provisional authorization, and
-matching smoke or production-activation context, plus Security.framework
+requires either the exact offline-root-signed E1/E2 Gate token plus canonical
+`gate_receipt_context_v1` in its authenticated pre-provisional Gate session,
+or the descriptor, provisional authorization, and matching smoke or
+production-activation context for those later modes, plus Security.framework
 validity and a match between the running self and connection-bound peer
 `kSecCodeInfoUnique` / `kSecCodeInfoCdHashes` values and the authorized
 per-architecture set. Both peers exchange and agree on the descriptor digest
 and canonical authorization-context digest before display or signing. A
 descriptor-only, provisional-only, mixed provisional/grant, or smoke/active
-context disagreement fails closed.
+context disagreement fails closed. Production, smoke, and post-grant modes
+reject the Gate context, and a Gate session rejects every later-mode context.
+Gate receipt signing additionally requires the root-signed token to be
+currently unexpired and its Gate ID, plan, target/prerequisite null rules,
+architecture, runner/session, and capability to match exactly.
+
+The schema-3 receipt carries the Gate-context digest in its existing
+`authorization_context_sha256` field. Confirmation retains the artifact-
+authorization protocol's closed `gate_authority_evidence_v1` journal branch,
+including exact descriptor/token/context bytes and the complete bounded
+genesis-to-current registry chain. Historical verification derives the SPKI by
+replaying that chain; it never trusts a lone terminal record or unchecked
+retained key. The same digest is bound directly by receipt, coordinator active,
+and permit and transitively by the closed record's active/permit digests. Gate
+1B historical reconciliation remains read-only and requires the matching Gate
+runner/session connection; later token expiry cannot authorize another
+confirmation, permit, or send.
 
 `TEAM_ID` and positive decimal `RELEASE_BUILD` are required immutable
 operator-supplied build/Gate inputs with no repository defaults. Each peer

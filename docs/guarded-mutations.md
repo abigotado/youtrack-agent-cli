@@ -42,22 +42,34 @@ The activation boundary also requires the exact event-ledger codec in
 capability-specific, offline-root-signed provisional authorization plus
 post-smoke production activation grant from
 [Gate artifact authorization](gate1a-artifact-authorization.md).
+Before provisional authorization exists, the same schema-3 receipt field is
+exercised only inside an authenticated Gate 1A/Gate 1B E1/E2 session. It then
+contains the digest of canonical `gate_receipt_context_v1`, which binds the
+exact root-signed Gate token, Gate ID, descriptor, plan, target/prerequisite
+null rules, architecture, runner/session, and capability. This is controlled
+Gate authority, not production activation; production, smoke, and post-grant
+paths reject the Gate context type.
 4. `mutation apply` validates the receipt signature, expiry, nonce, plan/payload
    and schema hashes, current identity, project policy, and preconditions. It
    additionally requires the signed registry revision, generation, exact SPKI,
    fingerprint, artifact descriptor, authorization-context digest, and
-   authorized capability to equal the current active registry, active grant,
-   and running exact code identities through `confirmed -> in_flight`. The
-   journal atomically persists the exact canonical descriptor, signed
-   provisional authorization, signed activation grant, derived context, and
-   their digests with the receipt before this transition.
+   authorized capability to equal the current active registry, the authority
+   eligible for this closed mode, and running exact code identities through
+   `confirmed -> in_flight`. Production/post-grant uses the exact signed
+   provisional authorization, activation grant, and final context; Gate 1B
+   uses the exact unexpired E1/E2 token, Gate context, authenticated runner/session,
+   and complete registry chain; activation smoke uses its existing signed
+   provisional/smoke-token and smoke-context branch. The journal atomically
+   persists the matching complete `authority_evidence` branch and its exact
+   canonical bytes/digests with the receipt before this transition. Branches
+   are mutually exclusive and cannot supply missing fields for one another.
    Before reading mutable authority it enters the sole launchd-managed
    helper's serialized authority executor, takes its guard, and acquires the
    helper-owned fixed-active Keychain coordinator also used by every
    enrollment/rotation/revocation/recovery commit. The guard remains held
    through close and exact-read/delete cleanup. While holding that guard and
    coordinator, the helper revalidates the complete
-   registry, the final context, and trusted current time strictly before the
+   registry, the applicable context, and trusted current time strictly before the
    descriptor's `helper_profile_expires_at`. Only after the durable
    `confirmed -> in_flight` CAS may it create one permit bound to the exact
    request bytes. It holds the coordinator through that one send, durable
@@ -88,7 +100,12 @@ post-smoke production activation grant from
    the persisted historical receipt, exact authority sidecars, root signatures,
    descriptor/grant hash chain, context, and capability but does not require
    that authority to remain active. It may establish a unique applied result;
-   otherwise it records `operator_resolution_required`.
+   otherwise it records `operator_resolution_required`. In the controlled Gate
+   1B path, the equivalent validation uses the retained signed Gate token,
+   canonical Gate context, and complete registry chain under the still-
+   authenticated matching Gate runner session. Token expiry after the recorded
+   live boundary does not erase that historical chain, but it cannot authorize
+   another confirmation, permit, or send.
 
 When execution is enabled, normal terminal states are `reconciled`, `failed_before_mutation`, and
 `operator_resolution_required`. A timeout, reset, malformed/truncated response,
@@ -108,9 +125,16 @@ exactly `2`, `revision`, `state`, `plan`, `receipt`, `authority_evidence`,
 present as null rather than omitted. Existing plan, receipt, outcome, and
 evidence values retain their bounded codecs. `authority_evidence` is null only
 for `prepared` and v2 `canceled`/`expired` records reached before authority
-acquisition; otherwise it is the exact
-descriptor/provisional/grant/final-context/registry evidence object required
-by the Gate contract.
+acquisition; otherwise it is exactly one closed branch. `production`,
+`post_grant_verification`, and `activation_smoke` retain their existing
+descriptor/provisional/stage-token-or-grant/context/registry evidence. `gate`
+is the bounded canonical `gate_authority_evidence_v1` object from the artifact-
+authorization protocol: it retains exact descriptor, root-signed E1/E2 token,
+Gate receipt-context, and complete genesis-to-current registry-chain bytes plus
+every digest needed to reconstruct the receipt verification key. It contains
+no provisional authorization, smoke token, activation grant, final-production
+context, or production authority. A lone final registry record or unchecked
+retained SPKI cannot satisfy this branch.
 
 `coordinator_evidence` is null before acquisition or one compact canonical
 object with fields `schema_version` integer `1`, `lease_id`,

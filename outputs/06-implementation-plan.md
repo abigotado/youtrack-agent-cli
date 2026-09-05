@@ -16,6 +16,10 @@ The trust and activation dependencies are now fixed:
 2. Implement full durable receipt verification and two-phase confirmation behind
    dependency injection while the current repository remains
    `approval.Unsupported`.
+   Bind E1/E2 receipts to their canonical Gate context and retained signed-token
+   authority branch so the unpublished candidate can exercise the same v3
+   receipt protocol before provisional authorization exists. Reject Gate
+   contexts from production, smoke, and post-grant authority paths.
 3. Implement the signed native helper, OS-protected approval-key registry,
    bounded Go client, and non-distributed operator runner. Keep the fresh-
    `LAContext` UI-allow signing lookup separate from UI-fail/no-context

@@ -693,8 +693,13 @@ in this order: `schema_version`, `record_type` exactly
 `registry_revision`, `plan_id`, `journal_revision`, `registry_intent_sha256`,
 `created_at`, and `expires_at`. The session ID is unpadded base64url of 32
 fresh random bytes. The CLI digest is required for both operation kinds.
-Apply requires final production context, registry revision, plan, and journal
-revision and sets registry intent null. Registry commit requires the pre-read
+Apply requires the exact context eligible for its closed mode—canonical
+`gate_receipt_context_v1` only in the matching authenticated Gate E1/E2
+session, the smoke receipt context only in activation smoke, or the grant-bound
+final context only in production/post-grant verification—plus registry
+revision, plan, and journal revision, and sets registry intent null. Production,
+smoke, and post-grant modes reject the Gate context before active acquisition.
+Registry commit requires the pre-read
 registry-intent digest and sets context, registry revision, plan, and journal
 revision null. Its eventual request/proposal/candidate is constructed and
 validated later while the lease is held and must repeat the intent's
@@ -747,6 +752,16 @@ and fencing records and are never deleted in the first release; reaching
 either 256-record bound blocks writes and registry ceremonies pending a new
 reviewed protocol.
 
+For an apply, the schema-3 receipt, active record, permit, and closed record
+form one context chain. The receipt, active, and permit repeat the identical
+`authorization_context_sha256`; the permit binds `active_sha256`, and the
+closed record binds that same active digest plus the permit digest when a
+permit exists. In Gate mode that context digest reconstructs the exact
+root-signed E1/E2 token tuple through the journal's closed
+`gate_authority_evidence_v1` branch. A changed/missing link, cross-mode context,
+or linked object whose bytes reconstruct another Gate token/session is
+corruption, never authority.
+
 The active, permit, and closed digests are SHA-256 of their respective domain
 followed by their exact canonical bytes. Active, permit, registry-revision, and
 each normal-path closed add are one-shot. After their success, error,
@@ -771,7 +786,8 @@ The uninterrupted apply order is exact:
    acquisition, not send authority.
 2. While retaining the same authenticated connection and excluding every
    registry commit, it replays the complete ledger, validates the unexpired
-   helper profile and final authorization pair/context, and checks the receipt,
+   helper profile and applicable live authority/context (the exact root-signed
+   Gate token/context in Gate mode or the existing stage/production chain), and checks the receipt,
    project policy, credential binding, preconditions, plan, and journal
    revision. Expiry or another definitive failure after acquisition but before
    permit closes `failed_before_mutation`, burns the receipt, and sends zero
@@ -1502,6 +1518,19 @@ revision read, then closed as committed with
 remains ambiguous and read-only reconciliation is required. A process exit,
 timeout, connection reset, invalid response, stale fence, or cleanup failure
 never authorizes a second permit or network retry.
+
+For that Gate 1B read-only remote reconciliation, the exact CLI must still be
+operating under the connection-authenticated runner and `gate_session_id`
+bound by the retained `gate_receipt_context_v1`; CLI and runner keep their
+distinct pinned code identities. It loads the journal's exact descriptor, signed Gate
+token, context, receipt, and complete genesis-to-current registry chain,
+recomputes every digest, verifies the root signature and historical live-time
+checks, derives the receipt key only by full chain replay, and verifies the
+active/permit/closed linkage. A token that expired after the recorded permit/
+send remains valid historical evidence for those bounded reads, but never for
+a new active acquisition, permit, send, or registry commit. A lone terminal
+record, retained SPKI without chain derivation, different runner/session, or
+cross-mode context fails closed.
 
 ### Future authority commands and machine errors
 

@@ -1489,6 +1489,92 @@ and E2 evidence validate. The ordinary provisional/grant path rejects all Gate
 token types and domains. The release binary contains no environment switch
 that converts a Gate token into production authority.
 
+### Gate receipt authorization context and retained authority
+
+Before provisional authorization exists, either Gate suite may exercise the
+ordinary schema-3 confirmation path inside its exact authenticated E1 or E2
+runner session. Both peers derive one compact canonical object capped at 4,096
+bytes with fields, in order:
+
+1. `schema_version`, integer `1`
+2. `context_type`, exactly `gate_receipt_context_v1`
+3. `gate_token_type`, exactly `gate_e1` or `gate_e2`
+4. `gate_token_sha256`, SHA-256 of the exact root-signed Gate token bytes
+5. `gate_id`, exactly `gate1a` or `gate1b`
+6. `descriptor_sha256`
+7. `gate_plan_sha256`
+8. `gate_target_sha256`, null for Gate 1A and exactly the Gate token value for
+   Gate 1B
+9. `prerequisite_gate1a_e2_evidence_set_sha256`, null for Gate 1A and exactly
+   the Gate token value for Gate 1B
+10. `architecture`
+11. `gate_runner_unique`
+12. `gate_session_id`
+13. `allowed_capability`, exactly `confirm_only` for Gate 1A or
+    `issue_create_gate` for Gate 1B
+
+Every value must exactly equal the descriptor, Gate plan, and signed Gate
+token; no field is caller-selected or inferred across tokens. The token digest
+is the sole token identifier. `gate_receipt_context_sha256` is plain SHA-256
+over these exact canonical bytes, with no domain prefix. A Gate schema-3
+receipt places this digest in its existing `authorization_context_sha256`
+field. The distinct `context_type` makes this context ineligible for
+production, activation smoke, and post-grant verification; those modes reject
+it before profile, registry, journal, or network access. Conversely, a Gate
+session rejects provisional, smoke, and final-production receipt contexts.
+
+Confirmation atomically retains one closed canonical Gate branch in journal
+v2 `authority_evidence`, capped at 1,572,864 bytes. Its fields are, in order,
+`schema_version` integer `1`, `evidence_type` exactly
+`gate_authority_evidence_v1`, `descriptor_bytes_base64url`,
+`descriptor_sha256`, `gate_token_type`, `gate_token_bytes_base64url`,
+`gate_token_sha256`, `gate_receipt_context_bytes_base64url`,
+`gate_receipt_context_sha256`, `gate_id`, `gate_plan_sha256`,
+`gate_target_sha256`, `prerequisite_gate1a_e2_evidence_set_sha256`,
+`architecture`, `gate_runner_unique`, `gate_session_id`,
+`allowed_capability`, `registry_chain_records_base64url`,
+`registry_chain_sha256`, `registry_revision`, `key_generation`,
+`verification_spki_der_b64u`, and `signing_key_fingerprint_sha256`.
+The first three byte fields are unpadded base64url of the exact canonical
+descriptor, exact root-signed Gate token, and exact unsigned Gate
+receipt-context bytes. `registry_chain_records_base64url` is the ordered array
+of unpadded-base64url exact canonical registry records for every revision from
+1 through `registry_revision`, under the existing 256-record and 1,114,112-byte
+decoded aggregate bounds. `registry_chain_sha256` is plain SHA-256 of the exact
+compact canonical JSON bytes of that complete array. Every
+digest is recomputed, every duplicate binding matches the receipt and active
+registry generation, and all null rules are the context rules above. This
+branch contains no provisional authorization, activation-smoke token,
+production activation grant, smoke/final context, or production authority.
+
+The retained exact bytes make the historical chain reconstructible:
+verification re-encodes the descriptor and context, verifies the Gate token
+under its exact E1/E2 signature domain and pinned root, recomputes every digest,
+checks the token/context/session/capability tuple, then replays and verifies the
+entire retained genesis-to-current registry chain under the registry protocol.
+Only the active generation derived by that replay may select the verification
+SPKI/fingerprint; a caller-supplied or lone terminal-record SPKI is never
+accepted. The verifier then verifies the receipt signature and matches its
+revision, generation, and `authorization_context_sha256`. Live confirmation, coordinator acquisition,
+permit, and send require the Gate token to be currently unexpired and the same
+Gate runner connection to remain authenticated. Historical validation instead
+proves that the token was valid at the recorded live boundaries; later expiry
+does not erase an already `in_flight` chain. It never renews authority or
+permits another confirmation, permit, or send. Gate 1B may use that retained
+chain only for bounded read-only reconciliation while the current connection
+is still authenticated as the same Gate runner/session.
+
+For a Gate apply, the receipt, coordinator active record, permit, and closed
+record all bind this same context digest: the receipt and active/permit carry
+`authorization_context_sha256` directly, while the closed record carries the
+exact active and permit digests. Rebuilding either linked object proves the
+same Gate token/context tuple. A missing link, changed context or token digest,
+cross-Gate/cross-E1/E2/cross-session substitution, or a closed record whose
+linked active/permit bytes do not reconstruct that tuple is invalid. Gate 1A
+records the same closed journal authority branch for its confirmation cases;
+its network policy remains `none` and the context adds no apply/send
+capability.
+
 ### Gate 1B first exact-artifact enrollment
 
 Each Gate 1B E1 or E2 run begins with
@@ -1564,11 +1650,13 @@ Gate 1B has no item-attributed cleanup authority:
 requires. On success, failure, timeout, or partial enrollment, the trusted
 runner destroys or reverts the whole disposable host at the stage boundary.
 It never derives the activation-smoke/post-grant cleanup context and never
-performs a per-item production Keychain or journal delete. A reset whose
-completion is not independently proved invalidates every output from that
-run. E1 and E2 therefore each execute this setup from a separate proved-empty
-host; the E1 snapshot is evidence input to E2 authorization but no E1 mutable
-state is carried into the E2 run.
+performs a per-item production Keychain or journal delete. Host
+destruction/revert is a trusted supervisor lifecycle duty outside signed Gate
+pass evidence; the Gate makes no destruction attestation. Every failed run remains
+invalid, and the next E1/E2 run independently proves its own canonical empty
+start. E1 and E2 therefore each execute this setup from a separate clean host;
+the E1 snapshot is evidence input to E2 authorization but no E1 mutable state
+is carried into the E2 run.
 
 ## Gate evidence codec
 
@@ -2108,9 +2196,12 @@ Receipt schema 3 adds `authorization_context_sha256` immediately after
 `registry_revision` to the unsigned and signed receipt contract. Because v3 is
 not implemented or shipped, this is part of its required pre-Gate delta rather
 than a new schema version. Production confirmation and apply require it to
-equal the final production authorization-context digest. The distinct smoke
-context and every earlier schema are ineligible. This delta must be frozen in
-the approval-protocol vectors before Gate begins.
+equal the final production authorization-context digest. Before provisional
+authorization, an exact authenticated Gate E1/E2 session instead requires its
+`gate_receipt_context_sha256`; this is Gate execution, not production
+authority. The distinct smoke context, Gate context on a non-Gate path, and
+every earlier schema are ineligible. This delta must be frozen in the approval-
+protocol vectors before Gate begins.
 
 The closed capability matrix is:
 
@@ -2522,6 +2613,12 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
   complete evidence-set manifests, including Gate 1B E1- and E2-bound setup
   contexts, empty pre-enrollment inventories, immutable baseline registry
   snapshots, and their exact index/evidence-set tuple projections;
+- all four Gate 1A/Gate 1B by E1/E2
+  `gate_receipt_context_v1` objects and digests, matching schema-3 receipts,
+  complete `gate_authority_evidence_v1` journal branches with retained
+  descriptor/token/context bytes and genesis-to-current registry chains, and
+  the context-bound active/permit/closed linkage plus Gate 1B historical
+  read-only reconciliation;
 - every exact Security.framework key/registry/coordinator dictionary
   projection, coordinator active/permit/closed record, apply-first and
   registry-first linearization, and pre/post-permit restart outcome;
@@ -2585,6 +2682,21 @@ independently covers:
   architecture, plan, target, capability, or network policy, plus
   E1/E2/smoke/post-grant replay, session reuse, evidence predecessor mismatch,
   missing architecture, and incomplete evidence set;
+- missing, oversized, noncanonical, or changed `gate_receipt_context_v1`;
+  wrong Gate token type/digest, Gate ID, descriptor, plan, target/prerequisite
+  null rule, architecture, runner, session, or capability; Gate 1A/1B,
+  E1/E2, production, smoke, or post-grant context substitution; a live expired
+  Gate token accepted for confirmation, acquisition, permit, or send; an old
+  Gate context used for a new confirmation/permit/send; historical Gate 1B
+  reconciliation without the still-authenticated matching runner session; or
+  rejection solely because the retained token expired after the recorded live
+  authority boundary;
+- missing, oversized, noncanonical, mixed, or digest-only Gate
+  `authority_evidence`; any provisional/smoke/grant/final-production object in
+  its Gate branch; omitted/reordered/forked/gapped registry-chain records;
+  terminal-record-only validation, unchecked SPKI self-selection, receipt/
+  context/active/permit/closed link disagreement, or historical validation
+  that creates live authority;
 - unknown/reordered Gate case, step, typed argv source, fixture, assertion, or
   transcript; shell/cwd/env/stdin inheritance; prepare/confirm/apply reorder;
   dynamic-value injection; observation omission/addition/reorder; and command-
@@ -2665,8 +2777,9 @@ independently covers:
   permit, or network action under setup authority;
 - non-null Gate 1B cleanup policy or cleanup evidence field; a Gate 1B cleanup
   context, cleanup intent, attributed per-item delete, or `stage_cleanup` IPC
-  operation; failure to prove whole-host destroy/revert after any Gate 1B run;
-  or accepting any output from an uncertain Gate 1B reset;
+  operation; treating supervisor destruction/revert as signed Gate evidence;
+  accepting output from a failed Gate 1B run; or a later E1/E2 run that does
+  not independently prove its own empty start;
 - missing, expired, unsigned, cross-stage, cross-architecture, cross-capability,
   cross-runner, or cross-session cleanup authority; cleanup-context/token/
   descriptor/setup-snapshot disagreement; a setup or cleanup context used to
@@ -2733,6 +2846,13 @@ invalidates prior E1/E2 evidence.
   content-addressed. Any case, workflow step, runner, typed argv source,
   fixture, assertion, transcript, entitlement expectation, or command change
   produces a new plan digest and invalidates its tokens and evidence sets.
+- Every Gate 1A/Gate 1B E1/E2 receipt binds the exact token-derived
+  `gate_receipt_context_v1` through the existing schema-3 context field and a
+  closed retained Gate authority branch. Live authority requires the unexpired
+  token and authenticated matching runner session; historical verification
+  replays the retained root and complete registry chain but can authorize only
+  Gate 1B bounded reads, never a new confirmation, permit, or send. Production,
+  smoke, and post-grant modes reject the Gate context and evidence branch.
 - Gate 1A exact-artifact cases use the normal confirmation and registry
   lifecycle commands; its five destructive corruption/malformed-ledger/
   ambiguous-add/orphan-cleanup/active-key-loss cases use only the separately
@@ -2751,8 +2871,9 @@ invalidates prior E1/E2 evidence.
   revision-1/generation-1 snapshot is immutable baseline provenance in every
   later observation and both index layers; later ordinary-authority registry
   transitions record their own current state without replacing that baseline.
-  Gate 1B has no attributed cleanup authority and ends by proved whole-host
-  destroy/revert; E1 state is never inherited by E2.
+  Gate 1B has no attributed cleanup authority; whole-host destroy/revert is an
+  out-of-band supervisor lifecycle duty, not signed pass evidence, and the next
+  run independently proves empty start. E1 state is never inherited by E2.
 - Every activation-smoke and post-grant capability plan begins with exactly one
   setup-only exact-artifact enrollment from a canonical empty five-domain
   inventory. Its retained revision-1/generation-1 registry snapshot binds

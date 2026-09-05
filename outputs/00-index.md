@@ -24,7 +24,10 @@ expiry matrix, and a closed 26-case Gate 1B with its own token-bound enrollment
 on each fresh E1/E2 host and deterministic schedules through
 enrollment, close, active-delete ambiguity, and a
 competing-acquisition ABA attempt between equality read and delete. Future
-activation-smoke/post-grant plans are setup-first (5/6 and 6/6 cases by
+E1/E2 receipts bind a separate Gate context and retained Gate authority set,
+so confirmation is testable before provisional authorization. These receipts
+are rejected by every non-Gate authority path.
+Activation-smoke/post-grant plans are setup-first (5/6 and 6/6 cases by
 capability), bind a retained empty-inventory enrollment snapshot through all
 later evidence, finish with an empty-inventory cleanup proof, and accept case
 assertions only in a final runner observation after every transcript result.
