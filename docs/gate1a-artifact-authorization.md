@@ -85,7 +85,7 @@ base64url of exactly 32 bytes (43 characters). Gate plans are capped at their
 object-specific limits below and target objects at 4,096 bytes; their
 identifiers are SHA-256 of their exact canonical bytes. An evidence index
 contains 1..256 observations and references
-at most 1,024 regular files, each at most 8 MiB and at most 256 MiB in
+at most 4,096 regular files, each at most 8 MiB and at most 256 MiB in
 aggregate. All counts and byte caps are checked before proportional allocation
 or file reads.
 
@@ -612,9 +612,9 @@ different code digest satisfy a valid signed authorization.
 
 ## Canonical Gate, smoke, and post-grant plans
 
-A Gate plan is data, never a script. Gate 1A and Gate 1B plans are each capped
-at 65,536 bytes; activation-smoke and post-grant-verification plans are each
-capped at 32,768 bytes. Their
+A Gate plan is data, never a script. Each of the six Gate 1A, Gate 1B,
+capability-specific activation-smoke, and capability-specific post-grant-
+verification plans is capped at 1,048,576 bytes (1 MiB). Their
 compact canonical fields are, in order:
 
 1. `schema_version`, integer `1`
@@ -734,8 +734,11 @@ caller value.
 
 ### Fixture, executable, assertion, and transcript manifests
 
-The fixture, assertion, and transcript sets are compact canonical JSON, each
-capped at 65,536 bytes with 1..256 entries and no extensions. A fixture-set manifest has fields
+The fixture and assertion sets are compact canonical JSON, each capped at
+65,536 bytes with 1..256 entries and no extensions. The transcript set is
+compact canonical JSON capped at 1,048,576 bytes (1 MiB) with 1..2,048 entries
+and no extensions. These are independent byte and entry caps, not substitutes
+for the exact membership requirements below. A fixture-set manifest has fields
 `schema_version` integer `1`, `manifest_type` exactly `fixture_set`, and
 `entries`, in that order. Each entry has `fixture_id`, `fixture_kind`,
 `content_sha256`, `size`, and `mode`, in that order. Kind is exactly
@@ -817,7 +820,8 @@ redaction policy is exactly `reject_secret_then_hash`. A detected credential,
 token, private key, or unredacted secret fails the run instead of being
 replaced.
 
-A command-contract manifest is compact canonical JSON capped at 131,072 bytes.
+A command-contract manifest is compact canonical JSON capped at 1,048,576
+bytes (1 MiB), for each of the six plan types/capabilities.
 Its fields are `schema_version` integer `1`, `manifest_type` exactly
 `command_contract`, `plan_type`, `approved_capability`,
 `fixture_executable_manifest_sha256`, `entries`, and `case_evaluations`, in
@@ -879,6 +883,47 @@ requires every operation and final-evaluation reference to resolve with the
 declared kind and evaluator.
 An unreferenced manifest entry or a referenced ID absent from the plan is
 invalid.
+
+The fixed case tables below derive the following exact cardinalities for each
+complete plan, command contract, transcript set, assertion set, and passing
+per-architecture evidence index. Every operation contributes one observation;
+every case contributes one additional final-evaluation observation, with its
+own stdout and stderr transcript IDs. Additional transcript kinds apply to
+each operation exactly as declared in its case row. These counts are equality
+requirements, not maxima that permit omitted cases or additional authority.
+
+| Plan/capability | Cases / final evaluations | Operations | Observations | Transcript entries | Assertion entries |
+| --- | --- | --- | --- | --- | --- |
+| Gate 1A | 23 | 78 | 101 | 381 | 69 |
+| Gate 1B | 26 | 164 | 190 | 1,039 | 127 |
+| Activation smoke / confirm-only | 5 | 14 | 19 | 66 | 20 |
+| Activation smoke / issue-create | 6 | 17 | 23 | 90 | 22 |
+| Post-grant / confirm-only | 6 | 13 | 19 | 67 | 21 |
+| Post-grant / issue-create | 6 | 14 | 20 | 80 | 22 |
+
+The longest derived transcript ID in these fixed tables is 121 ASCII bytes,
+within the unchanged 128-byte ID limit. Gate 1B alone requires 1,039 transcript
+entries and 380 per-observation result manifests before other referenced
+evidence files; it must not inherit the fixture/assertion entry cap or the
+post-grant-only install-manifest file cap. All six evidence-index codecs use
+the same independent 1 MiB object, 256-observation, 4,096-referenced-file,
+8 MiB-per-file, and 256 MiB-aggregate limits. Exact membership and ordering
+remain mandatory within those limits. Per-observation assertion-result and
+transcript-result manifests retain their separate 32,768-byte caps.
+
+Before freezing any of the six literal command-contract digests, the compiler
+must materialize and validate every complete checked-in canonical manifest
+and plan, including all typed arguments and resolved ID references, against
+both its byte and entry budgets. It must also construct each complete
+evidence-index/result-manifest skeleton with the maximum encoded lengths of
+its permitted runtime fields, enumerate the complete referenced-file closure,
+and verify object, count, per-file, and aggregate budgets using checked
+arithmetic. This includes the separately scoped post-grant install manifest
+across all declared architectures. No digest may be frozen if any budget is
+exceeded; cardinalities alone do not prove byte-size feasibility. The budget
+report is conformance evidence, not runtime authority or permission to weaken
+an object limit. Runtime decoding checks caps before proportional allocation,
+parsing, or referenced-file reads even for a pinned digest.
 
 There are no optional fields, user extensions, ignored metadata, default
 steps, or wildcard case IDs. `evidence_scope` is exactly `exact_artifact` or
@@ -1672,7 +1717,8 @@ is carried into the E2 run.
 ## Gate evidence codec
 
 Each Gate run writes immutable content-addressed files and one compact
-canonical evidence index. The index is capped at 65,536 bytes. Its fields are:
+canonical evidence index. The index is capped at 1,048,576 bytes (1 MiB).
+Its fields are:
 
 1. `schema_version`, integer `1`
 2. `evidence_type`, exactly `gate_e1_pass` or `gate_e2_pass`
@@ -2117,8 +2163,9 @@ proves the journal/session root empty. A copied sidecar, plan, receipt, socket,
 loopback account, registry item, coordinator item, key, or journal file makes
 the final inventory nonempty and invalidates the complete smoke set.
 
-Each architecture produces a canonical smoke evidence index capped at 65,536
-bytes with these fields in order: `schema_version` integer `1`, `evidence_type`
+Each architecture produces a canonical smoke evidence index capped at
+1,048,576 bytes (1 MiB) with these fields in order: `schema_version` integer
+`1`, `evidence_type`
 exactly `activation_smoke_pass`, `gate_id` exactly `activation_smoke`,
 `descriptor_sha256`, `gate_token_sha256`, `gate_plan_sha256`,
 `gate_target_sha256` null, `allowed_capability`,
@@ -2405,7 +2452,7 @@ This object is a final absence projection of the completed
 `stage_cleanup_keychain` evidence, not an independent deletion instruction.
 
 Each architecture emits a compact canonical post-grant evidence index capped
-at 65,536 bytes with these fields in exact order:
+at 1,048,576 bytes (1 MiB) with these fields in exact order:
 
 1. `schema_version`, integer `1`
 2. `evidence_type`, exactly `post_grant_verification_pass`
@@ -2617,6 +2664,10 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
   capability-specific post-grant plans, including every typed argv source,
   scope mapping, canonical operation execution context, empty operation
   assertion array, case-final evaluation contract, and ordered final aggregate;
+- all six complete command contracts and their fixture/assertion/transcript
+  manifests, exact cardinalities from the normative table, maximum-length
+  evidence skeletons and complete referenced-file closures, with canonical
+  byte/count/file budget reports accepted before their digests are frozen;
 - the complete Gate 1A fixture-executable manifest with both disjoint fixture
   roles, both negative-peer components, and every architecture-specific signed
   identity/code slice;
@@ -2669,6 +2720,13 @@ independently covers:
 - every object and field size boundary; missing, duplicate, unknown, reordered,
   escaped, whitespace-modified, noncanonical integer/null/base64url, and
   trailing JSON;
+- byte, entry, observation, referenced-file, per-file, and aggregate caps at
+  limit-minus-one, limit, and limit-plus-one, subject independently to exact
+  membership; checked-count/size addition overflow; truncation or extra entries
+  relative to each of the six fixed cardinality rows; and rejection of an
+  oversized object before parsing/proportional allocation or an oversized
+  referenced-file closure before file reads, including a correctly hashed
+  but over-budget candidate at compile time;
 - wrong root key ID, public key, signature, domain, object type, descriptor, or
   payload digest, including cross-domain signature substitution;
 - absent, duplicate, reordered, unsupported, or mismatched architecture,

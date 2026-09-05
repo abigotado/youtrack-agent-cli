@@ -40,9 +40,19 @@ out-of-order fields; a non-object top level; alternate number, string, or null
 encodings; and trailing data. After validation, the decoder re-encodes the
 value and requires byte-for-byte equality with the input.
 
-All string values are printable ASCII and contain no JSON escape. JSON
-integers are base-10 digits with no sign and no leading zero, except the value
-zero itself. Nullable fields are exactly JSON `null`, never an empty string.
+All string values are printable ASCII and contain no JSON escape. Except for
+fields explicitly typed `OSStatus`, JSON integers are base-10 digits with no
+sign and no leading zero, except the value zero itself. An `OSStatus` is a
+canonical signed 32-bit JSON integer in `-2147483648..2147483647`, with token
+grammar `^(0|[1-9][0-9]*|-[1-9][0-9]*)$` and an independent range check before
+conversion. Positive values have no plus sign; negative zero, leading zeros,
+fractions, exponents, strings, and overflow are invalid. This exception applies
+only to explicitly declared Security.framework status values, including the
+operation result's `pre_read_status`, `delete_status`, and `post_read_status`;
+it does not widen revisions, counts, sizes, enum-valued status fields, or any
+other integer. A nullable status is null only in the exact field-shape rows
+below; absence is the numeric `-25300`, not null. Nullable fields are exactly
+JSON `null`, never an empty string.
 Booleans are exactly `true` or `false`. Core registry and coordinator authority
 objects have no arrays or nested objects. The separately named stage-cleanup
 intent, progress, ACK-ledger, and evidence objects are bounded artifact containers and use
@@ -56,6 +66,7 @@ The common grammar is:
 | `schema_version` | JSON integer `1` |
 | transition | one of `enroll`, `rotate`, `revoke`, `recover` |
 | revision | JSON integer `0..256`; stored records use `1..256` |
+| OSStatus | canonical signed int32 JSON integer; grammar and range above |
 | digest | 64 lowercase hexadecimal characters |
 | empty predecessor | 64 ASCII `0` characters |
 | challenge | unpadded RFC 4648 base64url of exactly 32 bytes; 43 characters; decode/re-encode equality required |
@@ -1708,7 +1719,17 @@ domain-prefixed signing input, every digest, predecessor chain, DER SPKIs, and
 strict low-S signatures. At least one vector must form a multi-event chain
 `enroll -> rotate -> revoke -> recover` and derive the exact final state.
 Another positive vector covers recovery from an active valid ledger after the
-exact `errSecItemNotFound:-25300` result.
+exact `errSecItemNotFound:-25300` result. Both Go and Swift must decode and
+byte-for-byte re-encode status codec vectors for `-2147483648`, `-25300`, `-1`,
+`0`, `1`, and `2147483647`. Signed-range acceptance does not classify an unknown
+status as success: complete operation-result vectors still require its exact
+failure or quarantine field-shape row. Negative vectors reject `-2147483649`,
+`2147483648`, `-0`, `+1`, `01`, `-01`, `1.0`, `1e0`, and string-valued statuses;
+they also reject negative integers in every non-OSStatus integer field.
+Nullable-status vectors cover every allowed and forbidden null placement in
+the operation-result table, including refusal to substitute null for the
+numeric absence status. Neither implementation may parse through a floating
+point value or an unchecked narrowing conversion.
 
 The same fixture directory contains language-neutral serialized projections
 for every exact key-generation, signing-key lookup with a fresh zero-reuse
