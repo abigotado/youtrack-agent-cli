@@ -551,9 +551,11 @@ current time to be strictly earlier. Evidence captured before expiry
 cannot authorize an operation at or after it.
 
 The sole exception is launch/peer authentication into an explicitly
-recovery-only helper session for bounded startup/status classification. If no
-unresolved active record exists, it returns `authority_status=clear` with the
-expired profile field and closes.
+recovery-only helper session for bounded startup/status classification. If the
+profile is expired and no active record exists, it returns
+`HELPER_PROFILE_EXPIRED` with exit 12, never successful `authority_status=clear`,
+and closes. Successful post-expiry status requires a validated already-closed
+active record and advertises only its restricted cleanup path.
 Recovery-only classification continues only for the same exact descriptor and
 retained evidence. An unclosed active record remains quarantined with no
 mutations. A valid already-closed record permits only exact persistent-reference
