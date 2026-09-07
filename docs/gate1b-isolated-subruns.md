@@ -11,6 +11,16 @@ have to exist before their own correctly scoped test tokens can be issued.
 `approval.Unsupported` remains the production adapter. Nothing here authorizes
 installation, signing, provisioning, a live test, or a production mutation.
 
+Implementation prerequisite: the Go `internal/gatecontract` and Swift
+`ApprovalProtocol.IsolatedBinding` codecs implement only the canonical local
+wire shape of `gate1b_isolated_binding_v1`, with shared vectors under
+`testdata/gate1b-isolated-binding`. Parsing or hashing a binding does not
+resolve its references or prove their types, authenticity, semantic agreement,
+freshness, or authority. Recursive closure verification, the materialized
+inventory/compiler, and native Gate execution remain unimplemented. The
+segment-contract codec is also deferred pending an explicit decision on its
+counter domains; this prerequisite does not define those domains.
+
 ## Scope and precedence
 
 Gate 1B runs independent, root-authorized **units**, not a resettable suite.
