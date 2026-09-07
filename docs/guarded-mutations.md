@@ -43,10 +43,12 @@ capability-specific, offline-root-signed provisional authorization plus
 post-smoke production activation grant from
 [Gate artifact authorization](gate1a-artifact-authorization.md).
 Before provisional authorization exists, the same schema-3 receipt field is
-exercised only inside an authenticated Gate 1A/Gate 1B E1/E2 session. It then
-contains the digest of canonical `gate_receipt_context_v1`, which binds the
-exact root-signed Gate token, Gate ID, descriptor, plan, target/prerequisite
-null rules, architecture, runner/session, and capability. This is controlled
+exercised only inside an authenticated Gate session. Gate 1A uses canonical
+`gate_receipt_context_v1`; Gate 1B uses
+`gate1b_isolated_receipt_context_v1` from
+[isolated subruns](gate1b-isolated-subruns.md), binding its exact root-signed
+unit token, inventory, unit, host/target allocation, pass, architecture,
+runner/session and prerequisites. Old single-suite Gate 1B context is rejected. This is controlled
 Gate authority, not production activation; production, smoke, and post-grant
 paths reject the Gate context type.
 4. `mutation apply` validates the receipt signature, expiry, nonce, plan/payload
@@ -57,7 +59,7 @@ paths reject the Gate context type.
    eligible for this closed mode, and running exact code identities through
    `confirmed -> in_flight`. Production/post-grant uses the exact signed
    provisional authorization, activation grant, and final context; Gate 1B
-   uses the exact unexpired E1/E2 token, Gate context, authenticated runner/session,
+   uses the exact unexpired isolated-unit token, unit context, authenticated runner/session,
    and complete registry chain; activation smoke uses its existing signed
    provisional/smoke-token and smoke-context branch. The journal atomically
    persists the matching complete `authority_evidence` branch and its exact
@@ -115,11 +117,12 @@ paths reject the Gate context type.
    is quarantined, even a unique remote match is a transient report only:
    no journal CAS, close add, active deletion, signing, permit, or replay is
    allowed. In the controlled Gate
-   1B path, the equivalent validation uses the retained signed Gate token,
+   1B path, the equivalent validation uses the retained signed isolated-unit token,
    canonical Gate context, and complete registry chain under the still-
    authenticated matching Gate runner session. Token expiry after the recorded
    live boundary does not erase that historical chain, but it cannot authorize
-   another confirmation, permit, or send.
+   another confirmation, permit, or send. A separate reboot observer may only
+   collect local quarantine evidence and export; it cannot reconcile remotely.
 
 When execution is enabled, normal terminal states are `reconciled`, `failed_before_mutation`, and
 `operator_resolution_required`. A timeout, reset, malformed/truncated response,
@@ -145,9 +148,12 @@ evidence values retain their bounded codecs. `authority_evidence` is null only
 for `prepared` and v2 `canceled`/`expired` records reached before authority
 acquisition; otherwise it is exactly one closed branch. `production`,
 `post_grant_verification`, and `activation_smoke` retain their existing
-descriptor/provisional/stage-token-or-grant/context/registry evidence. `gate`
-is the bounded canonical `gate_authority_evidence_v1` object from the artifact-
-authorization protocol: it retains exact descriptor, root-signed E1/E2 token,
+descriptor/provisional/stage-token-or-grant/context/registry evidence. The Gate
+branch is discriminated by its exact object type: Gate 1A uses
+`gate_authority_evidence_v1` from the artifact protocol; Gate 1B uses
+`gate1b_isolated_authority_evidence_v1` and its additional unit/host/target
+bindings from the isolated-subrun ADR. Each retains exact descriptor and its
+applicable root-signed token,
 Gate receipt-context, and complete genesis-to-current registry-chain bytes plus
 every digest needed to reconstruct the receipt verification key. It contains
 no provisional authorization, smoke token, activation grant, final-production

@@ -646,8 +646,9 @@ in this order: `schema_version`, `record_type` exactly
 `created_at`, and `expires_at`. The session ID is unpadded base64url of 32
 fresh random bytes. The CLI digest is required for both operation kinds.
 Apply requires the exact context eligible for its closed mode—canonical
-`gate_receipt_context_v1` only in the matching authenticated Gate E1/E2
-session, the smoke receipt context only in activation smoke, or the grant-bound
+`gate1b_isolated_receipt_context_v1` only in its authenticated Gate 1B unit
+session under [isolated subruns](gate1b-isolated-subruns.md), the smoke receipt
+context only in activation smoke, or the grant-bound
 final context only in production/post-grant verification—plus registry
 revision, plan, and journal revision, and sets registry intent null. Production,
 smoke, and post-grant modes reject the Gate context before active acquisition.
@@ -706,8 +707,9 @@ form one context chain. The receipt, active, and permit repeat the identical
 `authorization_context_sha256`; the permit binds `active_sha256`, and the
 closed record binds that same active digest plus the permit digest when a
 permit exists. In Gate mode that context digest reconstructs the exact
-root-signed E1/E2 token tuple through the journal's closed
-`gate_authority_evidence_v1` branch. A changed/missing link, cross-mode context,
+root-signed isolated unit token tuple through the journal's closed
+`gate1b_isolated_authority_evidence_v1` branch. Gate 1A remains confirmation-only
+and never obtains this apply permit. A changed/missing link, cross-mode context,
 or linked object whose bytes reconstruct another Gate token/session is
 corruption, never authority.
 

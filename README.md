@@ -91,8 +91,9 @@ provisional authorization remains deny-only. A later offline-root-signed
 activation grant is issued only over the complete per-architecture pre-grant
 smoke evidence, and the real grant-bound production context must then pass a
 second per-architecture ordinary-command verification before publication.
-Every fresh Gate 1B E1/E2 run begins with its own token-bound enrollment and
-retains that baseline snapshot as provenance in its complete evidence set.
+Every isolated Gate 1B E1/E2 execution unit begins with its own token-bound
+enrollment and retains that baseline in its leaf evidence. The offline parent
+set covers all units on all declared architectures; E2 binds the complete E1 set.
 Each activation-smoke and post-grant capability plan starts with a setup-only
 exact-artifact enrollment from a canonical empty disposable inventory, binds
 the retained revision-1 registry snapshot through every later observation and
@@ -126,10 +127,10 @@ the only recovery commands will be `mutation authority status` and trusted-UI
 `mutation authority recover`, neither with a plan ID or force-clear option.
 None of this is enabled in the current build.
 
-Native Gate 1B execution also has an open design blocker: destructive phases
-need separately authorized clean subruns and an evidence-aggregation protocol.
-The current case catalog is not an executable closed Gate contract and cannot
-authorize E1/E2 acceptance, activation, or publication.
+[Gate 1B isolated subruns](docs/gate1b-isolated-subruns.md) defines the separate
+unit authorization and evidence-aggregation contract. Its complete inventory,
+validators, and native conformance still require implementation and verification;
+the historical case catalog alone cannot authorize activation or publication.
 
 ## Agent Skill
 

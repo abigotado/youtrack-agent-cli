@@ -6,13 +6,13 @@
 - Target binary: `youtrack-agent-cli`
 - Target Agent Skill: `youtrack-agent`
 
-Native Gate 1B topology is not accepted for implementation: its destructive
-catalog requires a separately reviewed subrun-authorization and evidence-
-aggregation ADR. A quarantined host cannot reset into another phase under the
-same one-enrollment token/session. This blocks Gate 1B token/digest freeze,
-E1/E2 acceptance, issue-create provisional/activation authority, and production
-publication; only the safety restrictions and existing fail-closed slice are
-accepted here.
+The [isolated-subrun ADR](../docs/gate1b-isolated-subruns.md) specifies the new
+Gate 1B topology and supersedes single-suite Gate 1B authority objects. A
+quarantined unit never resets into another scenario under the same enrollment;
+only its narrowly scoped read-only reboot observer may inspect preserved state.
+The full unit inventory, validators, and native evidence remain unimplemented;
+Gate token/digest freeze, activation and publication cannot proceed on the
+historical coverage catalog alone.
 
 ## Reuse baseline
 
@@ -87,10 +87,11 @@ failure invalidates the run; the trusted external supervisor destroys the
 whole disposable host. Successful exported evidence likewise requires whole-
 host destruction before a successor release signature.
 
-Gate 1B independently enrolls its fresh E1/E2 host in the first compiled case.
-Its retained baseline snapshot records enrollment provenance through later
-observations and evidence sets; planned registry transitions retain their own
-successor evidence. Gate 1B does not acquire release-stage cleanup authority.
+Gate 1B independently enrolls each fresh unit host in each E1/E2 pass and
+architecture. Its leaf baseline records that unit's provenance; the offline
+parent aggregates exact compiled coverage without flattening sessions or
+baselines. Planned registry transitions retain their own successor evidence.
+Gate 1B does not acquire release-stage cleanup authority.
 
 Live `stage_cleanup`, item-deletion authority, ACK-ledger recovery, and signed
 empty-inventory cleanup proofs are deferred. The compiled stage policy is
@@ -178,8 +179,11 @@ Coordinator recovery authenticates exact peers but cannot fence a still-live pre
 
 The applicable authority set is mutually exclusive by mode: production and
 post-grant use provisional authorization plus activation grant and final context;
-Gate 1A/1B use their unexpired E1/E2 token, Gate context, authenticated runner/session,
-and full registry chain (Gate 1A remains confirmation-only); activation smoke uses its closed provisional/smoke
+Gate 1A uses its E1/E2 token and context; Gate 1B uses the isolated-unit token,
+context and authority evidence from the new ADR. Both require their matching
+authenticated live session and full registry chain (Gate 1A remains
+confirmation-only). Gate 1B's reboot observer cannot resume this authority.
+Activation smoke uses its closed provisional/smoke
 branch. Confirmation and apply require live authority. Historical validation
 reconstructs the retained branch; Gate reconciliation remains confined to its
 authenticated runner/session and cannot create a new permit or send.
@@ -251,9 +255,13 @@ The future authority contract retains JSON v1 while deliberately adding commands
    quarantine without any recovery mutation or replay.
 10. Build an unpublished exact candidate whose ordinary production factory
     wires only `issue.create`, repeat the two-pass Gate 1A sequence against its
-    new descriptor, then run two-pass live Gate 1B on a disposable YouTrack
-    2026.2 project, including the closed apply/registry ordering and every
-    pre/post-permit crash/restart case. Only after E2 issue provisional authorization and run the
+    new descriptor, then run the complete materialized two-pass Gate 1B
+    [isolated-unit inventory](../docs/gate1b-isolated-subruns.md), with a fresh
+    host and separately allocated and retired disposable YouTrack 2026.2 project
+    for every unit/architecture/pass. Bind E2 to the complete disposed E1 parent;
+    include the closed apply/registry ordering and every pre/post-permit
+    crash/restart variant without target or host reuse. Only after complete E2
+    acceptance issue provisional authorization and run the
     exact per-architecture loopback-preflight/hard-deny dispatch smoke; only a
     complete passing smoke evidence set permits the production activation grant.
     The real grant-bound context then passes the separate per-architecture

@@ -4,14 +4,15 @@ Status: In progress; existing phases 2-4 reach the fail-closed Gate 1A
 boundary, while the native coordinator, profile-expiry enforcement, Gates, and
 writes described below are not implemented
 
-## Remaining order, blocked before native Gate freeze
+## Remaining order, native Gate not implemented
 
-The safety dependency order below is conditional. Open P1: quarantining crash
-phases cannot continue within the current one-enrollment host/session. First
-design and review isolated root-authorized subruns, target/reset binding, and
-parent evidence aggregation. Until then the Gate 1B phase table is a required
-behavioral catalog, not an executable closed contract; do not freeze command
-digests, issue Gate 1B tokens, accept E1/E2 evidence, activate, or publish.
+The [isolated-subrun ADR](../docs/gate1b-isolated-subruns.md) specifies the
+Gate 1B topology: root-authorized atomic units, fresh host/target allocation,
+per-unit enrollment, observer-only reboot continuation, and offline parent
+aggregation. Implement and verify its fully materialized inventory and
+validators before command/token freeze or native execution. The old phase
+catalog is coverage input, not an executable single-session suite. No Gate
+pass, activation, or publication follows from this plan alone.
 
 1. Freeze the signed bundle, Team ID parameter, peer requirements,
    data-protection Keychain namespace, enrollment/rotation/recovery, and package
@@ -71,10 +72,11 @@ digests, issue Gate 1B tokens, accept E1/E2 evidence, activate, or publish.
    persistent reference; stale deletion must leave a replacement item intact.
 6. Produce an unpublished exact candidate with ordinary `issue.create` apply
    wired, rerun the two-pass Gate 1A sequence for its new descriptor, then run
-   the closed 26-case two-pass live Gate 1B on a disposable YouTrack 2026.2
-   project. Each fresh E1/E2 host starts with the compiled token-bound enrollment
-   case and retains its baseline registry snapshot in observations, index, and
-   evidence set. Later transition evidence records the planned registry changes;
+   the complete two-pass Gate 1B unit inventory expanded from its 26 coverage
+   families. Every unit/architecture/pass has a fresh host and disposable
+   YouTrack project, a token-bound enrollment, and its own retained baseline.
+   E2 tokens bind the complete disposed E1 parent set, not an individual leaf.
+   Later transition evidence records the planned registry changes;
    the baseline remains enrollment provenance. The suite includes
    Remote MCP/OAuth host tests, both apply-first and registry-first
    rotation/revocation/recovery orderings, invalid-enrollment contention before

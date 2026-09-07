@@ -4,10 +4,11 @@ Status: **CLI direction approved; fail-closed first slice implemented locally**
 Evidence cutoff: **2026-09-01**
 Target baseline: **YouTrack 2026.2**, Codex, and Claude Code
 
-Native Gate readiness: **BLOCKED**. Quarantine safety is accepted, but the
-destructive Gate 1B catalog is not an executable closed plan. Fresh subrun
-authorization, target/reset binding, and parent evidence aggregation need a
-separate reviewed ADR before Gate token issuance or release authority.
+Native Gate readiness: **NOT PASSED**. The separate
+[isolated-subrun ADR](../docs/gate1b-isolated-subruns.md) specifies Gate 1B unit
+authorization, target lifecycle, and parent aggregation. Its inventory,
+validators, and native execution still require implementation and verification;
+the historical catalog is not release authority.
 
 ## Recommended decision
 
@@ -25,8 +26,8 @@ with `confirmed -> in_flight -> one exact-request permit -> one send/outcome ->
 durable close`, and the descriptor-bound helper-profile expiry is checked
 strictly through the final pre-send fence. The closed Gate contract adds exact
 closed 23-case Gate 1A including install/migration fault cases, an 88-vector
-expiry matrix, and a closed 26-case Gate 1B with its own token-bound enrollment
-on each fresh E1/E2 host and deterministic schedules through
+expiry matrix, and a 26-family Gate 1B catalog expanded into isolated atomic
+units with separate token-bound enrollment in both passes and deterministic schedules through
 enrollment, close, active-delete ambiguity, and a
 competing-acquisition ABA attempt between equality read and delete. Future
 E1/E2 receipts bind a separate Gate context and retained Gate authority set,

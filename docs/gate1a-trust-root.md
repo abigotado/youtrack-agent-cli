@@ -1,18 +1,19 @@
 # ADR: Gate 1A trust, storage, and package topology
 
-- Status: Partially accepted safety decision; native Gate topology not implementation-ready
+- Status: Safety and isolated-subrun topology specified; native Gate not implemented
 - Date: 2026-09-03
 - Gate 1A result: **NOT PASSED**
 - Production approval adapter: `approval.Unsupported`
 
-Open P1: destructive Gate 1B phases cannot share the current one-enrollment
-host/session after an unclosed lease is quarantined. The required conformance
-catalog is not an executable closed Gate plan. A separately reviewed subrun
-authorization, target/reset binding, and parent evidence-aggregation protocol
-must precede Gate 1B token issuance, command-contract freeze, E1/E2 evidence
-acceptance, issue-create provisional/activation authority, and production
-publication. The safety decisions below do not waive that blocker or constitute
-a passed native Gate.
+[Gate 1B isolated subruns](gate1b-isolated-subruns.md) specifies the separate
+authorization, target lifecycle, and parent evidence-aggregation protocol.
+Destructive phases never reset or reuse an enrolled unit. That ADR supersedes
+Gate 1B single-suite token/context/index assumptions; Gate 1A remains unchanged.
+Token issuance requires a reviewed materialized inventory, verified codecs and
+validators, and the exact native candidate. The resulting authorized native
+runs must then pass before evidence acceptance or successor authority. No
+design decision here constitutes a passed Gate or permits activation/publication
+by itself.
 
 ## Context
 
@@ -152,8 +153,9 @@ The shipped baseline requirements contain the literal Team ID and build
 number; production code never expands an environment variable at runtime.
 Those requirements establish publisher and coarse build identity, but they are
 not exact-artifact authority. Both sides additionally require the matching
-root-signed E1/E2 token and canonical `gate_receipt_context_v1` inside an
-authenticated pre-provisional Gate session, or the matching provisional
+root-signed Gate 1A E1/E2 token with `gate_receipt_context_v1`, or the Gate 1B
+isolated unit token with `gate1b_isolated_receipt_context_v1`, inside its
+matching authenticated pre-provisional session, or the matching provisional
 authorization and smoke or production activation context in those later modes,
 from the separately pinned offline Ed25519 root and compare the running self
 and connection-bound peer `kSecCodeInfoUnique` / `kSecCodeInfoCdHashes` values
@@ -413,11 +415,15 @@ activation grant, and final context. A pre-grant smoke set instead contains the
 descriptor, signed provisional authorization, signed smoke token, provisional
 context, and smoke receipt context; it contains no grant and any hard-denied
 `in_flight` attempt is moved to the non-reconcilable terminal state
-`activation_smoke_consumed`. A pre-provisional E1/E2 Gate set instead contains
+`activation_smoke_consumed`. A pre-provisional Gate 1A set instead contains
 the exact descriptor, signed Gate token, canonical `gate_receipt_context_v1`,
 and complete bounded genesis-to-current registry chain required to derive the
 receipt key; it contains no provisional, smoke, grant, final-context, or
-production authority. Confirmation stores the matching set in the same
+production authority. Gate 1B instead retains
+`gate1b_isolated_authority_evidence_v1` from the isolated-subrun ADR, including
+its unit token, new context and exact unit/host/target/inventory binding as well
+as the complete registry chain; it never accepts the old single-suite Gate
+object. Confirmation stores the matching set in the same
 revision CAS that moves `prepared` to `confirmed`. Apply reopens and fully
 revalidates those bytes against the pinned root and current stage context, then
 carries the unchanged set through the atomic `confirmed -> in_flight`
@@ -444,8 +450,10 @@ grant pair. The current status must explicitly permit apply. Any intervening
 registry or activation transition makes a still-confirmed receipt ineligible;
 status/apply cancels the plan rather than falling back to retained authority.
 The controlled Gate 1B apply path enforces the same current-registry checks but
-requires its exact unexpired `gate_receipt_context_v1` and matching E1/E2 runner
-session instead of any provisional/grant pair. Gate 1A remains network-free.
+requires exact `gate1b_isolated_receipt_context_v1`, an unexpired isolated-unit
+token and its matching runner session instead of any provisional/grant pair.
+The reboot observer segment cannot apply, sign or reconcile remotely; it only
+observes local quarantine under its separate scoped token. Gate 1A remains network-free.
 Each helper uses a non-reentrant serialized executor only for its own process.
 The fixed Keychain active record is the cross-process lock, including against
 another exact signed helper in a different user bootstrap context. The owner
@@ -652,7 +660,10 @@ native-approval candidate. The
 current REST
 executor stays disabled. A later exact signed candidate must wire the ordinary
 production `mutation apply` entry point for only `issue.create` and pass live
-Gate 1B on a disposable YouTrack 2026.2 project. Because wiring the executor
+Gate 1B through the complete materialized
+[isolated-unit inventory](gate1b-isolated-subruns.md), using a distinct disposable
+YouTrack 2026.2 project and fresh host for every unit/architecture/pass, with
+E2 bound to the complete disposed E1 parent. Because wiring the executor
 changes the artifact, that same candidate must first rerun and pass Gate 1A.
 Gate 1B then proves exact identity/preconditions, one-shot execution, the
 helper-owned coordinator's apply-versus-rotate/revoke/recovery linearization, every

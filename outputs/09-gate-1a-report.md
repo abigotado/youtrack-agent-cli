@@ -5,16 +5,16 @@
 - Scope completed by this report: protocol-contract spike only
 - Production approval adapter: `approval.Unsupported`
 
-The partially accepted [trust-root and package-topology ADR](../docs/gate1a-trust-root.md)
+The [trust-root and package-topology ADR](../docs/gate1a-trust-root.md)
 freezes the identifiers, Team ID input, Keychain namespace, enrollment,
 rotation/recovery, signed layout, and evidence order. It is a design result,
 not Gate evidence.
 
-Open P1: destructive Gate 1B phases require isolated authorized subruns and a
-parent evidence aggregator. Resetting a quarantined host invalidates its sole
-enrollment/session, so the present phase catalog cannot be executed or used for
-Gate token issuance, E1/E2 acceptance, activation, or publication. Resolving
-that topology requires a separate reviewed ADR; the native Gate remains blocked.
+The separate [isolated-subrun ADR](../docs/gate1b-isolated-subruns.md) specifies
+Gate 1B unit authorization and offline parent aggregation without resetting an
+enrolled unit. This resolves the topology at design level only: the complete
+inventory, validators, and native evidence are still required. The historical
+phase catalog cannot authorize Gate tokens, activation or publication by itself.
 
 The normative [registry/ceremony codec](../docs/gate1a-registry-protocol.md)
 and [exact-artifact authorization](../docs/gate1a-artifact-authorization.md)
@@ -146,7 +146,9 @@ Apple code identities only through the descriptor and the post-E2 confirm-only
 provisional authorization plus post-smoke activation grant; it is not followed
 by a wiring commit or rebuild. `apply` and
 `reconcile` remain disabled until a separate exact Gate 1B candidate proves
-their one-shot and ambiguous-outcome behavior on a disposable YouTrack project.
+their one-shot and ambiguous-outcome behavior through the complete isolated-unit
+inventory, with a distinct disposable YouTrack project and fresh host for every
+unit/architecture/pass under the isolated-subrun ADR.
 That candidate must first introduce journal v2; only a valid v1 `prepared`
 record migrates atomically, while every other valid v1 state—including
 `failed_before_mutation`—remains unchanged and quarantined. It adds exactly `mutation authority status` and
@@ -173,9 +175,10 @@ of A's persistent reference, two valid helpers/alternate bootstrap namespaces,
 queued callbacks unable to send after normal close, and exact Security.framework dictionary and
 bounded-projection vectors. Those concurrency cases use the signed plan's exact
 two-party binary barrier schedule and content-addressed event trace, never
-sleeps or scheduler timing. The closed 26-case Gate 1B set starts with its own
-token-bound enrollment on each fresh E1/E2 host and retains the baseline snapshot
-as provenance through every later observation, index, and evidence set. It also exercises exact
+sleeps or scheduler timing. The 26 Gate 1B coverage families expand into atomic
+isolated units, each with token-bound enrollment and a baseline scoped to that
+unit/architecture/pass. The parent set validates all leaves, their disposal and
+coverage; E2 depends on the complete E1 parent. It also exercises exact
 authority status/recover JSON v1 shapes with required invocation `meta`, exits
 10..13 plus corruption exit 1, closed inherited flags, trusted recovery UI, and
 journal v1-to-v2 migration/quarantine interruptions.

@@ -161,8 +161,9 @@ The pinned production requirements are exact, not caller-configurable. Their
 full Developer ID Application expressions and identifiers are frozen in the
 [trust-root ADR](gate1a-trust-root.md#signed-bundle-and-identifiers).
 They are only the coarse publisher/build predicate. Exact authority also
-requires either the exact offline-root-signed E1/E2 Gate token plus canonical
-`gate_receipt_context_v1` in its authenticated pre-provisional Gate session,
+requires either the exact offline-root-signed Gate 1A E1/E2 token plus canonical
+`gate_receipt_context_v1`, or Gate 1B isolated-unit token plus
+`gate1b_isolated_receipt_context_v1`, in its matching authenticated session,
 or the descriptor, provisional authorization, and matching smoke or
 production-activation context for those later modes, plus Security.framework
 validity and a match between the running self and connection-bound peer
@@ -177,16 +178,19 @@ currently unexpired and its Gate ID, plan, target/prerequisite null rules,
 architecture, runner/session, and capability to match exactly.
 
 The schema-3 receipt carries the Gate-context digest in its existing
-`authorization_context_sha256` field. Confirmation retains the artifact-
-authorization protocol's closed `gate_authority_evidence_v1` journal branch,
-including exact descriptor/token/context bytes and the complete bounded
+`authorization_context_sha256` field. Confirmation retains Gate 1A's closed
+`gate_authority_evidence_v1` branch or Gate 1B's distinct
+`gate1b_isolated_authority_evidence_v1` branch from the isolated-subrun ADR,
+including its unit/host/target/inventory binding, exact descriptor/token/context
+bytes and the complete bounded
 genesis-to-current registry chain. Historical verification derives the SPKI by
 replaying that chain; it never trusts a lone terminal record or unchecked
 retained key. The same digest is bound directly by receipt, coordinator active,
 and permit and transitively by the closed record's active/permit digests. Gate
 1B historical reconciliation remains read-only and requires the matching Gate
 runner/session connection; later token expiry cannot authorize another
-confirmation, permit, or send.
+confirmation, permit, or send. The reboot observer is a separate local-only
+read session, not a continuation of that signing or remote-reconciliation path.
 
 `TEAM_ID` and positive decimal `RELEASE_BUILD` are required immutable
 operator-supplied build/Gate inputs with no repository defaults. Each peer
@@ -262,7 +266,8 @@ An already-closed lease can be cleaned only by its exact lookup's bounded,
 nonempty CFData persistent reference (at most 4,096 bytes), passed in
 `kSecMatchItemList`; there is no attributes-only delete fallback. The exact dictionaries, projections,
 records, linearization points, and recovery rules live in the registry
-protocol and are part of the Gate 1B conformance surface. That closed surface
+protocol and are part of the Gate 1B conformance surface, executed through
+[isolated subruns](gate1b-isolated-subruns.md). Its materialized coverage
 includes invalid enrollment before ledger read, durable-outcome-before-close,
 close-add ambiguity, post-close/pre-delete crash, active-delete ambiguity, and
 an ABA schedule where independent helpers remove A and acquire B between
@@ -289,9 +294,12 @@ self-report, empty-inventory claim, partial cleanup, or reused host cannot
 satisfy that condition. Live `stage_cleanup`, cleanup intent/progress, and
 ACK-ledger deletion authority are deferred from the first release. Setup
 context cannot sign approval receipts, permit, send, or cross sessions.
-Gate 1B also performs its own first token-bound enrollment on every fresh
-E1/E2 host. Its snapshot is baseline provenance, while later planned registry
-transitions must validate their current ledger state. It retains no authority
+Gate 1B performs one token-bound enrollment on every isolated unit host in each
+E1/E2 pass and architecture. Its snapshot is that unit's baseline provenance,
+while later planned registry
+transitions must validate their current ledger state. Reboot continuation uses
+a separate observer-only token and new session on the same preserved host;
+it cannot enroll, sign, send, reconcile remotely, CAS, delete, or reset. It retains no authority
 to use release-stage cleanup. Recovery-only sessions validate exact code and
 retained evidence but cannot adopt the old owner. They classify unclosed state
 as quarantined, or delete only a validated already-closed active item's exact

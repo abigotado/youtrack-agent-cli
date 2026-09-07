@@ -4,11 +4,34 @@ Status: **NOT ACTIVATED**. The authority key is not enrolled, no Gate token is
 issued, and no production artifact is activated. `approval.Unsupported`
 remains the only production adapter. Gate 1A and Gate 1B are **NOT PASSED**.
 
-Gate 1B is also **NOT IMPLEMENTATION-READY**: the coordinator cases below are
-a required future conformance catalog, not an accepted executable suite. The
-[execution-topology blocker](#gate-1b-execution-topology-blocker) forbids Gate
-1B token issuance, command-contract digest freeze, and evidence acceptance
-until a separately reviewed subrun/aggregation/target-reset protocol exists.
+Gate 1B's docs-only execution decision is accepted in
+[isolated subruns](gate1b-isolated-subruns.md), which is its sole topology and
+new-type authority. Token issuance and digest freeze require the reviewed
+materialized compiler/contracts/inventory, validated vectors, and native
+candidate implementation. After that, separately authorized native E1/E2 runs
+must produce the required transport and full-suite evidence before evidence
+acceptance or issue-create provisional authorization. Neither implementation
+nor those native results exist: Gate 1B remains **NOT PASSED**.
+
+### Gate 1B-only supersession
+
+The isolated-subrun ADR replaces, only for Gate 1B, this document's former
+flat plan, single setup/session, E1/E2 token, setup/receipt/retained-authority
+context, index, export/disposal, and one-index-per-architecture evidence-set
+route. Legacy v1 authority and container codecs below reject
+`gate_id=gate1b`, `plan_type=gate1b`, or `stage_type=gate1b`; a valid old
+signature or hash does not provide an alternate route. Their Gate 1A,
+activation-smoke, and post-grant meanings are unchanged.
+
+The 26 Gate 1B families and 21 coordinator phase rows below are coverage inputs
+only. The new compiler must expand every independent phase and negative variant
+into an isolated unit with its own setup and final evaluator; status-contract
+and legacy-journal quarantine variants are included. Old `reset` labels are
+not executable commands. No old flat catalog total establishes the unit,
+observation, transcript, or assertion inventory. Shared leaf payloads may be
+used only through the ADR's
+[typed leaf binding adapter](gate1b-isolated-subruns.md#leaf-evidence-and-binding-adapter),
+never by globally reinterpreting their old containing schemas.
 
 Developer ID identity, Team ID, bundle identifiers, and build number establish
 publisher and release identity, but they do not distinguish a Gate-tested
@@ -66,8 +89,8 @@ its final field. Each signed object is capped before parsing or allocation:
 
 | Object | Domain | Maximum bytes |
 | --- | --- | ---: |
-| E1 Gate token | `YTA-GATE-E1-V1\0` | 4,096 |
-| E2 Gate token | `YTA-GATE-E2-V1\0` | 4,096 |
+| Gate 1A E1 token | `YTA-GATE-E1-V1\0` | 4,096 |
+| Gate 1A E2 token | `YTA-GATE-E2-V1\0` | 4,096 |
 | provisional production authorization | `YTA-PROVISIONAL-PRODUCTION-AUTHORIZATION-V1\0` | 8,192 |
 | activation-smoke token | `YTA-ACTIVATION-SMOKE-V1\0` | 4,096 |
 | production activation grant | `YTA-PRODUCTION-ACTIVATION-GRANT-V1\0` | 8,192 |
@@ -96,7 +119,11 @@ at most 4,096 regular files, each at most 8 MiB and at most 256 MiB in
 aggregate. All counts and byte caps are checked before proportional allocation
 or file reads.
 
-The Gate 1B target object is compact canonical JSON capped at 4,096 bytes with
+The following legacy target payload grammar is descriptive input only; Gate
+1B allocation, fresh actual target identity, and target authorization follow
+[pre-token allocation](gate1b-isolated-subruns.md#pre-token-host-and-target-allocation).
+This payload alone cannot authorize a unit or prove a fresh target.
+It is compact canonical JSON capped at 4,096 bytes with
 these fields in order: `schema_version` integer `1`, `target_type` exactly
 `disposable_youtrack_2026_2`, `service_url`, `rest_url`, `oauth_issuer_url`,
 `account_id`, `project_id`, `project_key`, `target_nonce`, and `expires_at`.
@@ -610,46 +637,43 @@ different code digest satisfy a valid signed authorization.
 
 ## Canonical Gate, smoke, and post-grant plans
 
-The Gate 1B branch of this section is conditional on resolving the
-[execution-topology blocker](#gate-1b-execution-topology-blocker). Its case
-order, candidate counts, and codecs document required coverage, not a frozen
-executable contract. The other stages remain unactivated and their own gates
-are unchanged.
+Gate 1B uses the isolated ADR's coverage inventory and unit compiler, not the
+flat v1 plan codec in this section. Its tables below retain behavior coverage,
+not a frozen executable contract. The other stages remain unactivated and
+their own gates are unchanged.
 
-A Gate plan is data, never a script. Each of the six Gate 1A, Gate 1B,
+A Gate plan is data, never a script. Each of the five Gate 1A,
 capability-specific activation-smoke, and capability-specific post-grant-
 verification plans is capped at 1,048,576 bytes (1 MiB). Their
 compact canonical fields are, in order:
 
 1. `schema_version`, integer `1`
-2. `plan_type`, exactly `gate1a`, `gate1b`, `activation_smoke`, or
+2. `plan_type`, exactly `gate1a`, `activation_smoke`, or
    `post_grant_verification`
 3. `descriptor_sha256`
-4. `approved_capability`, `confirm_only` for Gate 1A; `issue_create_gate` for
-   Gate 1B; and `confirm_only` or `issue_create` for smoke and post-grant
-   verification
+4. `approved_capability`, `confirm_only` for Gate 1A; and `confirm_only` or
+   `issue_create` for smoke and post-grant verification
 5. `architectures`, exactly the descriptor array
 6. `fixture_set_sha256`
 7. `fixture_executable_manifest_sha256`, required for Gate 1A and null for
-   Gate 1B, activation smoke, and post-grant verification
+   activation smoke and post-grant verification
 8. `assertion_set_sha256`
 9. `transcript_set_sha256`
 10. `command_contract_manifest_sha256`
 11. `allowed_network`, exactly `none` for Gate 1A and confirm-only smoke or
-    post-grant verification, `exact_gate_target` for Gate 1B, or
-    `loopback_read_only` for issue-create smoke or post-grant verification
-12. `sandbox_policy`, exactly `gate1a_deny_v1`, `gate1b_target_v1`,
+    post-grant verification, or `loopback_read_only` for issue-create smoke
+    or post-grant verification
+12. `sandbox_policy`, exactly `gate1a_deny_v1`,
     `smoke_confirm_deny_v1`, `smoke_issue_loopback_v1`,
     `post_grant_confirm_deny_v1`, or `post_grant_issue_loopback_v1`, matching
     plan type and capability
 13. `reset_policy`, exactly `fresh_reverted_host_per_architecture_stage_v1`
 14. `minimum_macos_product_build_version`, printable ASCII of 1..32 bytes
 15. `architecture_execution_matrix`, the closed array described below
-16. `gate_target_sha256`, null except for Gate 1B
+16. `gate_target_sha256`, exactly null
 17. `provisional_context_sha256`, null except for activation smoke
 18. `authorization_context_sha256`, null except for post-grant verification
-19. `stage_setup_policy`, null for Gate 1A, exactly
-    `gate1b_first_exact_artifact_enrollment_v1` for Gate 1B, or exactly
+19. `stage_setup_policy`, null for Gate 1A or exactly
     `first_exact_artifact_enrollment_v1` for activation smoke and post-grant
     verification
 20. `host_disposal_policy`, exactly `external_whole_host_disposal_v1`
@@ -673,7 +697,7 @@ least the minimum and is recorded byte-for-byte in evidence. A run under
 Rosetta, on an undeclared slice, with a reused token/session/host state, or
 missing one matrix row fails the whole evidence set.
 
-The six sandbox policies are compiled constants, not file paths. They deny
+The five flat-plan sandbox policies are compiled constants, not file paths. They deny
 undeclared subprocesses and filesystem access outside the mode-0700 Gate root.
 For an `exact_artifact` case they permit only the descriptor-pinned CLI/helper
 and the runner/verifier named by its command contract. The sole exception is
@@ -709,14 +733,15 @@ is contacted only by the compiled rejection probe in its disjoint endpoint;
 it is never installed or substituted for the ordinary listener. No runner
 preconnected descriptor can stand in for either peer.
 Gate 1A and confirm-only smoke deny `AF_INET`,
-`AF_INET6`, and every other socket family/type. `gate1b_target_v1` permits only
-the exact target origin and methods required by its declared workflows.
+`AF_INET6`, and every other socket family/type. Gate 1B unit sandbox authority
+is defined only by the isolated-subrun ADR; an old `gate1b_target_v1` flat plan
+cannot enable network access.
 `smoke_issue_loopback_v1` permits only its token's IPv4 loopback origin and
 read-only `GET`/`HEAD`; the mutation dispatcher remains a pre-socket hard deny.
 The two post-grant policies have the same network restrictions as their smoke
 counterparts but require the real grant-bound final authorization context and
 the post-grant token's distinct dispatch-denial code.
-For either setup-policy value, `stage_setup_policy` grants no ambient registry
+For the release-stage setup-policy value, `stage_setup_policy` grants no ambient registry
 authority: it is usable only by the matching first compiled setup case, only
 with the root-signed token and derived setup context for that plan type, and
 only to create revision 1 from the proved empty disposable inventory described
@@ -825,7 +850,7 @@ token, private key, or unredacted secret fails the run instead of being
 replaced.
 
 A command-contract manifest is compact canonical JSON capped at 1,048,576
-bytes (1 MiB), for each of the six plan types/capabilities.
+bytes (1 MiB), for each of the five flat plan types/capabilities.
 Its fields are `schema_version` integer `1`, `manifest_type` exactly
 `command_contract`, `plan_type`, `approved_capability`,
 `fixture_executable_manifest_sha256`, `entries`, and `case_evaluations`, in
@@ -843,9 +868,10 @@ entry fixes each operation's executable, argv template, timeout, and complete
 ordered ID lists; a plan never supplies or overrides different values.
 
 `case_evaluations` has exactly one entry per case in normative case order.
-The six manifests therefore contain exactly 23, 26, 5, 6, 6, and 6
-case-evaluation entries for Gate 1A, Gate 1B, smoke confirm, smoke issue-create,
-post-grant confirm, and post-grant issue-create respectively.
+The five flat manifests therefore contain exactly 23, 5, 6, 6, and 6
+case-evaluation entries for Gate 1A, smoke confirm, smoke issue-create,
+post-grant confirm, and post-grant issue-create respectively. Gate 1B unit
+evaluators are generated by the new coverage inventory, not these totals.
 Each contains, in order, `case_id`, `observation_id` equal to the case ID plus
 `/final-evaluation`, `executable_role` and `executable_component` both exactly
 `gate_runner`, `assertion_ids`, and `transcript_ids`. Its `assertion_ids` are
@@ -857,8 +883,8 @@ operation observation and transcript result exists. A plan case contains
 `case_id`, `evidence_scope`, `steps`, and `final_evaluation`, in that order;
 the last field is rebuilt from this manifest entry.
 
-The release verifier contains exactly six checked-in literal digests named
-`GATE1A_COMMAND_CONTRACT_SHA256`, `GATE1B_COMMAND_CONTRACT_SHA256`,
+The flat-plan release verifier requires five checked-in literal digests named
+`GATE1A_COMMAND_CONTRACT_SHA256`,
 `SMOKE_CONFIRM_COMMAND_CONTRACT_SHA256`, and
 `SMOKE_ISSUE_CREATE_COMMAND_CONTRACT_SHA256`,
 `POST_GRANT_CONFIRM_COMMAND_CONTRACT_SHA256`, and
@@ -907,28 +933,22 @@ requirements, not maxima that permit omitted cases or additional authority.
 | Plan/capability | Cases / final evaluations | Operations | Observations | Transcript entries | Assertion entries |
 | --- | --- | --- | --- | --- | --- |
 | Gate 1A | 23 | 78 | 101 | 381 | 69 |
-| Gate 1B | 26 | 166 | 192 | 1,053 | 128 |
 | Activation smoke / confirm-only | 5 | 12 | 17 | 58 | 16 |
 | Activation smoke / issue-create | 6 | 15 | 21 | 77 | 18 |
 | Post-grant / confirm-only | 6 | 11 | 17 | 59 | 17 |
 | Post-grant / issue-create | 6 | 12 | 18 | 68 | 18 |
 
-The Gate 1B row checks the proposed catalog's structure only; it cannot be
-used to freeze a digest, authorize execution, or claim a passing suite while
-the execution-topology blocker remains open.
-
-The longest derived transcript ID in these fixed tables is 121 ASCII bytes,
-and the longest observation ID is 102 bytes, both within the unchanged
-128-byte limit. Gate 1B alone requires 1,053 transcript entries and
-384 per-observation result manifests before other referenced evidence files;
-it must not inherit the fixture/assertion entry cap or the post-grant-only
-install-manifest file cap. All six evidence-index codecs use
+Gate 1B has no executable flat-count row. Its compiler must materialize all
+independent phases and negative variants and derive bounded unit/leaf/parent
+counts under the isolated ADR. The legacy catalog's longest local IDs remain
+within the 128-byte leaf limit; they do not authorize a single combined index.
+The five flat-stage evidence-index codecs use
 the same independent 1 MiB object, 256-observation, 4,096-referenced-file,
 8 MiB-per-file, and 256 MiB-aggregate limits. Exact membership and ordering
 remain mandatory within those limits. Per-observation assertion-result and
 transcript-result manifests retain their separate 32,768-byte caps.
 
-Before freezing any of the six literal command-contract digests, the compiler
+Before freezing any of the five flat literal command-contract digests, the compiler
 must materialize and validate every complete checked-in canonical manifest
 and plan, including all typed arguments and resolved ID references, against
 both its byte and entry budgets. It must also construct each complete
@@ -950,7 +970,7 @@ steps, or wildcard case IDs. `evidence_scope` is exactly `exact_artifact` or
 `gate1a.registry.crash-ambiguous-secitemadd`,
 `gate1a.registry.orphan-cleanup`, and
 `gate1a.registry.active-key-loss`. Every other Gate 1A case, including ordinary
-`gate1a.registry.enroll-rotate-revoke-recover`, every Gate 1B case, and every
+`gate1a.registry.enroll-rotate-revoke-recover` and every
 activation-smoke and post-grant-verification case is `exact_artifact`. No caller or plan generator can
 change this mapping. The
 exact Gate 1A case order is:
@@ -982,9 +1002,11 @@ exact Gate 1A case order is:
 This closed Gate 1A list contains exactly 23 cases; the compiled case table
 below must contain the same IDs once each in this exact order.
 
-The proposed Gate 1B coverage order is below. It is subject to the
-[execution-topology blocker](#gate-1b-execution-topology-blocker), not an
-accepted executable case order:
+The Gate 1B family order below is coverage input for the
+[isolated unit inventory](gate1b-isolated-subruns.md#coverage-inventory-and-unit-definition).
+Each expanded unit has independent pre-token host/target allocation, fresh
+setup, and final evaluation. The setup family expresses a requirement of
+every unit, not one global enrollment followed by 25 state-sharing cases.
 
 1. `gate1b.setup-exact-artifact-enrollment`
 2. `gate1b.issue-create.prepare-confirm-apply-success`
@@ -1013,9 +1035,10 @@ accepted executable case order:
 25. `gate1b.receipt.context-and-replay-deny`
 26. `gate1b.authority.fail-closed-matrix`
 
-This proposed Gate 1B catalog contains exactly 26 cases; the coverage table
+This Gate 1B catalog contains exactly 26 coverage families; the coverage table
 below must contain the same IDs once each in this order. Neither is a frozen
-or executable command contract until the topology blocker is resolved.
+or executable command contract; only the isolated ADR's materialized unit
+inventory can supply that contract.
 
 For activation smoke, `confirm_only` has exactly these cases:
 
@@ -1120,7 +1143,7 @@ different-winner, source-delete success/error/ambiguity, restart, and cleanup
 partial failure are mandatory schedule fixtures for these cases. Missing any
 one is a Gate failure.
 
-| Gate 1B case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
+| Gate 1B coverage family | Legacy step/phase labels (not executable) | Required assertion suffixes | Required transcript kinds |
 | --- | --- | --- | --- |
 | `gate1b.setup-exact-artifact-enrollment` | `pre-enrollment-inventory`, `enroll`, `snapshot` | `.primary`, `.pre-enrollment-empty`, `.gate1b-setup-only-authority`, `.registry-baseline-snapshot` | `ipc`, `ui`, `security_framework` |
 | `gate1b.issue-create.prepare-confirm-apply-success` | `prepare`, `confirm`, `apply` | `.primary`, `.one-created-issue` | `network`, `ipc`, `ui` |
@@ -1184,19 +1207,19 @@ one is a Gate failure.
 | `post-grant.issue-create.authority-negatives` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `network`, `ipc`, `security_framework` |
 | `post-grant.issue-create.seal-evidence` | `seal-evidence`, `verify-export` | `.primary`, `.terminal-evidence-retained`, `.sanitized-export`, `.no-live-delete` | `ipc`, `security_framework` |
 
-The command-contract compiler has one closed Gate 1B setup route. Only
-`gate1b.setup-exact-artifact-enrollment` may contain
-`pre-enrollment-inventory`, `enroll`, and `snapshot`, in that order.
-`pre-enrollment-inventory` and `snapshot` execute as
-`gate_runner`/`gate_runner`; `enroll` executes as `cli`/`outer`, with the
-descriptor-pinned helper reached by that exact CLI's own authenticated
-connection to the fixed ordinary listener. Their argv templates contain only compiled literals and
-digest-bound fixture paths; the Gate token and setup context arrive through
-that authenticated runner session and are never argv, environment, stdin, or
-caller-selected path values. The smoke and post-grant setup cases retain their
-same role and argv routing but accept only their own stage tokens and contexts;
-they cannot accept the Gate 1B context, and no later Gate 1B command template
-can route to setup authority.
+Gate 1B setup is compiled per isolated unit under the
+[new setup and unit authorization contract](gate1b-isolated-subruns.md#unit-authorization-and-context).
+The legacy family label `gate1b.setup-exact-artifact-enrollment` cannot select
+an old v1 setup context, reuse another unit's enrollment, or defer empty-host
+inventory until after token issuance. Each exact CLI self-connects to the
+helper-owned fixed ordinary listener; runner control authority never replaces
+that peer authentication. Smoke and post-grant setup retain their existing
+role, argv, stage-token, and context routing and reject Gate 1B contexts.
+
+The following flat case/step and argv codecs apply unchanged to Gate 1A,
+smoke, and post-grant only. Gate 1B uses shared payloads only where the isolated
+ADR's typed adapter explicitly admits them; the old family tables and reset
+labels cannot be compiled directly by this flat route.
 
 For each step and transcript kind, the transcript ID is the case ID, one dot,
 the step ID, one dot, and the kind. Every operation step's `assertion_ids` is
@@ -1258,7 +1281,6 @@ closed typed object using one exact schema:
 | --- | --- | --- |
 | literal | `source`, `value` | source exactly `literal`; printable ASCII value |
 | path | `schema_version`, `token_type`, `source`, `fixture_id`, `content_sha256`, `expected_type`, `access` | the complete typed path-token codec defined above |
-| Gate target | `source` | exactly `gate_target_service_url`; Gate 1B only |
 | prior output | `source`, `step_id`, `output_field` | source exactly `step_output`; earlier step; output exactly `plan_id` or `receipt_id` |
 
 No other source or output field exists. Dynamic values are produced by the
@@ -1268,39 +1290,45 @@ with the declared argv, closed stdin, empty environment, no shell, no current-
 directory inheritance, and an independent hard timeout. The runner rejects an
 undeclared file access, transcript, assertion, network origin, or subprocess.
 
-### Gate 1B execution-topology blocker
+### Gate 1B execution decision and remaining freeze
 
-The 26-case Gate 1B list and the 21-row coordinator phase table are required
-future conformance catalogs only. Their arithmetic counts are candidate
-coverage checks, not proof that a valid single-run plan can execute them.
-Crash/quarantine and ambiguity phases require fresh mutable state. Resetting
-the entire host between those phases destroys the authenticated runner session,
-the one setup enrollment, and its baseline provenance; silently reusing the
-same token/session/snapshot would violate this document's authority contract.
-No first-release codec currently resolves that conflict.
+The [isolated-subrun ADR](gate1b-isolated-subruns.md) is the accepted docs-only
+decision, superseding the former undefined-topology blocker. It preserves
+same-UID adversarial helpers, quarantines unclosed leases, and does not infer
+global singleton authority from launchd.
 
-Before any Gate 1B implementation or native execution, a separate plan must
-define independently root-authorized subruns, their exact enrollment/session/
-host identity and retained baseline, bounded parent evidence aggregation, and
-disposable YouTrack target reset semantics. That plan must pass architecture
-and security review before changing any codec. This document deliberately
-does not invent that subrun protocol or permit reset under an old session.
+Every independently stateful phase or negative variant runs on a fresh actual
+host and target allocation for its architecture and E1/E2 pass. Pre-token
+host/target inventory precedes the separately root-signed child token, which
+binds pass, architecture, unit, inventory, target, session, and complete Gate
+1A E2 prerequisite. E2 additionally binds the complete E1 parent. No host or
+actual target is reused by another unit, including across architectures or
+passes. Each unit owns its setup, baseline, and final evaluator; the parent
+uses typed unit bindings and local leaf IDs, never concatenated global IDs.
 
-Until then, Gate 1B command-contract digest freeze, Gate 1B E1/E2 token
-issuance, Gate 1B E1/E2 evidence acceptance, and issue-create provisional
-authorization from this incomplete catalog are forbidden. Fixture simulations
-cannot clear the blocker or be presented as native exact-artifact execution.
-Gate 1A remains separately pending/NOT PASSED; no production activation follows
-from this partial design. The endpoint adversarial technique below is a
-proposal requiring the same separate ADR and native evidence, not a proven
-topology or substitute for the missing subrun and aggregation protocol.
+A reboot case has at most two segments. Its new token-authorized read-only
+observer binds the retained checkpoint and same host/target; it cannot reset,
+sign, CAS, delete, or access the network. External target retirement precedes
+evidence export and whole-host disposal. These requirements are defined, not
+implemented, by the new ADR.
+
+Gate 1B command-contract digest freeze and token issuance remain forbidden
+until the accepted compiler and materialized inventory, their validated
+conformance vectors, and native candidate implementation exist. Those
+prerequisites enable only explicitly authorized native runs; their actual
+passing E1/E2 evidence is then required for evidence acceptance and issue-create
+provisional authorization. This order does not require a run's evidence before
+its own token. Simulation and this documentation do not pass Gate 1B.
+Gate 1A remains independently NOT PASSED.
 
 ### Deterministic two-party coordinator schedules
 
-This entire schedule/trace subsection is a proposed coverage catalog subject
-to the [execution-topology blocker](#gate-1b-execution-topology-blocker), not an
-accepted closed command contract. No schedule digest or token may be frozen
-from it yet.
+This schedule/trace subsection is a coverage catalog routed through the
+[isolated unit compiler](gate1b-isolated-subruns.md#coverage-inventory-and-unit-definition),
+not an executable flat command contract. Each independent phase and negative
+variant becomes its own unit; literal reset labels are not commands. No
+schedule digest or token may be frozen before the new execution prerequisites
+are satisfied.
 
 Every Gate 1B coordinator case uses a digest-bound schedule fixture. Ordering
 comes from release/arrival barriers, never sleeps, scheduler luck, shell
@@ -1327,8 +1355,10 @@ Native evidence must show A's old connection survives, B's new connection
 authenticates independently, and both exact code identities match. A
 pathname/type/inode ambiguity or failure to realize this OS behavior fails
 the technique; simulation cannot stand in for that evidence. This technique
-remains behind the same Gate 1B digest/token/evidence freeze blocker until the
-separate architecture decision and native conformance evidence accept it.
+is a required native vector under the isolated ADR's
+[execution acceptance](gate1b-isolated-subruns.md#required-conformance-vectors).
+The design decision does not claim this transport behavior already proven;
+failure of that native vector blocks Gate 1B.
 
 The trusted runner creates two anonymous unidirectional pipes per CLI actor
 before direct spawn. Only the child's release-read end at descriptor 3 and
@@ -1497,29 +1527,27 @@ operation result exists.
 
 ## E1 Gate authorization
 
-Gate 1B issuance is forbidden until its
-[execution-topology blocker](#gate-1b-execution-topology-blocker) is resolved.
-The Gate 1B fields below are proposed, not an authorization to run the catalog.
+This legacy v1 token is Gate 1A-only and rejects `gate_id=gate1b`.
+Gate 1B uses `gate1b_isolated_unit_token_v1` under the
+[unit authorization contract](gate1b-isolated-subruns.md#unit-authorization-and-context),
+not this token or domain.
 
 E1 permits only the exact descriptor to execute one named Gate suite. Its
 unsigned fields are:
 
 1. `schema_version`, integer `1`
 2. `token_type`, exactly `gate_e1`
-3. `gate_id`, exactly `gate1a` or `gate1b`
+3. `gate_id`, exactly `gate1a`
 4. `authority_key_id`
 5. `descriptor_sha256`
 6. `gate_plan_sha256`
-7. `gate_target_sha256`, null for Gate 1A and the exact disposable
-   instance/account/project policy digest for Gate 1B
-8. `prerequisite_gate1a_e2_evidence_set_sha256`, null for Gate 1A and the
-   complete Gate 1A E2 set for Gate 1B
+7. `gate_target_sha256`, exactly null
+8. `prerequisite_gate1a_e2_evidence_set_sha256`, exactly null
 9. `architecture`, exactly one architecture declared by the descriptor
 10. `gate_runner_unique`
 11. `gate_session_id`
-12. `allowed_capability`, `confirm_only` for Gate 1A or `issue_create_gate`
-    for Gate 1B
-13. `allowed_network`, `none` for Gate 1A or `exact_gate_target` for Gate 1B
+12. `allowed_capability`, exactly `confirm_only`
+13. `allowed_network`, exactly `none`
 14. `issued_at`
 15. `expires_at`
 
@@ -1543,13 +1571,9 @@ manifest-pinned disjoint fixture pair in its disjoint Keychain service,
 filesystem root, and IPC namespace; they never execute or modify production
 registry state. The old-build negative peer may appear only in the exact
 runtime mixed-build rejection substeps and must gain no authority. Network
-creation is denied by the process sandbox. A Gate 1B E1 token is issued
-only for a candidate that has already completed the two-pass Gate 1A sequence;
-its first case permits exactly one setup-authorized enrollment on that E1
-run's otherwise empty disposable host, after which the ordinary one-shot
-`issue.create` path is permitted only against the exact disposable target
-named by `gate_target_sha256`. The setup context cannot exercise that runtime
-authority. Every other capability or origin fails closed. A pass records the
+creation is denied by the process sandbox. Gate 1B E1 allocation and issuance
+follow the isolated ADR and require the complete Gate 1A E2 prerequisite.
+A pass records the
 descriptor, Gate ID, token, plan and target digests, fixture hashes and
 executable manifest, per-observation scope and executable identity,
 OS/architecture, times, and result in immutable evidence.
@@ -1560,8 +1584,9 @@ slice cannot stand in for another.
 
 ## E2 Gate authorization
 
-The same [Gate 1B execution-topology blocker](#gate-1b-execution-topology-blocker)
-forbids issuing or accepting Gate 1B E2 from the current coverage catalog.
+This legacy v1 E2 codec is Gate 1A-only and rejects `gate_id=gate1b`.
+Gate 1B E2 units use the distinct isolated token and must bind the complete
+prior E1 parent, not one prior architecture index.
 
 E2 exists only after a complete E1 pass for the same descriptor, Gate ID, plan,
 target, and capability. It permits a clean-reset repetition of that complete
@@ -1569,7 +1594,7 @@ suite solely inside one new Gate runner session. Its unsigned fields are:
 
 1. `schema_version`, integer `1`
 2. `token_type`, exactly `gate_e2`
-3. `gate_id`, exactly `gate1a` or `gate1b`
+3. `gate_id`, exactly `gate1a`
 4. `authority_key_id`
 5. `descriptor_sha256`
 6. `gate_plan_sha256`
@@ -1588,14 +1613,11 @@ E2 has the same 30-minute maximum and runner/session checks as E1. The run
 starts from another clean host or freshly reverted snapshot and repeats every
 ordered observation in the same content-addressed Gate plan, including the
 exact artifact/fixture scope partition and a fresh disjoint fixture namespace.
-Gate 1A remains network-free. Gate 1B again permits only the exact disposable
-target, performs its own first setup-authorized enrollment and then its real
-one-shot write/reconciliation cases, and must start from a fresh project
-fixture and a fresh empty disposable host. No E1 registry, coordinator,
-signing-key, journal, runner-session, or setup-context state is inherited. It
-records the E2 token, prior E1 evidence, descriptor, full rerun evidence,
-network transcript, and target reset. A partial, cached, inherited, or
-smoke-only second pass is invalid.
+Gate 1A remains network-free. No E1 registry, coordinator, signing-key,
+journal, or runner-session state is inherited by its E2 run. A partial,
+cached, inherited, or smoke-only second pass is invalid. Gate 1B freshness and
+target retirement use the distinct per-unit protocol, never this whole-suite
+reset path.
 
 Every declared architecture receives its own E2 token after that
 architecture's E1 pass, with a new random session ID and a freshly reset host
@@ -1610,27 +1632,26 @@ that converts a Gate token into production authority.
 
 ### Gate receipt authorization context and retained authority
 
-Before provisional authorization exists, either Gate suite may exercise the
-ordinary schema-3 confirmation path inside its exact authenticated E1 or E2
-runner session. Both peers derive one compact canonical object capped at 4,096
-bytes with fields, in order:
+Before provisional authorization exists, Gate 1A may exercise the ordinary
+schema-3 confirmation path inside its exact authenticated E1 or E2 runner
+session. This legacy context and its retained-authority branch reject
+`gate_id=gate1b`. Gate 1B uses `gate1b_isolated_receipt_context_v1` and
+`gate1b_isolated_authority_evidence_v1` from the isolated ADR. Gate 1A peers
+derive one compact canonical object capped at 4,096 bytes with fields, in order:
 
 1. `schema_version`, integer `1`
 2. `context_type`, exactly `gate_receipt_context_v1`
 3. `gate_token_type`, exactly `gate_e1` or `gate_e2`
 4. `gate_token_sha256`, SHA-256 of the exact root-signed Gate token bytes
-5. `gate_id`, exactly `gate1a` or `gate1b`
+5. `gate_id`, exactly `gate1a`
 6. `descriptor_sha256`
 7. `gate_plan_sha256`
-8. `gate_target_sha256`, null for Gate 1A and exactly the Gate token value for
-   Gate 1B
-9. `prerequisite_gate1a_e2_evidence_set_sha256`, null for Gate 1A and exactly
-   the Gate token value for Gate 1B
+8. `gate_target_sha256`, exactly null
+9. `prerequisite_gate1a_e2_evidence_set_sha256`, exactly null
 10. `architecture`
 11. `gate_runner_unique`
 12. `gate_session_id`
-13. `allowed_capability`, exactly `confirm_only` for Gate 1A or
-    `issue_create_gate` for Gate 1B
+13. `allowed_capability`, exactly `confirm_only`
 
 Every value must exactly equal the descriptor, Gate plan, and signed Gate
 token; no field is caller-selected or inferred across tokens. The token digest
@@ -1679,9 +1700,9 @@ permit, and send require the Gate token to be currently unexpired and the same
 Gate runner connection to remain authenticated. Historical validation instead
 proves that the token was valid at the recorded live boundaries; later expiry
 does not erase an already `in_flight` chain. It never renews authority or
-permits another confirmation, permit, or send. Gate 1B may use that retained
-chain only for bounded read-only reconciliation while the current connection
-is still authenticated as the same Gate runner/session.
+permits another confirmation, permit, or send. Gate 1B historical bounded
+read-only reconciliation and the network-free reboot observer use only the
+isolated ADR's retained-authority and segment rules, never this legacy branch.
 
 For a Gate apply, the receipt, coordinator active record, permit, and closed
 record all bind this same context digest: the receipt and active/permit carry
@@ -1696,114 +1717,57 @@ capability.
 
 ### Gate 1B first exact-artifact enrollment
 
-Each Gate 1B E1 or E2 run begins with
-`gate1b.setup-exact-artifact-enrollment` on its own clean-reset disposable
-macOS VM or physical host. The root-signed Gate token and plan value
-`stage_setup_policy=gate1b_first_exact_artifact_enrollment_v1` allow the
-authenticated runner and exact artifact to derive one compact canonical setup
-context capped at 4,096 bytes. Its fields are, in order:
+Gate 1B enrollment is defined solely by the isolated ADR's
+[unit authorization and context](gate1b-isolated-subruns.md#unit-authorization-and-context).
+Every expanded unit proves its own pre-token fresh actual host/target
+inventory, then receives its bound child token, then performs the ordinary
+exact-artifact enrollment and retains an immutable revision-1 baseline. The
+old `gate1b_first_exact_artifact_enrollment` context and flat setup policy
+are rejected, not accepted as aliases of the new protocol.
 
-1. `schema_version`, integer `1`
-2. `context_type`, exactly `gate1b_first_exact_artifact_enrollment`
-3. `descriptor_sha256`
-4. `gate_plan_sha256`
-5. `gate_target_sha256`
-6. `gate_token_type`, exactly `gate_e1` or `gate_e2`
-7. `gate_token_sha256`, the sole Gate token ID and SHA-256 of the exact signed
-   Gate token bytes
-8. `prior_e1_evidence_sha256`, null for E1 and exactly the E2 token's
-   `e1_evidence_sha256` value for E2
-9. `prerequisite_gate1a_e2_evidence_set_sha256`
-10. `architecture`
-11. `allowed_capability`, exactly `issue_create_gate`
-12. `gate_runner_unique`
-13. `gate_session_id`
-14. `setup_authorization`, exactly
-    `gate1b_first_exact_artifact_enrollment_only`
+Setup permits only the initial enrollment ceremony, with its ordinary fresh
+user-presence checks; it cannot sign receipts, rotate, revoke, recover, issue
+permits, send, or delete. Runtime operations use that unit's separate receipt
+context and retained authority. A later transition may change current registry
+state but cannot replace baseline provenance. No mutable state crosses units
+or passes. The only continuation is the ADR's bounded read-only reboot
+observer, which is not a fresh setup or mutable recovery path.
 
-Every field must exactly equal the Gate plan and token; there are no
-extensions or alternate token identifiers. `gate1b_setup_context_sha256` is
-plain SHA-256 over those exact bytes. The outer CLI and helper accept this
-context only as an authorization input to the normal first-enrollment ceremony
-inside that token's authenticated session. It is not a private key, signing
-credential, general signing endpoint, or substitute registry authority. The
-ordinary ceremony may perform its required proposal and final signatures only
-with the newly generated exact signing key and its normal fresh
-Security.framework user-presence checks. The context itself cannot sign any
-registry record or receipt.
-
-The case reuses, without changing their field order or caps, the canonical
-`stage_pre_enrollment_empty_inventory` and
-`stage_post_enrollment_registry_snapshot` codecs defined below. For this one
-use, `stage_type` is exactly `gate1b` in both codecs. Only the post-enrollment
-snapshot contains `stage_token_sha256` and `setup_context_sha256`; they equal
-`gate_token_sha256` and `gate1b_setup_context_sha256`, respectively. The empty
-inventory has neither field and is bound by the snapshot's
-`pre_enrollment_inventory_sha256`. The retained empty inventory must prove that
-the production registry service, coordinator service, signing-key namespace,
-journal root, and runner-session state contain no inherited Gate 1A or prior
-Gate 1B state before any enrollment work. The single ceremony must create
-revision 1/generation 1, durably close and remove its coordinator active
-record, and retain the exact post-enrollment snapshot outside disposable
-mutable state before the setup case can pass.
-
-Entry to this setup authority is permitted only for the first case's
-`enroll` operation after that case's canonical empty-inventory observation.
-The `pre-enrollment-inventory` and `snapshot` operations are read-only runner
-evidence operations. Setup authority ends when the snapshot and case-final
-evaluation have been retained, or immediately on any failure or timeout. It
-can never authorize prepare, confirm, apply, permit, send, receipt signing,
-rotation, revocation, recovery, a second enrollment, or cleanup/deletion.
-Every later Gate 1B case enters through ordinary Gate E1/E2 runtime authority
-and the normal registry lifecycle, never through the setup context.
-
-The snapshot is immutable baseline provenance, not a promise that current
-registry state remains at revision 1/generation 1. Planned later rotate,
-revoke, and recover operations may advance registry state under their own
-ordinary Gate authority and transition evidence. Their observations continue
-to bind the retained baseline `registry_snapshot_sha256` while their own
-registry evidence describes the current state; neither value may be
-substituted for the other.
-
-Gate 1B has no item-attributed cleanup authority or `stage_cleanup` IPC.
-Success, failure, timeout, and partial enrollment all end with trusted external
-whole-host disposal after sanitized evidence export. Candidate per-item
-Keychain/journal deletion is forbidden. The disposal policy and bounded
-attestation below apply to each E1/E2 run; complete prior-stage evidence and
-its matching attestation are required before a successor E2/provisional
-signature. Failed runs remain invalid even after successful destruction.
-E1 mutable state is never inherited by E2, which independently proves its
-own canonical empty start.
+There is no item-attributed stage cleanup or `stage_cleanup` IPC. The trusted
+external supervisor retires the exact target before sanitized export and
+whole-host disposal under the isolated ADR. Missing or ambiguous retirement,
+export, or destruction blocks the parent; disposal cannot make failed evidence
+pass.
 
 ## Gate evidence codec
 
-Each Gate run writes immutable content-addressed files and one compact
-canonical evidence index. The index is capped at 1,048,576 bytes (1 MiB).
-Its fields are:
+Each Gate 1A run writes immutable content-addressed files and one compact
+canonical evidence index. This v1 index and the flat evidence-set below reject
+`gate_id=gate1b`. Gate 1B uses `gate1b_isolated_leaf_index_v1` and
+`gate1b_isolated_parent_v1`; shared observation/result payloads enter only via
+the [typed leaf adapter](gate1b-isolated-subruns.md#leaf-evidence-and-binding-adapter).
+They do not make this container valid for Gate 1B.
+The Gate 1A index is capped at 1,048,576 bytes (1 MiB). Its fields are:
 
 1. `schema_version`, integer `1`
 2. `evidence_type`, exactly `gate_e1_pass` or `gate_e2_pass`
-3. `gate_id`, exactly `gate1a` or `gate1b`
+3. `gate_id`, exactly `gate1a`
 4. `descriptor_sha256`
 5. `gate_token_sha256`
 6. `gate_plan_sha256`
-7. `gate_target_sha256`, null for Gate 1A and required for Gate 1B
+7. `gate_target_sha256`, exactly null
 8. `allowed_capability`, matching the Gate token
 9. `prior_e1_evidence_sha256`, null for E1 and required for E2
-10. `prerequisite_gate1a_e2_evidence_set_sha256`, null for Gate 1A and required for Gate 1B
+10. `prerequisite_gate1a_e2_evidence_set_sha256`, exactly null
 11. `gate_runner_unique`
 12. `gate_session_id`
 13. `macos_product_build_version`, printable ASCII, at most 32 bytes
 14. `architecture`, `arm64` or `x86_64`
 15. `fixture_set_sha256`
-16. `fixture_executable_manifest_sha256`, the Gate 1A plan value or null for
-    Gate 1B
-17. `setup_context_sha256`, null for Gate 1A and the exact
-    `gate1b_setup_context_sha256` for Gate 1B
-18. `pre_enrollment_inventory_sha256`, null for Gate 1A and required for
-    Gate 1B
-19. `registry_snapshot_sha256`, null for Gate 1A and the retained immutable
-    baseline snapshot digest for Gate 1B
+16. `fixture_executable_manifest_sha256`, the Gate 1A plan value
+17. `setup_context_sha256`, exactly null
+18. `pre_enrollment_inventory_sha256`, exactly null
+19. `registry_snapshot_sha256`, exactly null
 20. `evidence_scopes`, exactly the ordered unique case scopes in the plan
 21. `started_at`
 22. `finished_at`
@@ -1815,14 +1779,12 @@ Observation order is the order frozen by the Gate plan. Each entry contains
 `executable_identity_sha256`, `command_sha256`, `stdout_sha256`,
 `stderr_sha256`, `exit_code`, `registry_snapshot_sha256`, `assertion_ids`,
 `assertion_results_sha256`, and `transcript_results_sha256`, in that order.
-`registry_snapshot_sha256` is null for every Gate 1A observation, for the Gate
-1B setup case's `pre-enrollment-inventory` and `enroll` operations, and for
+`registry_snapshot_sha256` is null for every Gate 1A observation and for
 activation-smoke/post-grant setup operations before snapshot creation. It
-equals the exact retained post-enrollment snapshot for each setup `snapshot`
-operation, its final evaluation, and every later observation in that Gate 1B
-or release-stage run. A Gate 1B transition observation also retains its own
-current-state evidence; advancing the registry does not change or null this
-baseline provenance digest. Scope and role exactly match the compiled case,
+equals the exact retained post-enrollment snapshot for each release-stage
+setup `snapshot` operation, its final evaluation, and every later observation
+in that release-stage run. Gate 1B baseline/current-state projection is governed
+by the isolated leaf adapter, not a new branch in this v1 index. Scope and role exactly match the compiled case,
 step, or case-final evaluation.
 `executable_identity_sha256` hashes the complete exact
 descriptor code-slice entry (`cli` maps to `outer`, `helper` to `helper`),
@@ -1875,12 +1837,10 @@ missing/reordered final evaluation invalidates the run; there is no pass bit
 that can substitute for it.
 
 Gate 1A observations include every approval-protocol, code-identity, Keychain,
-UI-presence, fail-closed, restart, and clean-host test. Gate 1B observations
-begin with the empty-inventory, one-time enrollment, and retained baseline
-snapshot observations, then include its ordinary CLI live-write, helper-owned
-coordinator, apply-versus-registry linearization, lease fencing, every
-pre/post-permit crash boundary, one-shot send, fault, and reconciliation cases.
-E2 contains the complete repeated observation set for its Gate ID. Missing,
+UI-presence, fail-closed, restart, and clean-host test. Gate 1B's independent
+unit setup, workflow, and final-evaluation observations are assembled only by
+the new leaf/parent protocol. Gate 1A E2 contains the complete repeated
+observation set for Gate 1A. Missing,
 duplicated, reordered, or additional observations are a failure against the
 content-addressed Gate plan.
 
@@ -1894,35 +1854,32 @@ its own digest is correct.
 Passing indexes are collected into one canonical evidence-set manifest,
 capped at 16,384 bytes. Its fields are `schema_version` integer `1`,
 `evidence_set_type` exactly `gate_e1`, `gate_e2`, or `activation_smoke`,
-`gate_id` exactly `gate1a`, `gate1b`, or `activation_smoke`,
+`gate_id` exactly `gate1a` or `activation_smoke`,
 `descriptor_sha256`, `gate_plan_sha256`, `gate_target_sha256`,
 `provisional_context_sha256`, `fixture_executable_manifest_sha256`,
 `evidence_scopes`, `architectures`, `indexes`, `registry_snapshots`, and
 `result` exactly `pass`, in that order. Gate sets use null provisional context,
 smoke uses null Gate target, and `registry_snapshots` is null only for Gate 1A.
 The fixture-executable digest is required only for Gate 1A. Gate 1A
-scope order is exactly `exact_artifact`, then `disjoint_fixture`; Gate 1B and
-smoke contain only `exact_artifact`. `architectures` exactly equals the
+scope order is exactly `exact_artifact`, then `disjoint_fixture`; smoke
+contains only `exact_artifact`. `architectures` exactly equals the
 descriptor array.
 For Gate 1A sets, `indexes` has one entry per architecture in that same order,
 with fields `architecture`, `evidence_index_sha256`, `gate_token_sha256`,
 `gate_session_id`, `export_manifest_sha256`, and `host_disposal_attestation_sha256`
-in order. Gate 1B uses the same six fields followed by
-`setup_context_sha256`, `pre_enrollment_inventory_sha256`, and
-`registry_snapshot_sha256`, in that order. For activation smoke, each entry uses the same six-field prefix and appends
+in order. For activation smoke, each entry uses the same six-field prefix and appends
 `setup_context_sha256`, `pre_enrollment_inventory_sha256`,
 `registry_snapshot_sha256`, and `terminal_journal_evidence_sha256`,
 in that order. Disposal and export digests name the external objects defined
 below and are never fields of the earlier evidence index.
 The non-null
-`registry_snapshots` array for Gate 1B and activation smoke has one entry per
+`registry_snapshots` array for activation smoke has one entry per
 descriptor architecture, in that order, with fields `architecture` and
 `registry_snapshot_sha256`; it must exactly project the matching index entries.
-For Gate 1B, each index tuple must exactly project the generated setup-context,
-empty-inventory, and baseline-snapshot digests from its canonical index and
-retained evidence. Only their pre-run descriptor, plan, target, token,
-architecture, runner, and session inputs must match the root-signed Gate token;
-the token does not contain these post-run digests.
+Gate 1B has no one-index-per-architecture tuple in this codec. Its parent
+requires the complete typed inventory of units for every architecture/pass,
+including each unit's retained allocation, setup, segment, retirement, export,
+and disposal evidence under the isolated ADR.
 For activation smoke, every
 tuple must match its canonical index, root-signed token, and retained
 setup/export/disposal evidence. All token and session IDs are unique across all sets.
@@ -1969,8 +1926,15 @@ invalid.
 
 A `confirm_only` provisional authorization requires all Gate 1B fields to be
 null. An `issue_create` authorization requires all four Gate 1B fields and
-complete Gate 1B sets whose indexes each name a valid Gate 1A prerequisite for
-the same architecture. Gate 1A's two scope values and Gate 1B's exact-artifact
+complete `gate1b_isolated_parent_v1` E1/E2 objects: the two evidence-set fields
+select their respective exact parent digests, `gate1b_plan_sha256` selects their
+identical coverage-inventory digest (not a legacy flat-plan digest), and
+`gate1b_evidence_scopes` is exactly `["exact_artifact"]`, as required by the isolated ADR's
+[parent verifier](gate1b-isolated-subruns.md#parent-aggregation-and-freshness).
+The existing four Gate 1B authorization fields select that new route only;
+legacy flat Gate 1B sets or indexes are rejected. E2 binds the complete E1
+parent, and every unit binds the complete Gate 1A E2 prerequisite.
+Gate 1A's two scope values and Gate 1B's exact-artifact
 scope are mandatory and must equal their plans, indexes, and final evidence
 sets. The disjoint registry fixture therefore contributes required
 corruption, fork/gap/duplicate, ambiguous-add, orphan-cleanup, and active-key-
@@ -2064,7 +2028,6 @@ substitute current registry state for it.
 `setup_transcript_manifest_sha256` selects exactly the existing
 `transcript_results` codec, capped at 32,768 bytes, for the first setup case's
 `enroll` operation. The applicable setup case is exactly one of
-`gate1b.setup-exact-artifact-enrollment`,
 `smoke.confirm.setup-exact-artifact-enrollment`,
 `smoke.issue-create.setup-exact-artifact-enrollment`,
 `post-grant.confirm.setup-exact-artifact-enrollment`, or
@@ -2085,14 +2048,13 @@ The selected `ipc` transcript content is one closed canonical object capped at
 
 1. `schema_version`, integer `1`
 2. `evidence_type`, exactly `stage_setup_enrollment`
-3. `stage_type`, exactly `gate1b`, `activation_smoke`, or
+3. `stage_type`, exactly `activation_smoke` or
    `post_grant_verification`
 4. `stage_token_sha256`
 5. `setup_context_sha256`
 6. `artifact_descriptor_sha256`
 7. `architecture`
-8. `approved_capability`, exactly `issue_create_gate` for Gate 1B, otherwise
-   the token's `confirm_only` or `issue_create`
+8. `approved_capability`, the token's `confirm_only` or `issue_create`
 9. `gate_runner_unique`
 10. `gate_session_id`
 11. `registry_revision`, integer `1`
@@ -2122,14 +2084,24 @@ record, then enrollment IPC content, then the complete durable five-entry
 enroll transcript-result manifest, then snapshot, then setup final evaluation.
 No object may depend on its own digest or on a later object in this sequence.
 
-These setup codecs apply identically to Gate 1B, activation smoke, and
-post-grant verification, with the specified stage/token bindings. Their
+As standalone flat-stage inputs these legacy setup payloads apply only to
+activation smoke and post-grant verification and reject `stage_type=gate1b`.
+Only inside the isolated ADR's typed leaf adapter may their Gate 1B payload
+projection use `stage_type=gate1b` and the new unit setup/enrollment/baseline
+bindings. This is an explicit enclosing-type route, not a globally accepted
+new stage value or acceptance of any old Gate 1B setup context. Their
 pre-inventory, context, snapshot, selected enrollment transcript/result
 manifest, and failure evidence are retained as immutable content-addressed
 files outside the disposable host before proceeding. They never authorize
 cleanup, recovery, or a later registry ceremony.
 
 ### External whole-host disposal and successor-signature gate
+
+The following flat-stage export/disposal codecs apply to Gate 1A, smoke, and
+post-grant only and reject `stage_type=gate1b`. Gate 1B uses the isolated ADR's
+per-unit target retirement, export, and host-disposal closure. In particular,
+the exact target must be externally retired before export/disposal; an old
+single-run host-disposal attestation cannot satisfy a Gate 1B parent.
 
 The first release contains no `stage_cleanup` IPC, per-item stage delete,
 cleanup intent/progress/ACK ledger, restart cleanup session, or signed
@@ -2159,7 +2131,7 @@ After the immutable index exists, the external verifier emits a canonical
 export manifest capped at 2,097,152 bytes with fields in order:
 `schema_version` integer `1`, `manifest_type` exactly
 `stage_sanitized_evidence_export`, `stage_type` exactly `gate1a`,
-`gate1b`, `activation_smoke`, or `post_grant_verification`,
+`activation_smoke`, or `post_grant_verification`,
 `descriptor_sha256`, `stage_token_sha256`, `architecture`,
 `gate_runner_unique`, `gate_session_id`, `evidence_index_sha256`,
 `files`, `exported_at`, and `result` exactly `verified`.
@@ -2169,8 +2141,9 @@ manifest and every later attestation/set object. It has 1..4,096 entries,
 8 MiB per file and 256 MiB aggregate, checked before allocation/read. Each
 entry is exactly `path`, `size`, `sha256`. Missing, extra, linked,
 case-colliding, secret-bearing, or mutable-state files fail export. This cap
-covers the larger Gate 1B closure and is distinct from the smaller post-grant
-installed-tree cap. Export manifests are historical evidence, not authority
+is a flat-stage export bound and is distinct from the smaller post-grant
+installed-tree cap. Gate 1B leaf and aggregate caps follow its isolated ADR.
+Export manifests are historical evidence, not authority
 loaded by the candidate.
 
 Only after export verification and independently observed complete disposal
@@ -2756,30 +2729,36 @@ vectors contain exact unsigned bytes, domain-prefixed signing bytes, signed
 bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
 
 - one universal artifact descriptor and one single-architecture descriptor;
-- exact Gate 1A, Gate 1B, both capability-specific smoke plans, and both
+- exact Gate 1A, both capability-specific smoke plans, and both
   capability-specific post-grant plans, including every typed argv source,
   scope mapping, canonical operation execution context, empty operation
   assertion array, case-final evaluation contract, and ordered final aggregate;
-- all six complete command contracts and their fixture/assertion/transcript
+- all five complete flat command contracts and their fixture/assertion/transcript
   manifests, exact cardinalities from the normative table, maximum-length
   evidence skeletons and complete referenced-file closures, with canonical
   byte/count/file budget reports accepted before their digests are frozen;
+- the isolated Gate 1B coverage inventory, all expanded unit/segment contracts,
+  exact per-leaf and parent count/budget vectors, and every required semantic
+  vector from the isolated ADR; no old flat count or reset route satisfies them;
 - the complete Gate 1A fixture-executable manifest with both disjoint fixture
   roles, both negative-peer components, and every architecture-specific signed
   identity/code slice;
-- Gate 1A and Gate 1B per-architecture E1/E2 tokens, evidence indexes, and
-  complete evidence-set manifests, including Gate 1B E1- and E2-bound setup
+- Gate 1A per-architecture E1/E2 tokens, indexes, and complete evidence sets;
+  Gate 1B isolated coverage inventory, per-unit E1/E2 tokens and any observer
+  tokens, typed leaves, complete parents, target-retirement/export/disposal
+  evidence, and per-unit setup
   contexts, empty pre-enrollment inventories, immutable baseline registry
-  snapshots, and their exact index/evidence-set tuple projections;
-- all five setup-case enroll transcript-result manifests with their exact
+  snapshots, and their exact typed leaf/parent projections;
+- all four release-stage setup-case enroll transcript-result manifests with their exact
   observation IDs and ordered five entries, closed `stage_setup_enrollment`
   IPC bytes, and helper reconstruction from the validated token/context and
   snapshot enrollment fields checked against registry/closed records; the
   exact commit/closed-to-IPC-to-manifest-to-snapshot-to-final-evaluation DAG,
   with matching content digests and byte counts in both Go and Swift;
-- all four Gate 1A/Gate 1B by E1/E2
-  `gate_receipt_context_v1` objects and digests, matching schema-3 receipts,
-  complete `gate_authority_evidence_v1` journal branches with retained
+- Gate 1A E1/E2 `gate_receipt_context_v1` objects and digests, and Gate 1B
+  per-unit `gate1b_isolated_receipt_context_v1` objects and digests, matching
+  schema-3 receipts and their respective complete `gate_authority_evidence_v1`
+  or `gate1b_isolated_authority_evidence_v1` journal branches with retained
   descriptor/token/context bytes and genesis-to-current registry chains, and
   the context-bound active/permit/closed linkage plus Gate 1B historical
   read-only reconciliation;
@@ -2938,13 +2917,16 @@ independently covers:
   synthetic context, wrong post-grant token/grant/context/runner/architecture,
   missing terminal CAS or export/disposal evidence, receipt replay after terminal
   consumption, and pre-dispatch/late-dispatch false positives;
-- missing/non-first Gate 1B setup case or a Gate 1B plan with null, release-
-  stage, or changed setup policy; Gate 1B setup under anything other than the
-  exact E1/E2 token and derived context, including a wrong token type/digest,
-  prior-E1 evidence, Gate 1A prerequisite, plan, target, descriptor,
-  architecture, capability, runner, or session; Gate 1A state inherited into
-  Gate 1B, E1 mutable state inherited into E2, or a Gate 1B setup context
-  routed by any later command template; missing/non-first release-stage setup
+- acceptance of any old flat Gate 1B token, setup/receipt context, retained
+  branch, index, evidence set, or export/disposal route; missing isolated
+  phase/negative variant, including status and legacy-journal quarantine;
+  inherited or relabeled actual host/target identities across units,
+  architectures, or passes; wrong unit token, complete E1-parent or Gate 1A
+  E2 prerequisite, inventory, target, descriptor, architecture, capability,
+  runner, session, or checkpoint binding; use of an old reset label as an
+  executable action; missing or late target retirement; reboot observer with
+  network, reset, signing, CAS, deletion, or more than two segments; any other
+  missing isolated-ADR conformance vector; missing/non-first release-stage setup
   case; setup token/context absent, mismatched, or used for any action except
   the one initial exact-artifact enrollment; nonempty
   pre-enrollment registry service, coordinator service, signing-key namespace,
@@ -2952,9 +2934,8 @@ independently covers:
   revision 1/generation 1; setup snapshot with wrong revision, generation,
   SPKI, fingerprint, descriptor, architecture, runner, or session; any later
   observation/index/evidence-set entry with a missing or different snapshot;
-  a Gate 1B index without its setup-context/inventory/snapshot tuple, a Gate 1B
-  evidence-set snapshot projection mismatch, or a non-null Gate 1A setup or
-  snapshot field; retained setup evidence placed inside disposable state; a
+  a Gate 1B typed leaf/parent with missing, conflicting, or cross-unit
+  setup/inventory/snapshot bindings, or a non-null Gate 1A setup or snapshot field; retained setup evidence placed inside disposable state; a
   baseline snapshot treated as current state after an evidenced
   rotate/revoke/recover transition or current state substituted for baseline;
   or a second setup, rotation, recovery, revocation, receipt signature,
@@ -3000,13 +2981,13 @@ invalidates prior E1/E2 evidence.
   content-addressed. Any case, workflow step, runner, typed argv source,
   fixture, assertion, transcript, entitlement expectation, or command change
   produces a new plan digest and invalidates its tokens and evidence sets.
-- Every Gate 1A/Gate 1B E1/E2 receipt binds the exact token-derived
-  `gate_receipt_context_v1` through the existing schema-3 context field and a
-  closed retained Gate authority branch. Live authority requires the unexpired
-  token and authenticated matching runner session; historical verification
-  replays the retained root and complete registry chain but can authorize only
-  Gate 1B bounded reads, never a new confirmation, permit, or send. Production,
-  smoke, and post-grant modes reject the Gate context and evidence branch.
+- Gate 1A E1/E2 receipts bind `gate_receipt_context_v1`; Gate 1B receipts
+  bind `gate1b_isolated_receipt_context_v1` and its distinct retained-authority
+  branch. Both use the existing schema-3 context field. Live authority requires
+  the unexpired token and matching authenticated runner connection. Gate 1B
+  historical reads and its network-free reboot observer follow the isolated
+  ADR; neither may renew confirmation, permit, or send. Production, smoke,
+  and post-grant modes reject both Gate-only context/authority branches.
 - Gate 1A exact-artifact cases use the normal confirmation and registry
   lifecycle commands; its five destructive corruption/malformed-ledger/
   ambiguous-add/orphan-cleanup/active-key-loss cases use only the separately
@@ -3018,8 +2999,10 @@ invalidates prior E1/E2 evidence.
   with the real sidecar pair, final production context, and schema-3 receipts,
   then irrevocably terminalizes those disposable receipts. Test-only command
   surfaces cannot substitute for either path.
-- Every Gate 1B, smoke, and post-grant run begins with exactly one setup-only
-  exact-artifact enrollment from a canonical empty inventory. Its retained
+- Every Gate 1B isolated unit, and every smoke or post-grant run, performs
+  exactly one setup-only exact-artifact enrollment from its own canonical
+  empty inventory. Gate 1B host/target allocation precedes its token and uses
+  the new inventory protocol; other stages retain their existing order. The retained
   revision-1/generation-1 snapshot is immutable baseline provenance, not
   current-state authority. E1 state is never inherited by E2. Setup authority
   cannot rotate, recover, revoke, sign receipts, acquire a permit, or send.
@@ -3036,8 +3019,10 @@ invalidates prior E1/E2 evidence.
   observation the case and containing evidence set cannot pass.
 - E1, E2, provisional authorization, provisional context, smoke, activation
   grant, final production context, post-grant verification, and publication
-  all bind one descriptor digest and complete per-architecture evidence sets with their exact
-  artifact/fixture scope partition. The fixture manifest is Gate evidence only
+  all bind one descriptor digest and complete evidence sets with their exact
+  artifact/fixture scope partition. Gate 1B alone requires the isolated typed
+  parent across every unit and architecture; a flat per-architecture index
+  cannot replace it. The fixture manifest is Gate evidence only
   and is never promoted into production runtime authority. The final context also
   binds the exact grant bytes, so different valid grants cannot share peer or
   receipt authority. A same-build rebuild has different Security.framework
