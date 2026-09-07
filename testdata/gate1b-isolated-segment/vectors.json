@@ -1,0 +1,1695 @@
+{
+  "schema_version": 1,
+  "positives": [
+    {
+      "name": "scenario-example",
+      "raw": "{\"schema_version\":1,\"object_type\":\"gate1b_isolated_segment_contract_v1\",\"segment_ordinal\":1,\"mode\":\"scenario\",\"command_contract_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"fixture_set_sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"assertion_set_sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"transcript_set_sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"operation_count\":2,\"observation_count\":3,\"transcript_count\":4,\"assertion_count\":5,\"file_count\":6,\"maximum_evidence_bytes\":1024}",
+      "sha256": "e5ac5bdec44a5e68ea2f5fba87b359011f24a401759501e3a27d69c689367fc9",
+      "ordinal": 1,
+      "mode": "scenario",
+      "counts": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        1024
+      ]
+    },
+    {
+      "name": "scenario-minimum",
+      "raw": "{\"schema_version\":1,\"object_type\":\"gate1b_isolated_segment_contract_v1\",\"segment_ordinal\":1,\"mode\":\"scenario\",\"command_contract_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"fixture_set_sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"assertion_set_sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"transcript_set_sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"operation_count\":1,\"observation_count\":1,\"transcript_count\":1,\"assertion_count\":1,\"file_count\":1,\"maximum_evidence_bytes\":1}",
+      "sha256": "9f5841f408e5c3095ae9c9df7dfda0a3b4cfee74f24727e408f6c3b4c83e9916",
+      "ordinal": 1,
+      "mode": "scenario",
+      "counts": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "scenario-maximum",
+      "raw": "{\"schema_version\":1,\"object_type\":\"gate1b_isolated_segment_contract_v1\",\"segment_ordinal\":1,\"mode\":\"scenario\",\"command_contract_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"fixture_set_sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"assertion_set_sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"transcript_set_sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"operation_count\":128,\"observation_count\":256,\"transcript_count\":2048,\"assertion_count\":256,\"file_count\":4096,\"maximum_evidence_bytes\":268435456}",
+      "sha256": "90165e0b86d1a08d12545b8189722894e2f29d8f2155c0e332da33a7e01667f9",
+      "ordinal": 1,
+      "mode": "scenario",
+      "counts": [
+        128,
+        256,
+        2048,
+        256,
+        4096,
+        268435456
+      ]
+    },
+    {
+      "name": "scenario-syntax-only-cross-count-mismatch",
+      "raw": "{\"schema_version\":1,\"object_type\":\"gate1b_isolated_segment_contract_v1\",\"segment_ordinal\":1,\"mode\":\"scenario\",\"command_contract_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"fixture_set_sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"assertion_set_sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"transcript_set_sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"operation_count\":128,\"observation_count\":1,\"transcript_count\":1,\"assertion_count\":1,\"file_count\":1,\"maximum_evidence_bytes\":1}",
+      "sha256": "cd35a32f086300e47a536b1a4ef0d8cc490682c0052884224b7833575a172576",
+      "ordinal": 1,
+      "mode": "scenario",
+      "counts": [
+        128,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "reboot_observer-example",
+      "raw": "{\"schema_version\":1,\"object_type\":\"gate1b_isolated_segment_contract_v1\",\"segment_ordinal\":2,\"mode\":\"reboot_observer\",\"command_contract_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"fixture_set_sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"assertion_set_sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"transcript_set_sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"operation_count\":2,\"observation_count\":3,\"transcript_count\":4,\"assertion_count\":5,\"file_count\":6,\"maximum_evidence_bytes\":1024}",
+      "sha256": "40c4f47d9f496c70cddfffd5a8d12ebb8564118aed9c741b98b6c7487b55a9ad",
+      "ordinal": 2,
+      "mode": "reboot_observer",
+      "counts": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        1024
+      ]
+    },
+    {
+      "name": "reboot_observer-minimum",
+      "raw": "{\"schema_version\":1,\"object_type\":\"gate1b_isolated_segment_contract_v1\",\"segment_ordinal\":2,\"mode\":\"reboot_observer\",\"command_contract_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"fixture_set_sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"assertion_set_sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"transcript_set_sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"operation_count\":1,\"observation_count\":1,\"transcript_count\":1,\"assertion_count\":1,\"file_count\":1,\"maximum_evidence_bytes\":1}",
+      "sha256": "8b351a0c51fdd62d8f70bc142f9dd0cd73ab4ab35ab56aff147e8ebb08296904",
+      "ordinal": 2,
+      "mode": "reboot_observer",
+      "counts": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "reboot_observer-maximum",
+      "raw": "{\"schema_version\":1,\"object_type\":\"gate1b_isolated_segment_contract_v1\",\"segment_ordinal\":2,\"mode\":\"reboot_observer\",\"command_contract_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"fixture_set_sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"assertion_set_sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"transcript_set_sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"operation_count\":128,\"observation_count\":256,\"transcript_count\":2048,\"assertion_count\":256,\"file_count\":4096,\"maximum_evidence_bytes\":268435456}",
+      "sha256": "d4d7d756df11ea07b8774e57769cb0209812b8321ec886a28b231d5014c5a8d5",
+      "ordinal": 2,
+      "mode": "reboot_observer",
+      "counts": [
+        128,
+        256,
+        2048,
+        256,
+        4096,
+        268435456
+      ]
+    },
+    {
+      "name": "reboot_observer-syntax-only-cross-count-mismatch",
+      "raw": "{\"schema_version\":1,\"object_type\":\"gate1b_isolated_segment_contract_v1\",\"segment_ordinal\":2,\"mode\":\"reboot_observer\",\"command_contract_sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"fixture_set_sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"assertion_set_sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"transcript_set_sha256\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"operation_count\":128,\"observation_count\":1,\"transcript_count\":1,\"assertion_count\":1,\"file_count\":1,\"maximum_evidence_bytes\":1}",
+      "sha256": "5839d6526c2a07a3699432eb45b3b56abeab70b41fc92eb92fe29d0ebed8fd70",
+      "ordinal": 2,
+      "mode": "reboot_observer",
+      "counts": [
+        128,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    }
+  ],
+  "negatives": [
+    {
+      "name": "missing-schema_version",
+      "base": "scenario-example",
+      "offset": 2,
+      "delete": 19,
+      "insert_hex": "",
+      "sha256": "5be36f07f5c7b18952c51540603e96fa96df8ff96b1fec11a5483585ed1a5a57"
+    },
+    {
+      "name": "null-schema_version",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 1,
+      "insert_hex": "6e756c6c",
+      "sha256": "72b5529ad6c59d1fba0e084b8a341d728e8766975794dcc4b5753847b8ac4538"
+    },
+    {
+      "name": "duplicate-schema_version",
+      "base": "scenario-example",
+      "offset": 21,
+      "delete": 0,
+      "insert_hex": "736368656d615f76657273696f6e223a312c22",
+      "sha256": "5d541e3557f492e554fbcbd9f73f9465eff604c3589761c1f80c8d38583d0333"
+    },
+    {
+      "name": "reordered-schema_version",
+      "base": "scenario-example",
+      "offset": 2,
+      "delete": 69,
+      "insert_hex": "6f626a6563745f74797065223a226761746531625f69736f6c617465645f7365676d656e745f636f6e74726163745f7631222c22736368656d615f76657273696f6e223a31",
+      "sha256": "e490fd46fc54fbbb8734bb58fb44241ec25b073f3525d9f2e0195617df59b8d9"
+    },
+    {
+      "name": "wrong-type-schema_version-true",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 1,
+      "insert_hex": "74727565",
+      "sha256": "b3e2e0bd503c3d3eeaa4df7e58dcf670c71b6824b2697bde74c82b68f72192b6"
+    },
+    {
+      "name": "wrong-type-schema_version-[]",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 1,
+      "insert_hex": "5b5d",
+      "sha256": "d632b70ec104172072653e8da9df0ec92adee0cdc10a054e8d33bd4649207eaf"
+    },
+    {
+      "name": "wrong-type-schema_version-{}",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 1,
+      "insert_hex": "7b7d",
+      "sha256": "2f5547f0e32d32940ec48e8c9b9993485983c74a788c614cf4989025757a873d"
+    },
+    {
+      "name": "missing-object_type",
+      "base": "scenario-example",
+      "offset": 21,
+      "delete": 52,
+      "insert_hex": "",
+      "sha256": "0e6d16ace31cd75886632511cc6b780ed153212591668433d559b29ebedc80af"
+    },
+    {
+      "name": "null-object_type",
+      "base": "scenario-example",
+      "offset": 34,
+      "delete": 37,
+      "insert_hex": "6e756c6c",
+      "sha256": "2172211cd0b53596967ab01836e557b05d951ffd002115a75cd12669e44cdd6c"
+    },
+    {
+      "name": "duplicate-object_type",
+      "base": "scenario-example",
+      "offset": 73,
+      "delete": 0,
+      "insert_hex": "6f626a6563745f74797065223a226761746531625f69736f6c617465645f7365676d656e745f636f6e74726163745f7631222c22",
+      "sha256": "bb493afa43524f238cfe5aaaefd77800892693caa6af11b86e40ee92684b4895"
+    },
+    {
+      "name": "reordered-object_type",
+      "base": "scenario-example",
+      "offset": 21,
+      "delete": 70,
+      "insert_hex": "7365676d656e745f6f7264696e616c223a312c226f626a6563745f74797065223a226761746531625f69736f6c617465645f7365676d656e745f636f6e74726163745f763122",
+      "sha256": "d50225279054477d131cb29d25abb7e746d58d9aa36bfd5e23c16ad98482cd8c"
+    },
+    {
+      "name": "wrong-type-object_type-true",
+      "base": "scenario-example",
+      "offset": 34,
+      "delete": 37,
+      "insert_hex": "74727565",
+      "sha256": "86f3e604246f3580208d57679e8a25cab2daf4a0e007cb9d0b1ae72966890eba"
+    },
+    {
+      "name": "wrong-type-object_type-[]",
+      "base": "scenario-example",
+      "offset": 34,
+      "delete": 37,
+      "insert_hex": "5b5d",
+      "sha256": "e7451a71cfed4260bcee26e0a64c88bdf7b2e5adf9dcc03d68a7eb8878475120"
+    },
+    {
+      "name": "wrong-type-object_type-{}",
+      "base": "scenario-example",
+      "offset": 34,
+      "delete": 37,
+      "insert_hex": "7b7d",
+      "sha256": "de9c76ba2078d3911b16fd87f0314e49e0a99ee78850d741bb20511ec9865f46"
+    },
+    {
+      "name": "missing-segment_ordinal",
+      "base": "scenario-example",
+      "offset": 73,
+      "delete": 20,
+      "insert_hex": "",
+      "sha256": "98515ab357f6ee051c035c3bebee8087d0ba9dac5d6eacb781bd40b557ba9372"
+    },
+    {
+      "name": "null-segment_ordinal",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 1,
+      "insert_hex": "6e756c6c",
+      "sha256": "934edf2be6bbefd873ebd6afe3fb78adb8b0d3712c5c1566721c7a4506a953f8"
+    },
+    {
+      "name": "duplicate-segment_ordinal",
+      "base": "scenario-example",
+      "offset": 93,
+      "delete": 0,
+      "insert_hex": "7365676d656e745f6f7264696e616c223a312c22",
+      "sha256": "b0500afdba6dba6a211eed7a04c73a951c1f4f9fe579bd4873487ea47f319fb6"
+    },
+    {
+      "name": "reordered-segment_ordinal",
+      "base": "scenario-example",
+      "offset": 73,
+      "delete": 36,
+      "insert_hex": "6d6f6465223a227363656e6172696f222c227365676d656e745f6f7264696e616c223a31",
+      "sha256": "60f5eb00169fe3345036af34ec8826462a2ddd6ee04a9c94f901854bc32cc180"
+    },
+    {
+      "name": "wrong-type-segment_ordinal-true",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 1,
+      "insert_hex": "74727565",
+      "sha256": "3e5b8a560b12bfbb7c5071d14a912c0b7af11da9509a0df24eb19ca75191beee"
+    },
+    {
+      "name": "wrong-type-segment_ordinal-[]",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 1,
+      "insert_hex": "5b5d",
+      "sha256": "b4929b329855518a2c56999fc592618714f81384d515493d13658535829ae645"
+    },
+    {
+      "name": "wrong-type-segment_ordinal-{}",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 1,
+      "insert_hex": "7b7d",
+      "sha256": "953c398a05c0113466db630efede3b20058503afa51cb1550de325252de3294f"
+    },
+    {
+      "name": "missing-mode",
+      "base": "scenario-example",
+      "offset": 93,
+      "delete": 18,
+      "insert_hex": "",
+      "sha256": "6fcfb8c8a5331c4465f7ea36bc6a6656c0bd56e5ddf6b8f2e6044a5045cd7f9f"
+    },
+    {
+      "name": "null-mode",
+      "base": "scenario-example",
+      "offset": 99,
+      "delete": 10,
+      "insert_hex": "6e756c6c",
+      "sha256": "142f5671541ba67ef5b3afd5d79f0750132be01744a49d4aa87b82790cd985f6"
+    },
+    {
+      "name": "duplicate-mode",
+      "base": "scenario-example",
+      "offset": 111,
+      "delete": 0,
+      "insert_hex": "6d6f6465223a227363656e6172696f222c22",
+      "sha256": "dc179acd62c4804fff6eda7895d252fd431b2a73291c16f9f669b9a7d3f5bf41"
+    },
+    {
+      "name": "reordered-mode",
+      "base": "scenario-example",
+      "offset": 93,
+      "delete": 108,
+      "insert_hex": "636f6d6d616e645f636f6e74726163745f736861323536223a2231313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131222c226d6f6465223a227363656e6172696f",
+      "sha256": "175cea62b7c0780d736d8023be580fa9944fb918fbf883ef3d3f799e0e632d83"
+    },
+    {
+      "name": "wrong-type-mode-true",
+      "base": "scenario-example",
+      "offset": 99,
+      "delete": 10,
+      "insert_hex": "74727565",
+      "sha256": "11c38020a76a548f2bc69774c6aa321e235286ec1379fda235d81e661f01f382"
+    },
+    {
+      "name": "wrong-type-mode-[]",
+      "base": "scenario-example",
+      "offset": 99,
+      "delete": 10,
+      "insert_hex": "5b5d",
+      "sha256": "d5e501d2afdff1f8d459df90fed018d23f11428eb30027cb63d5e0ffb25820c5"
+    },
+    {
+      "name": "wrong-type-mode-{}",
+      "base": "scenario-example",
+      "offset": 99,
+      "delete": 10,
+      "insert_hex": "7b7d",
+      "sha256": "b5c4ef70b060c9d58d7c4e4d9e6e2a04ddb761773ef8188798347ee818537472"
+    },
+    {
+      "name": "missing-command_contract_sha256",
+      "base": "scenario-example",
+      "offset": 111,
+      "delete": 93,
+      "insert_hex": "",
+      "sha256": "c1ed259de35617957e33d97a42b2eed7820dd4e9dabad5cada4f637bccbbe6ce"
+    },
+    {
+      "name": "null-command_contract_sha256",
+      "base": "scenario-example",
+      "offset": 136,
+      "delete": 66,
+      "insert_hex": "6e756c6c",
+      "sha256": "8bbf1b12e6dcc08c74a3a9d787a0cb6d3755d01315da2b94859badeaee1184bc"
+    },
+    {
+      "name": "duplicate-command_contract_sha256",
+      "base": "scenario-example",
+      "offset": 204,
+      "delete": 0,
+      "insert_hex": "636f6d6d616e645f636f6e74726163745f736861323536223a2231313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131222c22",
+      "sha256": "ebd836701f932e6cbaaf136304bbfc6b6bdb9593f9c010287d9f9c4a304ac662"
+    },
+    {
+      "name": "reordered-command_contract_sha256",
+      "base": "scenario-example",
+      "offset": 111,
+      "delete": 178,
+      "insert_hex": "666978747572655f7365745f736861323536223a2232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232222c22636f6d6d616e645f636f6e74726163745f736861323536223a2231313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131",
+      "sha256": "3bdadd5f0d3887d08dc7b444f326cff53f160764dea3ebd217bcbef6c4ce9813"
+    },
+    {
+      "name": "wrong-type-command_contract_sha256-true",
+      "base": "scenario-example",
+      "offset": 136,
+      "delete": 66,
+      "insert_hex": "74727565",
+      "sha256": "91876febf4f4ebab5dcca1c7ecc71584d1f6b5bbb8763461bb1e926d6b4afd8a"
+    },
+    {
+      "name": "wrong-type-command_contract_sha256-[]",
+      "base": "scenario-example",
+      "offset": 136,
+      "delete": 66,
+      "insert_hex": "5b5d",
+      "sha256": "14c9a4a2aefc0b8cd632872890372df081e515364fe40c536be950c1b906638d"
+    },
+    {
+      "name": "wrong-type-command_contract_sha256-{}",
+      "base": "scenario-example",
+      "offset": 136,
+      "delete": 66,
+      "insert_hex": "7b7d",
+      "sha256": "9066b8cf3810ea11a95aef52e89904cbe91c77dbdf0e5b4e068f42a3a88ead60"
+    },
+    {
+      "name": "missing-fixture_set_sha256",
+      "base": "scenario-example",
+      "offset": 204,
+      "delete": 88,
+      "insert_hex": "",
+      "sha256": "c343e71ee406f8bf5f82e2f4ba53ce17575d071e498f8811421fb7e3373711e9"
+    },
+    {
+      "name": "null-fixture_set_sha256",
+      "base": "scenario-example",
+      "offset": 224,
+      "delete": 66,
+      "insert_hex": "6e756c6c",
+      "sha256": "a58e9db1a46b77e2c1e23e3574275d036ec34249b8239b12da2171224bb7bec5"
+    },
+    {
+      "name": "duplicate-fixture_set_sha256",
+      "base": "scenario-example",
+      "offset": 292,
+      "delete": 0,
+      "insert_hex": "666978747572655f7365745f736861323536223a2232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232222c22",
+      "sha256": "c8db1177d12731eb25254b106d2320cb3691aa7ab2efcf690c0a3406361471af"
+    },
+    {
+      "name": "reordered-fixture_set_sha256",
+      "base": "scenario-example",
+      "offset": 204,
+      "delete": 175,
+      "insert_hex": "617373657274696f6e5f7365745f736861323536223a2233333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333222c22666978747572655f7365745f736861323536223a2232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232",
+      "sha256": "ec6e3fe581c01548a7f9a3ca15df203784553db8ed84c856e709cae77a1bebb6"
+    },
+    {
+      "name": "wrong-type-fixture_set_sha256-true",
+      "base": "scenario-example",
+      "offset": 224,
+      "delete": 66,
+      "insert_hex": "74727565",
+      "sha256": "02f750841a5e1618d8d02d9a7cb9ef20d6c93662ddd8f43539354b8d8d4ce9ba"
+    },
+    {
+      "name": "wrong-type-fixture_set_sha256-[]",
+      "base": "scenario-example",
+      "offset": 224,
+      "delete": 66,
+      "insert_hex": "5b5d",
+      "sha256": "c342ca05cdd66c56ca8141a3a99c7036475096c9d0d7eabe59f7b107227ba40b"
+    },
+    {
+      "name": "wrong-type-fixture_set_sha256-{}",
+      "base": "scenario-example",
+      "offset": 224,
+      "delete": 66,
+      "insert_hex": "7b7d",
+      "sha256": "dee96fcd981f2317daa6291be0b1e6eaa47deb03c88a541f0400863c4601d7ec"
+    },
+    {
+      "name": "missing-assertion_set_sha256",
+      "base": "scenario-example",
+      "offset": 292,
+      "delete": 90,
+      "insert_hex": "",
+      "sha256": "f8d72f70d97ba989fb3c1432702ef57dc2a1e04e8d7068c1f1bf6e0c71e1eef0"
+    },
+    {
+      "name": "null-assertion_set_sha256",
+      "base": "scenario-example",
+      "offset": 314,
+      "delete": 66,
+      "insert_hex": "6e756c6c",
+      "sha256": "4243d0fb2a232e9aa6b431ae1ea8837e0eb087bc994e27b8781e5f4d47ade569"
+    },
+    {
+      "name": "duplicate-assertion_set_sha256",
+      "base": "scenario-example",
+      "offset": 382,
+      "delete": 0,
+      "insert_hex": "617373657274696f6e5f7365745f736861323536223a2233333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333222c22",
+      "sha256": "86864d9eb9e7816d024501939032c59d1410f94ac260e11533edb81295f9736a"
+    },
+    {
+      "name": "reordered-assertion_set_sha256",
+      "base": "scenario-example",
+      "offset": 292,
+      "delete": 178,
+      "insert_hex": "7472616e7363726970745f7365745f736861323536223a2234343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434222c22617373657274696f6e5f7365745f736861323536223a2233333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+      "sha256": "b6234fe1a047cb3d7ac09cf1d78fc1cd9701dbcc23389d9104e5064b98d7119a"
+    },
+    {
+      "name": "wrong-type-assertion_set_sha256-true",
+      "base": "scenario-example",
+      "offset": 314,
+      "delete": 66,
+      "insert_hex": "74727565",
+      "sha256": "c7e198dd6dd621343466c36f53747adea4a01a5a8a6b6eb788d0af9155151401"
+    },
+    {
+      "name": "wrong-type-assertion_set_sha256-[]",
+      "base": "scenario-example",
+      "offset": 314,
+      "delete": 66,
+      "insert_hex": "5b5d",
+      "sha256": "e8a1efb09191e5cf04c8f8e090f8a0a1533532b5ab705b69c5f9d32d80785ae1"
+    },
+    {
+      "name": "wrong-type-assertion_set_sha256-{}",
+      "base": "scenario-example",
+      "offset": 314,
+      "delete": 66,
+      "insert_hex": "7b7d",
+      "sha256": "dde3425510029c8334f38cb82dd62ac997d702a15896823a853a550e98e663b3"
+    },
+    {
+      "name": "missing-transcript_set_sha256",
+      "base": "scenario-example",
+      "offset": 382,
+      "delete": 91,
+      "insert_hex": "",
+      "sha256": "e8da88f4e37de9117bc0b9a1f677ffa6df74d1c177c4ab00caedc3efae7b9f99"
+    },
+    {
+      "name": "null-transcript_set_sha256",
+      "base": "scenario-example",
+      "offset": 405,
+      "delete": 66,
+      "insert_hex": "6e756c6c",
+      "sha256": "22f0d16491e4cd068a6bf7c43106d51ac26e97193bbb59a7932d4aa8d6ea5344"
+    },
+    {
+      "name": "duplicate-transcript_set_sha256",
+      "base": "scenario-example",
+      "offset": 473,
+      "delete": 0,
+      "insert_hex": "7472616e7363726970745f7365745f736861323536223a2234343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434222c22",
+      "sha256": "5caea4e9b0be20b6899bd6c08b332a4c2bafbc109fb4c3e5c87631f99d1aff2e"
+    },
+    {
+      "name": "reordered-transcript_set_sha256",
+      "base": "scenario-example",
+      "offset": 382,
+      "delete": 109,
+      "insert_hex": "6f7065726174696f6e5f636f756e74223a322c227472616e7363726970745f7365745f736861323536223a223434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343434343422",
+      "sha256": "9711d339baf808d06b1e59e4d99e09d3daa3ed8ab9de3381605e036e19c4a471"
+    },
+    {
+      "name": "wrong-type-transcript_set_sha256-true",
+      "base": "scenario-example",
+      "offset": 405,
+      "delete": 66,
+      "insert_hex": "74727565",
+      "sha256": "6f1a00552e63ef153f4bd91ac41c9f737b3b4d1c95b3af9955801e5b5cb156c9"
+    },
+    {
+      "name": "wrong-type-transcript_set_sha256-[]",
+      "base": "scenario-example",
+      "offset": 405,
+      "delete": 66,
+      "insert_hex": "5b5d",
+      "sha256": "13a7186be48fe4afa1db1d162c33327ea04f2317f65ede6ae56c8f76438e65f3"
+    },
+    {
+      "name": "wrong-type-transcript_set_sha256-{}",
+      "base": "scenario-example",
+      "offset": 405,
+      "delete": 66,
+      "insert_hex": "7b7d",
+      "sha256": "fc1c1b18dc25047caf360f120fe87130c359ff52fa5c03f042ca9635e901028d"
+    },
+    {
+      "name": "missing-operation_count",
+      "base": "scenario-example",
+      "offset": 474,
+      "delete": 20,
+      "insert_hex": "",
+      "sha256": "5050bba9b8a016abce2f5b058e6bf9309b34b2d1395705460b2b4ab91c72ae35"
+    },
+    {
+      "name": "null-operation_count",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "6e756c6c",
+      "sha256": "a7fa8b920386b18853daa967dba7d175d506525ecc1c4da06f74030b97c9c8df"
+    },
+    {
+      "name": "duplicate-operation_count",
+      "base": "scenario-example",
+      "offset": 494,
+      "delete": 0,
+      "insert_hex": "7065726174696f6e5f636f756e74223a322c226f",
+      "sha256": "5dadf86f339ecaf6ec523e27443e18ca2d8a7bcd5a32fbd98f7155425763f86c"
+    },
+    {
+      "name": "reordered-operation_count",
+      "base": "scenario-example",
+      "offset": 474,
+      "delete": 39,
+      "insert_hex": "62736572766174696f6e5f636f756e74223a332c226f7065726174696f6e5f636f756e74223a32",
+      "sha256": "00d1ad0b9c3af2935a09cfdb6a139d9b06f86d257ad5a7a2652fef3da48986e6"
+    },
+    {
+      "name": "wrong-type-operation_count-true",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "74727565",
+      "sha256": "058da6056f8e90e64f7a511403737c1c8050460a1f3afc0ef9b046fdf4746602"
+    },
+    {
+      "name": "wrong-type-operation_count-[]",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "5b5d",
+      "sha256": "2693765ce7063c6a13fff54d44208d95bda1beb26595c4b2deb57430b128771f"
+    },
+    {
+      "name": "wrong-type-operation_count-{}",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "7b7d",
+      "sha256": "ab51c8b842021630fb8b0d4411faea04268dd4a0d62cd0914814340b79331aec"
+    },
+    {
+      "name": "missing-observation_count",
+      "base": "scenario-example",
+      "offset": 493,
+      "delete": 22,
+      "insert_hex": "",
+      "sha256": "037b26bdf070a55daf656ff9f3d84406f87cc10e402c9e602cdcd1569b6385d7"
+    },
+    {
+      "name": "null-observation_count",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "6e756c6c",
+      "sha256": "c9fbd05df0f249c972fcfaa41d469c1a844d3f27c2a8a13849043d3b5d973e3e"
+    },
+    {
+      "name": "duplicate-observation_count",
+      "base": "scenario-example",
+      "offset": 515,
+      "delete": 0,
+      "insert_hex": "6f62736572766174696f6e5f636f756e74223a332c22",
+      "sha256": "f94fd7982f48e5cfd9f43861a8239a982a4d2d170404faa72978af571ef5a43f"
+    },
+    {
+      "name": "reordered-observation_count",
+      "base": "scenario-example",
+      "offset": 493,
+      "delete": 41,
+      "insert_hex": "7472616e7363726970745f636f756e74223a342c226f62736572766174696f6e5f636f756e74223a33",
+      "sha256": "e17aed1b57594e85a44e62ae99159941530d14f3d37ae2a1e78e9847e1b8c4f8"
+    },
+    {
+      "name": "wrong-type-observation_count-true",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "74727565",
+      "sha256": "e35f437d567182b696eba0421925d9817837880c12bcc0309290aae14e5ed43d"
+    },
+    {
+      "name": "wrong-type-observation_count-[]",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "5b5d",
+      "sha256": "3e2e98623175f6dd39bde573f20bdef70ebca81d5d763bc1dd34b4cbf5ad7bbc"
+    },
+    {
+      "name": "wrong-type-observation_count-{}",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "7b7d",
+      "sha256": "d770a2c150c8db93bfe0c0e8e710fbe21aae53bc5d60a4507dd14bcc3ef45446"
+    },
+    {
+      "name": "missing-transcript_count",
+      "base": "scenario-example",
+      "offset": 515,
+      "delete": 21,
+      "insert_hex": "",
+      "sha256": "977b8f370276188aaa43d45445e2ee6cdbca27700d1c322677f6f576d71bea0b"
+    },
+    {
+      "name": "null-transcript_count",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "6e756c6c",
+      "sha256": "4f92348d51f894ea451aa07c9eab509d297d876039ce0f802f38daca2ce40062"
+    },
+    {
+      "name": "duplicate-transcript_count",
+      "base": "scenario-example",
+      "offset": 536,
+      "delete": 0,
+      "insert_hex": "7472616e7363726970745f636f756e74223a342c22",
+      "sha256": "5aa10d99d71942bb1918e63e8fe1d8a6954aad2dc014d12dbe50afd1a6e5b13a"
+    },
+    {
+      "name": "reordered-transcript_count",
+      "base": "scenario-example",
+      "offset": 515,
+      "delete": 39,
+      "insert_hex": "617373657274696f6e5f636f756e74223a352c227472616e7363726970745f636f756e74223a34",
+      "sha256": "2b32f3a104a66b012840105fc97d41fd692f6f39cfeebb2d22b61829dd303045"
+    },
+    {
+      "name": "wrong-type-transcript_count-true",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "74727565",
+      "sha256": "86b0fbaea031d9a00481cc425a848f40269d87f4726b8764b7194b5b261479b0"
+    },
+    {
+      "name": "wrong-type-transcript_count-[]",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "5b5d",
+      "sha256": "92e6e9ea07d10acd64ea0bbf93ae75972cbb1d1c8254c9f02d6b1ae1f6dd7b7e"
+    },
+    {
+      "name": "wrong-type-transcript_count-{}",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "7b7d",
+      "sha256": "207fabcc2549ee8d293dc50055e3f08b4ba44d81bd281e2c1731012ae828911c"
+    },
+    {
+      "name": "missing-assertion_count",
+      "base": "scenario-example",
+      "offset": 536,
+      "delete": 20,
+      "insert_hex": "",
+      "sha256": "41424e4f03b66e278cb18d9b7bff41febbbdd9e03a19acaaf1f5539bf3f3df4d"
+    },
+    {
+      "name": "null-assertion_count",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "6e756c6c",
+      "sha256": "0a0da2de160f2ba6f083c42c26aa58ba8938b5e8565cdf729c6035dbd179cc90"
+    },
+    {
+      "name": "duplicate-assertion_count",
+      "base": "scenario-example",
+      "offset": 556,
+      "delete": 0,
+      "insert_hex": "617373657274696f6e5f636f756e74223a352c22",
+      "sha256": "71a9ab8feb09b478e5a1287c5701b3b45dc8cd176f9456df3d93838e6efe735d"
+    },
+    {
+      "name": "reordered-assertion_count",
+      "base": "scenario-example",
+      "offset": 536,
+      "delete": 33,
+      "insert_hex": "66696c655f636f756e74223a362c22617373657274696f6e5f636f756e74223a35",
+      "sha256": "40f3e412218ac1ba357cc753d5d08b00b2a58f0cf0b799dfd08d3023c77f5965"
+    },
+    {
+      "name": "wrong-type-assertion_count-true",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "74727565",
+      "sha256": "441f495e3bfaa71f6bf470d6fcd10e538aacac490f91470d42cc722aa9b8667a"
+    },
+    {
+      "name": "wrong-type-assertion_count-[]",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "5b5d",
+      "sha256": "3ae7271d5df430940d64ded1c04eaa1e4985f5fa4bb41d4d4dbb34b6b08e4cdd"
+    },
+    {
+      "name": "wrong-type-assertion_count-{}",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "7b7d",
+      "sha256": "3e2fd0117ea1dfc2f1a222df09be98475eed7af86071c59b8c18c8870e17b3eb"
+    },
+    {
+      "name": "missing-file_count",
+      "base": "scenario-example",
+      "offset": 556,
+      "delete": 15,
+      "insert_hex": "",
+      "sha256": "f5ecc5f6f551c58802584b30f137d98000c90813dccf4aee4b2f5bfdd45591da"
+    },
+    {
+      "name": "null-file_count",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "6e756c6c",
+      "sha256": "2a9df1f875bf3b6ecbc48c8e338289d23cd11e46691624162c6f6562a476864f"
+    },
+    {
+      "name": "duplicate-file_count",
+      "base": "scenario-example",
+      "offset": 571,
+      "delete": 0,
+      "insert_hex": "66696c655f636f756e74223a362c22",
+      "sha256": "c1579d69568d38301149e06493eb4fd7c14c69e301fd49fb6395aa419ed97a93"
+    },
+    {
+      "name": "reordered-file_count",
+      "base": "scenario-example",
+      "offset": 556,
+      "delete": 43,
+      "insert_hex": "6d6178696d756d5f65766964656e63655f6279746573223a313032342c2266696c655f636f756e74223a36",
+      "sha256": "c5d325f1cb5b2b5f09c39df05105a32dea5d6daabdd70b277e1a1dbbc888b6ca"
+    },
+    {
+      "name": "wrong-type-file_count-true",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "74727565",
+      "sha256": "f854ac862c8457d5b45a25eeecd0ce383fa9c5dad2ba593a7a441646cc86f339"
+    },
+    {
+      "name": "wrong-type-file_count-[]",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "5b5d",
+      "sha256": "d758529bb0f5b7be17a0eae7fa03a0e1a4eed389ee1ea8aaf716a294fd6f8a6e"
+    },
+    {
+      "name": "wrong-type-file_count-{}",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "7b7d",
+      "sha256": "c418774e5f8a65ac327e4856ad1e2e5d674cbd26330a67aac3a70cace600488a"
+    },
+    {
+      "name": "missing-maximum_evidence_bytes",
+      "base": "scenario-example",
+      "offset": 569,
+      "delete": 30,
+      "insert_hex": "",
+      "sha256": "f113f4c9d7f98a4ccb8ea4cae11e41fa331a8cd93c414db72585378d2fc92a2c"
+    },
+    {
+      "name": "null-maximum_evidence_bytes",
+      "base": "scenario-example",
+      "offset": 595,
+      "delete": 4,
+      "insert_hex": "6e756c6c",
+      "sha256": "a41286f4ee7a1e002328dd7e64b85385a1d3dae70d39c5af1f63de0c67a61185"
+    },
+    {
+      "name": "duplicate-maximum_evidence_bytes",
+      "base": "scenario-example",
+      "offset": 599,
+      "delete": 0,
+      "insert_hex": "2c226d6178696d756d5f65766964656e63655f6279746573223a31303234",
+      "sha256": "779f2f310cadb16701275acab2d8b2ca2ab8bb47bcfcc32501f5709770c46f07"
+    },
+    {
+      "name": "reordered-maximum_evidence_bytes",
+      "base": "scenario-example",
+      "offset": 556,
+      "delete": 43,
+      "insert_hex": "6d6178696d756d5f65766964656e63655f6279746573223a313032342c2266696c655f636f756e74223a36",
+      "sha256": "c5d325f1cb5b2b5f09c39df05105a32dea5d6daabdd70b277e1a1dbbc888b6ca"
+    },
+    {
+      "name": "wrong-type-maximum_evidence_bytes-true",
+      "base": "scenario-example",
+      "offset": 595,
+      "delete": 4,
+      "insert_hex": "74727565",
+      "sha256": "442462c17b76dfb78bd126f89bc7fdc8f01c77a8d75ceb308db5964b927aafc9"
+    },
+    {
+      "name": "wrong-type-maximum_evidence_bytes-[]",
+      "base": "scenario-example",
+      "offset": 595,
+      "delete": 4,
+      "insert_hex": "5b5d",
+      "sha256": "55e96f150719dff7c1db1df4f2f77852effacccf040155b26c78a185eaadaf65"
+    },
+    {
+      "name": "wrong-type-maximum_evidence_bytes-{}",
+      "base": "scenario-example",
+      "offset": 595,
+      "delete": 4,
+      "insert_hex": "7b7d",
+      "sha256": "f93df19a46cccd65e991374155936abd84792679d0b9f3368ba6261562d78da3"
+    },
+    {
+      "name": "short-command_contract_sha256",
+      "base": "scenario-example",
+      "offset": 137,
+      "delete": 64,
+      "insert_hex": "616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "sha256": "9612ad636ed52ca649573d206f4abf1ab96d43f8e0b91c2859009eadb4d59fcf"
+    },
+    {
+      "name": "long-command_contract_sha256",
+      "base": "scenario-example",
+      "offset": 137,
+      "delete": 64,
+      "insert_hex": "6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "sha256": "ece872febfe1d962f6649d36ffc782cba2dac87b8963564ce593d2a1850f2d71"
+    },
+    {
+      "name": "uppercase-command_contract_sha256",
+      "base": "scenario-example",
+      "offset": 137,
+      "delete": 64,
+      "insert_hex": "41414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+      "sha256": "1131612f0ec36abf3189d025dd793f5e28366e5c83d2c3fbddc556630fc2e4fd"
+    },
+    {
+      "name": "nonhex-command_contract_sha256",
+      "base": "scenario-example",
+      "offset": 137,
+      "delete": 64,
+      "insert_hex": "67676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767",
+      "sha256": "0b8a02cf5d1a6b39b12d04f614ca72746772e9d3af68ec41ffc6ad0068831fbe"
+    },
+    {
+      "name": "empty-command_contract_sha256",
+      "base": "scenario-example",
+      "offset": 137,
+      "delete": 64,
+      "insert_hex": "",
+      "sha256": "063d826649e2add5a3b5eedfaa5d3ce0251df6c5cb9391bc7216294b397acafc"
+    },
+    {
+      "name": "short-fixture_set_sha256",
+      "base": "scenario-example",
+      "offset": 225,
+      "delete": 64,
+      "insert_hex": "616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "sha256": "d2d3349deac80b3df76bd2463d4ee387775d8f97a7237fe7392f56ca40667061"
+    },
+    {
+      "name": "long-fixture_set_sha256",
+      "base": "scenario-example",
+      "offset": 225,
+      "delete": 64,
+      "insert_hex": "6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "sha256": "631b61ea0dbaf4bb8c41e6bc55710a0122ce3035e3a1997a876e472caff35399"
+    },
+    {
+      "name": "uppercase-fixture_set_sha256",
+      "base": "scenario-example",
+      "offset": 225,
+      "delete": 64,
+      "insert_hex": "41414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+      "sha256": "08258e7569fc2d6c184b6fa8251e2609e5df549b0333abbe281779e25694790c"
+    },
+    {
+      "name": "nonhex-fixture_set_sha256",
+      "base": "scenario-example",
+      "offset": 225,
+      "delete": 64,
+      "insert_hex": "67676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767",
+      "sha256": "a317bef60bdde9ef3ac217ceb79b8f48131a7d055399e8a279b021ba9c81485d"
+    },
+    {
+      "name": "empty-fixture_set_sha256",
+      "base": "scenario-example",
+      "offset": 225,
+      "delete": 64,
+      "insert_hex": "",
+      "sha256": "f3079d6602e7a2d519c062f5d76528144a956d9da23cd8db11ad0171c18a2c35"
+    },
+    {
+      "name": "short-assertion_set_sha256",
+      "base": "scenario-example",
+      "offset": 315,
+      "delete": 64,
+      "insert_hex": "616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "sha256": "cb2386c54098c3de282b7bb5339fc520f7c0add3c2df8d0a984f838cf2ae7181"
+    },
+    {
+      "name": "long-assertion_set_sha256",
+      "base": "scenario-example",
+      "offset": 315,
+      "delete": 64,
+      "insert_hex": "6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "sha256": "541c01d7b19f96f8073913b03908cea66a371b01d7d21b2afe96864e79ed64c5"
+    },
+    {
+      "name": "uppercase-assertion_set_sha256",
+      "base": "scenario-example",
+      "offset": 315,
+      "delete": 64,
+      "insert_hex": "41414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+      "sha256": "4c47fdf07d3e3b04d8ef5b2f7b53100369ccd0d62488b598029d88ed3df3808e"
+    },
+    {
+      "name": "nonhex-assertion_set_sha256",
+      "base": "scenario-example",
+      "offset": 315,
+      "delete": 64,
+      "insert_hex": "67676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767",
+      "sha256": "c86cb82202f8a0394e2b66bb907f57f70076aa8840d7c70adf41c929bdb8c549"
+    },
+    {
+      "name": "empty-assertion_set_sha256",
+      "base": "scenario-example",
+      "offset": 315,
+      "delete": 64,
+      "insert_hex": "",
+      "sha256": "a346a83bb452dd77d536299145dd3556282f1f655dad9ece0dbf809e4645bed3"
+    },
+    {
+      "name": "short-transcript_set_sha256",
+      "base": "scenario-example",
+      "offset": 406,
+      "delete": 64,
+      "insert_hex": "616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "sha256": "ede1530e31c02f3fd0b633acfae586e1cf968c7b3adba4b0f4ac23a6129e2e7f"
+    },
+    {
+      "name": "long-transcript_set_sha256",
+      "base": "scenario-example",
+      "offset": 406,
+      "delete": 64,
+      "insert_hex": "6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "sha256": "29a1e158e49bc86a39854bad63f77593ad8d835bc79e72ac099f19fb50fa33e8"
+    },
+    {
+      "name": "uppercase-transcript_set_sha256",
+      "base": "scenario-example",
+      "offset": 406,
+      "delete": 64,
+      "insert_hex": "41414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+      "sha256": "b49783c5917483a8e7f2c71233adf8bd67d99909e8767f807bcc9ccef252ac02"
+    },
+    {
+      "name": "nonhex-transcript_set_sha256",
+      "base": "scenario-example",
+      "offset": 406,
+      "delete": 64,
+      "insert_hex": "67676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767",
+      "sha256": "f753215cfd1e6c0eb0f63f48ed4cfc267570ec98b8e9f810b325c9608689fc13"
+    },
+    {
+      "name": "empty-transcript_set_sha256",
+      "base": "scenario-example",
+      "offset": 406,
+      "delete": 64,
+      "insert_hex": "",
+      "sha256": "c73f2bb3c1f7cfbd9f95882b128e96be10b5985caf0f30439476d88f3ddb330b"
+    },
+    {
+      "name": "range-operation_count-0",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "30",
+      "sha256": "31c158428cd3a6e94ebf2d7f8ae2b9037abbd1cd71a64fd4317e42da853eebd8"
+    },
+    {
+      "name": "range-operation_count--1",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "2d31",
+      "sha256": "2edd79e8391359ba9fd32ff3501ecfab408bff2d0045ead339aebf865af5e678"
+    },
+    {
+      "name": "range-operation_count-129",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "313239",
+      "sha256": "5ee04ec9e9cb58674257ab1383b6d020a2b55a243777c01248e30d4b05431601"
+    },
+    {
+      "name": "range-operation_count-1.0",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "312e30",
+      "sha256": "3d3c1f8663827c51981e3635c02ad5102d67dffffa00da485d8e50474b7176ab"
+    },
+    {
+      "name": "range-operation_count-1e0",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "316530",
+      "sha256": "7ccabe9ac98e4daf43a4b0e58ece7da9284c5fb96d55eac0c8bb8ba6c9548cf9"
+    },
+    {
+      "name": "range-operation_count-\"1\"",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "223122",
+      "sha256": "3c777bcf0148a6038a82456722e00a70924eaacb0ff9ef49ccf13db3caf63650"
+    },
+    {
+      "name": "range-operation_count-999999999999999999999999999999999999999999",
+      "base": "scenario-example",
+      "offset": 490,
+      "delete": 1,
+      "insert_hex": "393939393939393939393939393939393939393939393939393939393939393939393939393939393939",
+      "sha256": "8342d40d5764cd41456878fb8207b44d98ca3b4da9a310b64d46b7bf31ca8f55"
+    },
+    {
+      "name": "range-observation_count-0",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "30",
+      "sha256": "74f4087fe1360b5b919f6ce7bd642a70c85bf29516e3d365f3f6529983f2d18e"
+    },
+    {
+      "name": "range-observation_count--1",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "2d31",
+      "sha256": "0f9b563b4fe17d65a8d6a7a9793a9aac401b010bc562da649991bafee040147f"
+    },
+    {
+      "name": "range-observation_count-257",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "323537",
+      "sha256": "c257965313439603e992156eae3b2765fc4e933ac6717cfa8c2fe676699ec066"
+    },
+    {
+      "name": "range-observation_count-1.0",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "312e30",
+      "sha256": "b5d2c03aca0e88587c52c63e8789d9ddfc269eac56a6490bcd8f3ccf3cbb0bef"
+    },
+    {
+      "name": "range-observation_count-1e0",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "316530",
+      "sha256": "0fd24ce988808d078868a17bc40bb2d8ed9b68ccf5602e44c3aca59f22e86f20"
+    },
+    {
+      "name": "range-observation_count-\"1\"",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "223122",
+      "sha256": "a624b47aab166d93d08bdb4c24ffbe5ca6a08b402414f9c6bd76cb4eb021c8de"
+    },
+    {
+      "name": "range-observation_count-999999999999999999999999999999999999999999",
+      "base": "scenario-example",
+      "offset": 512,
+      "delete": 1,
+      "insert_hex": "393939393939393939393939393939393939393939393939393939393939393939393939393939393939",
+      "sha256": "0d9d2db63dfca1c3e50a82b614b864c13a076b25f83eca215f243e849a9969bd"
+    },
+    {
+      "name": "range-transcript_count-0",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "30",
+      "sha256": "e8c98494bc3b49352caa227b62e6c4aef9ca45c62f23a28c914180d7bd75968a"
+    },
+    {
+      "name": "range-transcript_count--1",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "2d31",
+      "sha256": "2806b0bf55cd00a7b81a4bd9f497156d9c145d31cf422c0200bdf7980c596c2d"
+    },
+    {
+      "name": "range-transcript_count-2049",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "32303439",
+      "sha256": "fcdac36b26808df1056f12c518456882d98d1de844bde8f19952fda6203f9d91"
+    },
+    {
+      "name": "range-transcript_count-1.0",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "312e30",
+      "sha256": "aed8ae8b746667204a33f699312b3a33b58e2bace7fcd51b62893560c0ea3119"
+    },
+    {
+      "name": "range-transcript_count-1e0",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "316530",
+      "sha256": "2ec1d60c744ba10f80f591680cc56c3173e52c002f2d80c28a728aab2ca6215e"
+    },
+    {
+      "name": "range-transcript_count-\"1\"",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "223122",
+      "sha256": "ff0460cbda353c26d681b63301dad693fbfa195aa67e3c010c8f26e2a1846db5"
+    },
+    {
+      "name": "range-transcript_count-999999999999999999999999999999999999999999",
+      "base": "scenario-example",
+      "offset": 533,
+      "delete": 1,
+      "insert_hex": "393939393939393939393939393939393939393939393939393939393939393939393939393939393939",
+      "sha256": "cabfcd8a7a33762a0e3a8b181d37336ab848ddfa82b4a781443b953a6813ba2e"
+    },
+    {
+      "name": "range-assertion_count-0",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "30",
+      "sha256": "79c3df4036766e42eab9057f3890c401bc7e6b276c712fff2910851a0a992231"
+    },
+    {
+      "name": "range-assertion_count--1",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "2d31",
+      "sha256": "3ca7fc99bcca607f388d2c90e2b04f8a7b710c74731d8e2c2301af6f93628ff9"
+    },
+    {
+      "name": "range-assertion_count-257",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "323537",
+      "sha256": "3baf1cbb6447c6c1b8cc427f32455b01d8938fd12e0b182ffedb5c33426f1311"
+    },
+    {
+      "name": "range-assertion_count-1.0",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "312e30",
+      "sha256": "ef321596f7ea1ef788664f5d166aeefdcecc6c46490c3b22ed1ccb0557154f80"
+    },
+    {
+      "name": "range-assertion_count-1e0",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "316530",
+      "sha256": "c1cac4dda154df55c4afe28d7c855f7f8535ee7136e83321a2f49a77387b7e61"
+    },
+    {
+      "name": "range-assertion_count-\"1\"",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "223122",
+      "sha256": "63381697f0ba9fc1548bba8e9471cbb4b74d4576210df1a344978e7b134e1108"
+    },
+    {
+      "name": "range-assertion_count-999999999999999999999999999999999999999999",
+      "base": "scenario-example",
+      "offset": 553,
+      "delete": 1,
+      "insert_hex": "393939393939393939393939393939393939393939393939393939393939393939393939393939393939",
+      "sha256": "3ed527117572d66d99d8f3c823d8b9bb20584185343f82b2dd9bc3cc8ebb14d8"
+    },
+    {
+      "name": "range-file_count-0",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "30",
+      "sha256": "fef2d5542cce22936d325c04a27ab027c0df061e3210330b3801e21fcb917896"
+    },
+    {
+      "name": "range-file_count--1",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "2d31",
+      "sha256": "6d1c171b9b3c051877e5ab39b07674961e9a6653f1d8eaf7583015b00ee9c560"
+    },
+    {
+      "name": "range-file_count-4097",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "34303937",
+      "sha256": "b96fa1a26b0f53f76253a0aee37144415f1d37bb1abbacfda6d8adc8c54d8d4c"
+    },
+    {
+      "name": "range-file_count-1.0",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "312e30",
+      "sha256": "40b80168b3f21531389c2123f55b5ee3eda2ba1025170935e6433ef0094c95dc"
+    },
+    {
+      "name": "range-file_count-1e0",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "316530",
+      "sha256": "5b50252820f3dc1f55de9a456628406a8803fa037c3bf6fee0dcec183b88671a"
+    },
+    {
+      "name": "range-file_count-\"1\"",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "223122",
+      "sha256": "0a9bce92c7d4ea7d395d9bf4c7c4470581abd992999be50b64a64bc4fddd91ae"
+    },
+    {
+      "name": "range-file_count-999999999999999999999999999999999999999999",
+      "base": "scenario-example",
+      "offset": 568,
+      "delete": 1,
+      "insert_hex": "393939393939393939393939393939393939393939393939393939393939393939393939393939393939",
+      "sha256": "effeba7cbd8d2f1483a4423775e9df86826db5236d52cbb07b20692ac4f52fca"
+    },
+    {
+      "name": "range-maximum_evidence_bytes-0",
+      "base": "scenario-example",
+      "offset": 595,
+      "delete": 4,
+      "insert_hex": "30",
+      "sha256": "58caa6fce9ea9975f527834257e642de4627c2a7f2f0e32d5e74bd0670837044"
+    },
+    {
+      "name": "range-maximum_evidence_bytes--1",
+      "base": "scenario-example",
+      "offset": 595,
+      "delete": 4,
+      "insert_hex": "2d31",
+      "sha256": "0c2698316ccba648cf0f880cff2cf6d5d48f1b71ea0426e6e9d03e8e9cd2d932"
+    },
+    {
+      "name": "range-maximum_evidence_bytes-268435457",
+      "base": "scenario-example",
+      "offset": 595,
+      "delete": 4,
+      "insert_hex": "323638343335343537",
+      "sha256": "fc63812eb9212010fd50ecd5581fec360837ffbefe87d6de21cb2887272431a0"
+    },
+    {
+      "name": "range-maximum_evidence_bytes-1.0",
+      "base": "scenario-example",
+      "offset": 596,
+      "delete": 3,
+      "insert_hex": "2e30",
+      "sha256": "04fc6c84e983e17b7092d65fb2ad0e8b8b2ada1216d304296cfe64906267f162"
+    },
+    {
+      "name": "range-maximum_evidence_bytes-1e0",
+      "base": "scenario-example",
+      "offset": 596,
+      "delete": 3,
+      "insert_hex": "6530",
+      "sha256": "c5afc5ce8046057e611a20fb4410f05b3c49276f4a6e868ed04815252c6835c7"
+    },
+    {
+      "name": "range-maximum_evidence_bytes-\"1\"",
+      "base": "scenario-example",
+      "offset": 595,
+      "delete": 4,
+      "insert_hex": "223122",
+      "sha256": "f6121b008fc72228a14671f1bd1a521c23f73d611d68e7f4e82b5315d0e30527"
+    },
+    {
+      "name": "range-maximum_evidence_bytes-999999999999999999999999999999999999999999",
+      "base": "scenario-example",
+      "offset": 595,
+      "delete": 4,
+      "insert_hex": "393939393939393939393939393939393939393939393939393939393939393939393939393939393939",
+      "sha256": "8276a4befcaccfd2ef3cdac00ec92e8a4c38707849832f5642903d1e2bdb13b7"
+    },
+    {
+      "name": "integer-schema_version-0",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 1,
+      "insert_hex": "30",
+      "sha256": "9b3577a88534fd4ea18a6bd8e68e0efd997c20bde1d1e8398fed7f595cdb891e"
+    },
+    {
+      "name": "integer-schema_version--1",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 0,
+      "insert_hex": "2d",
+      "sha256": "191051399e5a034ef4b5a756156f8dabd7a33b8cdc38571e1dbd2aca45f97977"
+    },
+    {
+      "name": "integer-schema_version-3",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 1,
+      "insert_hex": "33",
+      "sha256": "ba07a4fc55b497297febbcd9ef405e18d3f3cca0a9ea4c24fe46f4185e2527c3"
+    },
+    {
+      "name": "integer-schema_version-1.0",
+      "base": "scenario-example",
+      "offset": 19,
+      "delete": 0,
+      "insert_hex": "2e30",
+      "sha256": "77577764a77b69b4532d51d8923b80d7573933be417edf559b8a227246d0405a"
+    },
+    {
+      "name": "integer-schema_version-1e0",
+      "base": "scenario-example",
+      "offset": 19,
+      "delete": 0,
+      "insert_hex": "6530",
+      "sha256": "36284ab66e447146f660592e1fac7439c2e9d17c2583f08ecff1c1307fe45215"
+    },
+    {
+      "name": "integer-schema_version-\"1\"",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 1,
+      "insert_hex": "223122",
+      "sha256": "458241be3273303536480cf6e4f980d2c4bc8fc5d1d12f2190527d68a01378b4"
+    },
+    {
+      "name": "integer-schema_version-999999999999999999999999999999999999999999",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 1,
+      "insert_hex": "393939393939393939393939393939393939393939393939393939393939393939393939393939393939",
+      "sha256": "5e7465daa2e4d4f764f0d4e71e9699ea0944f6e9257ee45396607d368edb73a1"
+    },
+    {
+      "name": "integer-segment_ordinal-0",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 1,
+      "insert_hex": "30",
+      "sha256": "83d74807228270026f3c05e0d20b68abe83e60f341fe873e6db4643ed1859ec9"
+    },
+    {
+      "name": "integer-segment_ordinal--1",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 0,
+      "insert_hex": "2d",
+      "sha256": "c299298f5966c81ef177f054bf275dc38010c9c9c701a9754da57257b548984e"
+    },
+    {
+      "name": "integer-segment_ordinal-3",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 1,
+      "insert_hex": "33",
+      "sha256": "6f73c81852b229dca05702d1c5d39116069b0d3d76c43b2fdc29445bf3baf757"
+    },
+    {
+      "name": "integer-segment_ordinal-1.0",
+      "base": "scenario-example",
+      "offset": 91,
+      "delete": 0,
+      "insert_hex": "2e30",
+      "sha256": "83291deae01d0356ce1352a781e64d91baf8b488d74cea3405d8272d1334cbdc"
+    },
+    {
+      "name": "integer-segment_ordinal-1e0",
+      "base": "scenario-example",
+      "offset": 91,
+      "delete": 0,
+      "insert_hex": "6530",
+      "sha256": "d46cfab45f2cd697d99c8d6b7d681110c741ffe32f5fc7a42d199e45bb24c209"
+    },
+    {
+      "name": "integer-segment_ordinal-\"1\"",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 1,
+      "insert_hex": "223122",
+      "sha256": "93057872dac12dc3c829430854c2528f47516c8e34791f9e71ee6dd59c016aa7"
+    },
+    {
+      "name": "integer-segment_ordinal-999999999999999999999999999999999999999999",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 1,
+      "insert_hex": "393939393939393939393939393939393939393939393939393939393939393939393939393939393939",
+      "sha256": "209e08339291d0da4f467af8ceca7a2867bb5ed327e12dfbe5eebf4f8c924026"
+    },
+    {
+      "name": "ordinal-mode-mismatch",
+      "base": "scenario-example",
+      "offset": 90,
+      "delete": 1,
+      "insert_hex": "32",
+      "sha256": "0da8ba70c2f94463ac64a0d7f939f90e0561b84ed035832188728279c41e3173"
+    },
+    {
+      "name": "mode-ordinal-mismatch",
+      "base": "scenario-example",
+      "offset": 100,
+      "delete": 8,
+      "insert_hex": "7265626f6f745f6f62736572766572",
+      "sha256": "9a0a953c888d071eee5b95d5186b2bf6d911fc03ec655fc93d3b59eb1cf42ead"
+    },
+    {
+      "name": "wrong-mode",
+      "base": "scenario-example",
+      "offset": 100,
+      "delete": 8,
+      "insert_hex": "756e6b6e6f776e",
+      "sha256": "446f35e5d8b49927b5da6a3ce2c665bcddb6dec524b919d9a7c192d8eec62ee2"
+    },
+    {
+      "name": "wrong-object",
+      "base": "scenario-example",
+      "offset": 51,
+      "delete": 16,
+      "insert_hex": "62696e64696e67",
+      "sha256": "feb5c38f18c7b6d6edd4a0269464a2e4187fcf18e5901413f1016e80d548bfb2"
+    },
+    {
+      "name": "sentinel-value",
+      "base": "scenario-example",
+      "offset": 100,
+      "delete": 8,
+      "insert_hex": "554e545255535445445f53454e54494e454c",
+      "sha256": "fa72bda80c051058f1386dd382e13e2eb96274b57ea373e890080f15fab1d94a"
+    },
+    {
+      "name": "escaped-mode",
+      "base": "scenario-example",
+      "offset": 100,
+      "delete": 1,
+      "insert_hex": "5c7530303733",
+      "sha256": "c3b69b5fa1424b04728edbc64ce8cf53809b675fb86dffc83ce356197b4da5ec"
+    },
+    {
+      "name": "escaped-digest",
+      "base": "scenario-example",
+      "offset": 137,
+      "delete": 0,
+      "insert_hex": "5c75303033",
+      "sha256": "47aac550f00cadf0531f14b99e8a374c7296876748db7d5107b9180d72bf7ee8"
+    },
+    {
+      "name": "escaped-key",
+      "base": "scenario-example",
+      "offset": 93,
+      "delete": 1,
+      "insert_hex": "5c7530303664",
+      "sha256": "2542ef728458fedf4c16368393e1d6e07c807e5b05d6265031911f814cfb147c"
+    },
+    {
+      "name": "unknown-field",
+      "base": "scenario-example",
+      "offset": 599,
+      "delete": 0,
+      "insert_hex": "2c22554e545255535445445f53454e54494e454c223a22554e545255535445445f53454e54494e454c22",
+      "sha256": "aa76801c188462c6584da76dc0d852a20894235ed58eb549357168937e63d148"
+    },
+    {
+      "name": "empty",
+      "base": "scenario-example",
+      "offset": 0,
+      "delete": 600,
+      "insert_hex": "",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "array",
+      "base": "scenario-example",
+      "offset": 0,
+      "delete": 600,
+      "insert_hex": "5b5d",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "top-null",
+      "base": "scenario-example",
+      "offset": 0,
+      "delete": 600,
+      "insert_hex": "6e756c6c",
+      "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    },
+    {
+      "name": "leading-space",
+      "base": "scenario-example",
+      "offset": 0,
+      "delete": 0,
+      "insert_hex": "20",
+      "sha256": "3b4ac3f84df34940243617c608249245a2079b8aba7d49e750f8398eb9a3cdbe"
+    },
+    {
+      "name": "trailing-newline",
+      "base": "scenario-example",
+      "offset": 600,
+      "delete": 0,
+      "insert_hex": "0a",
+      "sha256": "3005186756e8f640bca1012d4d19181d5418c19449ffdf4da27bc81bc50d47ff"
+    },
+    {
+      "name": "interior-space",
+      "base": "scenario-example",
+      "offset": 18,
+      "delete": 0,
+      "insert_hex": "20",
+      "sha256": "fcf4cc9f2bac0686a1f5fe398f8dcbb31f2bba37b9d6b7291793159090eba148"
+    },
+    {
+      "name": "bom",
+      "base": "scenario-example",
+      "offset": 0,
+      "delete": 0,
+      "insert_hex": "efbbbf",
+      "sha256": "30869eeace23970bf6fb276d3ba77c73b4d439045b4ca142206d4b63d7575375"
+    },
+    {
+      "name": "trailing-json",
+      "base": "scenario-example",
+      "offset": 600,
+      "delete": 0,
+      "insert_hex": "7b7d",
+      "sha256": "767733906cd9ad96fbb37c0b43da34f6cb59ad63316e029bc1f1d14989bd739f"
+    },
+    {
+      "name": "trailing-byte",
+      "base": "scenario-example",
+      "offset": 600,
+      "delete": 0,
+      "insert_hex": "00",
+      "sha256": "bf14d1d1d3d568393436bbb3919be89e7bf078f7685f3496783e9c613459ed2d"
+    },
+    {
+      "name": "invalid-utf8",
+      "base": "scenario-example",
+      "offset": 599,
+      "delete": 0,
+      "insert_hex": "ff",
+      "sha256": "5c9defd0895a7f3030f2c6821aa2b024b8c81f2355c25a84f764413c4738ae10"
+    },
+    {
+      "name": "invalid-utf8-prefix",
+      "base": "scenario-example",
+      "offset": 0,
+      "delete": 0,
+      "insert_hex": "c0af",
+      "sha256": "a79ebe31fe333aa75bec2018c6a6a879ce4918235cd7833c9ed97e048ccaab54"
+    },
+    {
+      "name": "size-4096",
+      "base": "scenario-example",
+      "offset": 600,
+      "delete": 0,
+      "insert_hex": "20202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020",
+      "sha256": "4020161404eb707d9e2948d81efd8311654e7cc41023881021d1c3963acb6cb2"
+    },
+    {
+      "name": "size-4097",
+      "base": "scenario-example",
+      "offset": 600,
+      "delete": 0,
+      "insert_hex": "2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020",
+      "sha256": "a1ed3d9a0db3591ab1cc0bea9466c44e9e682a9672e0ff2d373871be3ad46a1f"
+    }
+  ]
+}
