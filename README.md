@@ -83,7 +83,8 @@ Binary distribution, including Homebrew, is intentionally disabled until Gate
 source-built Formula cannot preserve the native approval helper's required
 signing identity and entitlements. Linux/Windows and unsigned portable archives
 are not a supported credential-bearing release path. The repository's Homebrew
-manifest and checker are readiness inputs, not an installable Formula; see
+manifest and checker validate dependency closure and offline source builds
+only—not Cask, signing, or native Gate readiness; see
 [the trust-root topology](docs/gate1a-trust-root.md) and
 [exact-artifact authorization](docs/gate1a-artifact-authorization.md), plus
 [Homebrew readiness](docs/homebrew.md). Even after complete Gate passes, a
@@ -105,27 +106,15 @@ grant or publication-envelope signature. A root-bound disposal attestation
 gates that signature; missing or uncertain disposal blocks release. Live
 `stage_cleanup`, deletion ACK recovery, and empty-inventory cleanup proofs are
 deferred, not delegated to the agent or native helper.
-The future write path uses a helper-private fixed-active Keychain coordinator
-as its cross-process mutex. LaunchAgent registration manages lifecycle, not
-singleton security; another same-user helper remains in the threat model.
-Registry commits cannot overlap an apply, and apply must durably
-enter `in_flight`, obtain one exact-request permit, send at most once, and
-irreversibly quiesce every send/sign/commit capability before durably closing.
-Only a valid already-closed lease may be cleaned up, using its exact Keychain
-persistent reference so a stale cleanup cannot delete a replacement lease.
-An unclosed lease stays quarantined even after restart, reboot, expiry, or
-user confirmation. This deliberately sacrifices availability after a crash;
-bounded remote reconciliation reports findings without changing its journal.
-The descriptor-bound helper
-profile expiry is a strict Gate, publication, installation, and pre-send
-cutoff. The closed evidence contract includes exact install/reinstall and
-Keychain-migration failure cases plus deterministic two-party coordinator
-schedules through close/delete ambiguity and active-cleanup ABA denial. Future coordinator/profile failures
-add stable JSON v1 `error.code` values and distinct future exits 10..13 while
-corruption remains existing exit 1;
-the only recovery commands will be `mutation authority status` and trusted-UI
-`mutation authority recover`, neither with a plan ID or force-clear option.
-None of this is enabled in the current build.
+The future write path, protected receipt consumption, expiry, pre-permit aborts,
+quarantine and bounded-capacity behavior are specified in the
+[registry/coordinator contract](docs/gate1a-registry-protocol.md) and
+[mutation lifecycle](docs/guarded-mutations.md). These are proposed native
+contracts, not implemented authority in this build. Their intentional
+availability limits include attacker-induced unclosed-crash quarantine and a
+256-record lifetime bound that requires a separate retention protocol; neither
+restart nor a new approval clears them. No native authority commands or future
+exits 10..13 are available until implementation updates the machine contract.
 
 [Gate 1B isolated subruns](docs/gate1b-isolated-subruns.md) defines the separate
 unit authorization and evidence-aggregation contract. Its complete inventory,

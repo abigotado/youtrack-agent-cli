@@ -1,7 +1,10 @@
 # Homebrew offline-readiness inputs
 
-`modules.json` is the canonical dependency manifest for a future source-built
-Homebrew formula. It is not a Formula, renderer, or publication mechanism.
+`modules.json` and `homebrewcheck` cover dependency-closure and offline
+source-build readiness only. They do not establish readiness for a Formula or
+Cask, signing, native Gate evidence, or publication. The accepted future
+distribution uses an immutable signed app delivered by Cask; it does not
+rebuild the approval helper from source.
 
 The manifest must match the complete `require` closure in `go.mod`. Each digest
 is for the corresponding Go proxy `.zip`, not for a VCS or GitHub archive.

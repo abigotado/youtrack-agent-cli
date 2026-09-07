@@ -6,6 +6,10 @@
 - Target binary: `youtrack-agent-cli`
 - Target Agent Skill: `youtrack-agent`
 
+Current mutation boundary: offline `prepare`, local `export`, and local
+`status` only. `confirm`, `apply`, and `reconcile` fail closed; native authority
+commands and the workflow/state transitions below remain future requirements.
+
 The [isolated-subrun ADR](../docs/gate1b-isolated-subruns.md) specifies the new
 Gate 1B topology and supersedes single-suite Gate 1B authority objects. A
 quarantined unit never resets into another scenario under the same enrollment;
@@ -157,7 +161,7 @@ errx -> standard library only
 - `Journal`: compare-and-swap transitions under one transaction API;
 - `CredentialProvider` and `PolicyChecker`: minimum operations needed by the application service.
 
-The combined `approval.DecodeAndValidateIPCResponse` decoder is the sole response-acceptance path: it binds both response arms to the request challenge and binds a success to the exact snapshot, registry revision, and active enrolled signing key before exposing a verified receipt. The interfaces contain at most one to three methods. `internal/youtrack` is a fixed-origin transport/model boundary and imports neither profile nor auth. `internal/cli` does not import `net/http`. Architecture tests enumerate allowed internal edges and fail on every unlisted dependency.
+The combined `approval.DecodeAndValidateIPCResponse` decoder is the sole response-acceptance path. Current v2 binds the request challenge, exact snapshot, key generation, and fingerprint and verifies against the expected SPKI. Registry-revision and authorization-context binding require future v3; current codec checks are not native authority evidence. The interfaces contain at most one to three methods. `internal/youtrack` is a fixed-origin transport/model boundary and imports neither profile nor auth. `internal/cli` does not import `net/http`. Architecture tests enumerate allowed internal edges and fail on every unlisted dependency.
 
 ## Journal transaction and lock contract
 
@@ -169,13 +173,24 @@ Native authority requires canonical journal record version 2 with exact authorit
 
 `confirm` has two phases. It first snapshots the prepared plan under profile/policy/journal locks and releases all locks. The native helper displays that one immutable snapshot, hashes those exact bytes into the receipt, and signs the deterministic unsigned receipt together with the current registry revision, active key identity, and applicable mode-bound authorization-context digest. The service reacquires the locks in the same order, revalidates unchanged identity, policy, plan hash, state, journal revision, registry revision, active key, descriptor and the complete applicable authority branch and derived context. It then atomically stores the receipt, exact canonical authority objects/context and all digests, and moves to `confirmed`. Concurrent confirmation loses the compare-and-swap and cannot mint a second usable receipt.
 
-`apply` holds the profile and policy locks while it validates the bound credential and remote preconditions. Historical verification with retained key or authority bytes is audit evidence only. Apply authority requires the signed receipt's registry revision and generation/SPKI/fingerprint to equal the current active registry entry and its context digest to equal the currently valid mode-bound authority set. Any intervening registry or activation transition cancels a confirmed plan. Before any mutable authority read, apply contends on the helper-private fixed-active Keychain account also required by every registry commit. Its unique add is the cross-process mutex; SMAppService registration and a local executor guard do not exclude another same-user helper or bootstrap namespace. The uninterrupted owner retains its lease through exact revalidation, `confirmed -> in_flight`, one exact-request permit, one send/outcome, irreversible capability quiescence, and durable normal close. Registry-first cancels stale confirmation; apply-first excludes registry commits through close. A proven owner abort before permit may close `failed_before_mutation`; a crash without durable close instead quarantines the lease. Uncertainty at/after permit is ambiguous and never retried. Audit-token, helper-session, lease, journal-revision, registry, context, and expiry fences are repeated immediately before send.
+`apply` holds the profile and policy locks while it validates the bound credential and remote preconditions. Historical verification with retained key or authority bytes is audit evidence only. Apply authority requires the signed receipt's registry revision and generation/SPKI/fingerprint to equal the current active registry entry and its context digest to equal the currently valid mode-bound authority set. Any intervening registry or activation transition cancels a confirmed plan. After bounded read-only coordinator integrity/capacity classification, and before registry-ledger reads, apply contends on the helper-private fixed-active Keychain account also required by every registry commit. Its unique add is the cross-process mutex; SMAppService registration and a local executor guard do not exclude another same-user helper or bootstrap namespace. The uninterrupted owner retains its lease through exact revalidation, `confirmed -> in_flight`, one exact-request permit, one send/outcome, irreversible capability quiescence, and durable normal close. Registry-first cancels stale confirmation; apply-first excludes registry commits through close. A proven owner abort before permit may close `failed_before_mutation`; a crash without durable close instead quarantines the lease. Uncertainty at/after permit is ambiguous and never retried. Audit-token, helper-session, lease, journal-revision, registry, context, and expiry fences are repeated immediately before send.
 
 `reconcile` verifies retained historical receipt, descriptor, applicable authority branch, context, registry chain, hashes, and capability without making them current authority. While any active lease lacks a valid durable close, reconciliation performs bounded remote reads and reports evidence only: no journal/evidence CAS, terminal transition, signing, or replay. A separately eligible already-closed record may use the normal evidence CAS contract. Terminal states return their existing record without additional network activity unless the operator explicitly requests fresh evidence collection.
 
 Coordinator recovery authenticates exact peers but cannot fence a still-live predecessor. An active lease without a valid durable normal close returns `AUTHORITY_STATE_QUARANTINED` (existing exit 1) with no local mutation, including after restart, reboot, expiry, or fresh user presence. Automated recovery/reset of such a lease is deferred and can leave guarded writes unavailable indefinitely. Cleanup of an already-closed lease validates full active/permit/closed linkage and reads attributes, bytes, and a bounded persistent reference in the same exact query. It deletes only that reference through `kSecMatchItemList`, never the reusable account name. If another helper removes A and acquires B, stale A deletion is a harmless no-op; no journal CAS or close synthesis occurs. Expiry admits only this limited authenticated inspection/closed cleanup, never new authority.
 
 ## Complete state table
+
+Protected active and normal-close records bind the exact signed-receipt digest.
+Before a new lease can consume a receipt, the helper scans protected history
+and rejects its reuse, including a prior null-permit close that burned it.
+Restoring journal bytes or winning a journal CAS cannot restore authority.
+The complete constraints are in the [registry protocol](../docs/gate1a-registry-protocol.md).
+
+When the last owner reaches 256 permits or closes, it must still durably close
+and retain its valid closed active item as the capacity sentinel. Status reports
+`capacity_exhausted`, action `stop`, exit 0; acquisition/recovery returns
+`AUTHORITY_CAPACITY_EXHAUSTED`, existing exit 1, without deleting that sentinel.
 
 The applicable authority set is mutually exclusive by mode: production and
 post-grant use provisional authorization plus activation grant and final context;
@@ -205,6 +220,9 @@ already-closed eligible records, never to quarantined authority.
 | `in_flight` | uninterrupted owner proves definitive failure before permit | `failed_before_mutation` | Quiesce capabilities, persist terminal outcome, durably close; zero dispatch. A crash before that close instead quarantines. |
 | `in_flight` | exact permit added | remains `in_flight` | Sole send-authority linearization; every later uncertainty is ambiguous and non-replayable. |
 | `confirmed` | operator cancellation before coordinator acquisition | `canceled` | Terminal; no mutation attempt. |
+| `confirmed` | receipt TTL expires before coordinator acquisition | `expired` | No lease or permit; expired receipt cannot authorize acquisition. |
+| `confirmed` / `in_flight` | receipt TTL expires after acquisition with proven durable permit absence | `failed_before_mutation` | Only the uninterrupted owner may burn the receipt, quiesce capabilities, and durably close; otherwise quarantine without CAS. |
+| `in_flight` | receipt TTL expires after durable permit without verified success | `ambiguous` | No send; owner quiesces and closes; absence of request bytes does not establish non-application. |
 | `confirmed` | trusted time reaches descriptor `helper_profile_expires_at` before coordinator acquisition | `expired` | Absolute cutoff; Gate/install evidence and cached helper sessions do not extend it. |
 | `confirmed` | applicable Gate/smoke/post-grant runner token expires before coordinator acquisition | `expired` | No lease, permit, or dispatch; historical token bytes cannot renew live authority. |
 | `confirmed` / `in_flight` | applicable runner token expires after acquisition with proven permit absence | `failed_before_mutation` | Burn receipt and durably close/fence the existing lease with zero dispatch; an already recorded smoke hard-deny `activation_smoke_consumed` remains terminal. |
@@ -213,7 +231,7 @@ already-closed eligible records, never to quarantined authority.
 | `confirmed` | approval registry revision or active generation changed | `canceled` | Retained keys may verify history but never authorize apply. |
 | `confirmed` | descriptor, applicable authority token/grant, or context changed | `canceled` | Historical bytes remain audit evidence but never authorize apply. |
 | `confirmed` / `in_flight` | trusted time reaches descriptor `helper_profile_expires_at` after coordinator acquisition while no permit exists | `failed_before_mutation` | Only the uninterrupted owner can quiesce, burn, and durably close with zero dispatch. A replacement process quarantines instead. New plans require a newly authorized artifact. |
-| `in_flight` | definitive rejection proving no mutation | `failed_before_mutation` | Terminal; a new plan is required. |
+| `in_flight` | durable permit exists; definitive rejection or known zero bytes sent without verified success | `ambiguous` | Owner quiesces and closes; only later eligible closed reconciliation may establish `resolved_not_applied`. |
 | `in_flight` | verified success recorded | `applied` | Non-replayable; proceed to bounded verification. |
 | `in_flight` | timeout, reset, unexpected/invalid response, or uncertain send | `ambiguous` | Never retry; reconcile. |
 | `in_flight` | process crash or local journal failure after permit without valid durable close | unchanged, quarantined | Restart never sends, closes, deletes, or CASes; bounded reconciliation reports only. |
@@ -221,12 +239,12 @@ already-closed eligible records, never to quarantined authority.
 | `applied` | verification cannot establish unique state | `operator_resolution_required` | No automatic retry. |
 | `ambiguous` | bounded evidence uniquely proves application | `reconciled` | Terminal known-applied. |
 | `ambiguous` | bounded evidence proves definitive non-application | `resolved_not_applied` | Terminal; only a new plan may write. |
-| `ambiguous` | zero/non-unique/unsupported evidence | `operator_resolution_required` | No automatic retry. |
+| `ambiguous` | zero/non-unique/unsupported evidence | `operator_resolution_required` | Not proof of non-application; no automatic retry or fresh plan. |
 | `operator_resolution_required` | explicit local operator resolution with evidence digest | `resolved_applied` / `resolved_not_applied` | Terminal audit record; this action never contacts YouTrack. |
 
 A verified remote success followed by stdout or journal-finalization failure emits `WRITE_APPLIED_LOCAL_FAILURE` with do-not-retry guidance. Without a valid durable close, restart preserves the journal bytes and quarantines authority; it never adds a close on behalf of the original owner. Bounded remote reconciliation reports findings without CAS. Gate 1B covers registry/apply ordering, invalid enrollment before ledger read, all pre/post-permit and outcome/close crash boundaries, concurrent exact-code helpers and alternate bootstrap namespaces, owner capability quiescence before close, and active A replaced by B before stale A persistent-reference deletion. Exact Security.framework dictionary/projection vectors and deterministic binary barrier/event traces are required; process-local guard serialization is not a cross-process proof.
 
-The future authority contract retains JSON v1 while deliberately adding commands `mutation authority status` and `mutation authority recover` plus distinct exits 10..13 for wait, trusted recovery, artifact replacement, and reconfirmation; corruption and operator escalation use existing exit 1. Both require an explicit profile, include invocation identity in required success `meta`, reject plan/lease/force selectors, `--yes`, `--dry-run`, `--fields`, and raw output, and recovery requires trusted UI and never contacts YouTrack. The new authority surface never emits exit 9, while remote-uncertain reconciliation may retain it. These additions are not implemented in the current disabled slice; the later implementation must extend `.agents/rules/cli-contract.md`, `internal/errx`, generators, generated command/contract references, the tracked Cursor mirror through the rule sync, and embedded skill routing together, then pass sync/compiler gates.
+The current runtime retains JSON v1 and exits 0..9. The future `mutation authority status` and `mutation authority recover` commands use the [proposed routing](../docs/gate1a-registry-protocol.md), including exits 11/12; the wider coordinator design proposes exits 10..13. Capacity introduces no additional exit number: successful status with action `stop` exits 0, and capacity-exhausted acquire/recover uses existing exit 1, as do corruption and quarantine. These commands remain unimplemented. Their eventual implementation must update `.agents/rules/cli-contract.md`, `internal/errx`, generated references, the tracked Cursor mirror, and embedded skill routing together, then pass sync/compiler gates.
 
 ## First implementation slice
 
@@ -269,7 +287,7 @@ The future authority contract retains JSON v1 while deliberately adding commands
     activation edit.
 11. Keep `issue.update` and `comment.add` disabled until their separate
     REST-TOCTOU acceptance or strict custom-MCP transaction decision.
-12. Run contract, security, primary, and independent adversarial review gates
-    before packaging.
+12. Complete the non-production pilot and contract, independent security,
+    primary, and adversarial review gates before packaging or publication.
 
 The REST executor is always labeled `rest-best-effort`. Strict atomic project enforcement remains a later custom YouTrack MCP executor because a local REST preflight cannot close the concurrent issue-move race.

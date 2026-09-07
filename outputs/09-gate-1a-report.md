@@ -5,6 +5,10 @@
 - Scope completed by this report: protocol-contract spike only
 - Production approval adapter: `approval.Unsupported`
 
+Current mutation surface enables offline `prepare`, local `export`, and local
+`status` only. `confirm`, `apply`, and `reconcile` fail closed; the native
+authority commands and evidence requirements below remain unimplemented.
+
 The [trust-root and package-topology ADR](../docs/gate1a-trust-root.md)
 freezes the identifiers, Team ID input, Keychain namespace, enrollment,
 rotation/recovery, signed layout, and evidence order. It is a design result,
@@ -153,13 +157,26 @@ That candidate must first introduce journal v2; only a valid v1 `prepared`
 record migrates atomically, while every other valid v1 state—including
 `failed_before_mutation`—remains unchanged and quarantined. It adds exactly `mutation authority status` and
 trusted-UI `mutation authority recover`, no plan-ID or force-clear recovery,
-and the explicit future exit 10..13 contract, with corruption on existing exit
+and the proposed exits 10..13, with corruption and capacity refusal on existing exit
 1, rooted in `internal/errx` and regenerated into both documentation and
 embedded-skill references. The implementation change also updates
 `.agents/rules/cli-contract.md`, regenerates its tracked Cursor mirror, and
 passes rule-sync/provider-compiler checks.
 That candidate must implement the fixed-active Keychain coordinator shared by
 all registry commits and apply across concurrently valid same-user helpers.
+Its protected active/closed records must bind the exact signed-receipt digest;
+bounded history rejects new-lease reuse including null-permit burns, independent
+of journal CAS. Receipt TTL must distinguish pre-acquisition expiry from an
+uninterrupted owner's acquired/pre-permit burn. After durable permit, only
+verified success is applied; every other outcome is ambiguous, including
+definitive rejection or known zero bytes sent. Later eligible closed
+reconciliation may prove `resolved_not_applied`; zero/non-unique matches do not
+prove non-application or authorize automatic fresh plans. The last owner at
+256 permits/closes must close and retain a valid closed active sentinel:
+status `capacity_exhausted`, action `stop`, exit 0; acquire/recover capacity
+error uses existing exit 1 with no deletion. See the
+[state table](08-implementation-decision.md#complete-state-table) and complete
+[registry constraints](../docs/gate1a-registry-protocol.md).
 LaunchAgent lifecycle and a process-local guard do not prove global singleton
 authority. The lease survives restarts; the owner follows durable
 `confirmed -> in_flight`, one exact-request permit, one send/outcome,
@@ -180,7 +197,7 @@ isolated units, each with token-bound enrollment and a baseline scoped to that
 unit/architecture/pass. The parent set validates all leaves, their disposal and
 coverage; E2 depends on the complete E1 parent. It also exercises exact
 authority status/recover JSON v1 shapes with required invocation `meta`, exits
-10..13 plus corruption exit 1, closed inherited flags, trusted recovery UI, and
+under the proposed routing (including 11/12), closed inherited flags, trusted recovery UI, and
 journal v1-to-v2 migration/quarantine interruptions.
 Because that wiring changes exact code identities, the same candidate must run
 the complete E1/E2 Gate 1A sequence before the two-pass Gate 1B evidence can
@@ -205,7 +222,9 @@ the signed and notarized nested helper retains its identity and entitlements
 across first install, identical reinstall, rollback refusal, replacement, and
 uninstall. Gate 1B must
 then prove the live one-shot YouTrack write path. The existing offline module
-manifest and checker remain readiness inputs only.
+manifest and checker cover dependency closure and offline source builds only;
+they do not prove Formula/Cask, signing, or native readiness. A non-production
+pilot and independent security review must also pass before publication.
 
 The eventual Cask must pin the exact outer archive SHA-256, install the
 immutable app payload, detached provisional authorization, activation grant,
@@ -217,7 +236,8 @@ Homebrew checksum validation is
 not a substitute for the pinned-root signature or runtime code-identity checks.
 
 The capability-specific activation-smoke plans contain exactly 5 and 6 cases;
-the post-grant plans contain exactly 6 each. Every plan starts with a stage-
+the post-grant plans contain exactly 6 for confirm-only and 7 for issue.create,
+including its ordinary apply hard-deny dispatch-boundary case. Every plan starts with a stage-
 token/setup-context-limited exact-artifact enrollment from a canonical empty
 registry/coordinator/key/journal/session inventory, binds the retained
 revision-1/generation-1 snapshot to every later observation/index/set, and

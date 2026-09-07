@@ -3,8 +3,9 @@
 Homebrew installation is **not available** in this implementation slice. The
 repository intentionally contains no installable Formula or Cask, no tap
 publication workflow, and no release credential. The checked dependency
-manifest and its validator are readiness inputs only; they do not produce or
-publish a package.
+manifest and its validator check dependency closure and offline source builds
+only. They are not Formula/Cask, signing, or native Gate proof and do not
+produce or publish a package.
 
 ## Why Gate 1A blocks packaging
 
@@ -66,7 +67,8 @@ publication envelope, or
 operator-controlled signing evidence.
 Consequently, no correct Cask can be materialized from the repository today.
 
-Homebrew may be activated only after Gate 1A and live Gate 1B pass and the
+Homebrew may be activated only after Gate 1A and live Gate 1B pass, the
+non-production pilot and independent security review pass, and the
 fail-closed release-policy guard is deliberately updated in the same reviewed
 change. Until then, use a local source build for development and do not publish
 or install a Homebrew package.
@@ -109,7 +111,10 @@ it. After expiry, only the exact launchd-managed helper's recovery-only launch
 and peer authentication may expose bounded status and exact persistent-reference
 cleanup of an already validly closed lease. Unclosed state remains quarantined
 with no journal CAS, synthesized close, or deletion, even after reboot or fresh
-user presence; ordinary authority remains denied. Installation verifies the
+user presence; ordinary authority remains denied. The
+valid closed capacity sentinel is retained when protected history reaches its
+bound; neither expiry nor reinstall permits clearing it. See the
+[native authority constraints](gate1a-registry-protocol.md). Installation verifies the
 sealed LaunchAgent declaration and intended lifecycle but never assumes that
 launchd prevents another exact signed helper under the same UID. Homebrew
 update or reinstall cannot refresh that field without producing a

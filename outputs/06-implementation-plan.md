@@ -4,6 +4,10 @@ Status: In progress; existing phases 2-4 reach the fail-closed Gate 1A
 boundary, while the native coordinator, profile-expiry enforcement, Gates, and
 writes described below are not implemented
 
+Current mutation surface enables offline `prepare`, local `export`, and local
+`status` only; `confirm`, `apply`, and `reconcile` fail closed. The sequence
+below must not be presented as an available authority-command workflow.
+
 ## Remaining order, native Gate not implemented
 
 The [isolated-subrun ADR](../docs/gate1b-isolated-subruns.md) specifies the
@@ -67,6 +71,19 @@ pass, activation, or publication follows from this plan alone.
    rule-sync and machine-local provider-compiler checks;
    require `confirmed -> in_flight` before the sole request-bound permit and
    irreversible owner capability quiescence before durable normal close.
+   Bind the exact receipt digest in protected active/closed records and scan
+   protected history before new-lease consumption, including null-permit burns;
+   journal CAS is not authority. Enforce receipt TTL before acquisition and at
+   subsequent fences. Only no-durable-permit owner failures may close as
+   `failed_before_mutation`; after permit, verified success is applied and all
+   other outcomes are ambiguous, including zero bytes or definitive rejection.
+   Later eligible closed reconciliation may establish `resolved_not_applied`.
+   At 256 permit/closed records retain the last owner's valid closed active
+   sentinel; status returns `capacity_exhausted`/`stop`/exit 0 and acquire/recover
+   fails with existing exit 1, without deletion. Capacity adds no number beyond
+   the coordinator's proposed exits 10..13 and existing codes. Follow the
+   [state table](08-implementation-decision.md#complete-state-table) and complete
+   [registry constraints](../docs/gate1a-registry-protocol.md).
    Non-owners quarantine every unclosed lease without journal CAS, even after
    restart/reboot/expiry. Only an already-closed item may be deleted by its exact
    persistent reference; stale deletion must leave a replacement item intact.
@@ -103,7 +120,9 @@ pass, activation, or publication follows from this plan alone.
    plan, and closed evidence tree without changing app bytes;
    keep update/comment disabled or require the strict custom-MCP transaction
    gate.
-8. Publish those exact signed artifacts and an audited SHA-pinned Cask/private
+8. Complete the non-production pilot and independent security review with the
+   accepted executor-risk decision before publication.
+9. Publish those exact signed artifacts and an audited SHA-pinned Cask/private
    tap last.
 
 Gate 1A cannot pass before durable confirmation exists in the candidate's
@@ -366,6 +385,7 @@ trust/storage/package topology
   -> issue.create production activation grant
   -> per-architecture post-grant production-context verification
   -> update/comment risk decision or strict custom MCP
+  -> non-production pilot + independent security review
   -> publication envelope + complete verification tree inside a SHA-pinned
      Cask archive/private tap
 ```

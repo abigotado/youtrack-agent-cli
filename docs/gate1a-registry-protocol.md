@@ -31,6 +31,13 @@ ledger snapshot by an administrator, Keychain compromise, or backup service.
 That requires an external monotonic high-water mark and remains outside the
 first release.
 
+Protected access-group integrity and the exact signed helper's enforcement are
+trusted. A same-user attacker may restore user-owned journal files but cannot
+alter protected history under this assumption; whole-Keychain rollback is
+excluded. These guarantees constrain this client's guarded transport only,
+not independent requests made with credentials outside it. Deliberate denial
+of service, including consuming the bounded lifetime below, is accepted.
+
 ## Primitive encodings
 
 All authority objects are compact UTF-8 JSON objects. They contain no leading
@@ -96,12 +103,14 @@ base64url decoding, signature verification, or display:
 | one coordinator active, permit, or closed item, including metadata | 8,192 |
 | complete ledger records | 256 |
 | aggregate canonical stored-record bytes | 1,114,112 |
-| aggregate bytes returned by the bounded Keychain query | 2,097,152 |
+| aggregate bytes returned by the bounded registry query (256 items) | 2,097,152 |
+| aggregate bytes returned by the bounded coordinator query (513 items) | 4,202,496 |
 | coordinator permit records | 256 |
 | coordinator closed records | 256 |
 
-The canonical-record aggregate bound is exactly `256 * 4,352`. More than 256
-matching items, an item over its bound, either aggregate over its bound, or
+The canonical-record aggregate bound is exactly `256 * 4,352`. Registry and
+coordinator query bounds are separate: `256 * 8,192` and `513 * 8,192`.
+More than the applicable item count, an item over its bound, an aggregate over its bound, or
 Security.framework returning a value of an unexpected type fails before
 sorting or cryptographic work.
 
@@ -208,7 +217,8 @@ The bounded service enumeration dictionary is the same except it omits
 account and uses `kSecMatchLimitAll`. A success result must be an array of
 1..256 dictionaries for the registry or at most one active plus 256 permit and
 256 closed dictionaries for the coordinator. The aggregate raw/projection
-bound is 2,097,152 bytes. Projection occurs before sorting; accounts are then
+bound is 2,097,152 bytes for registry and 4,202,496 bytes for coordinator.
+Projection occurs before sorting; accounts are then
 validated and sorted by canonical revision or record kind/lease ID. A bare
 dictionary for match-all, duplicate account, unknown account, unexpected
 value, or `errSecSuccess` with an empty collection is malformed. Only
@@ -220,8 +230,11 @@ to the acquired active record, `permit/<lease-id>` must return bytes equal to
 the one permit, and `closed/<lease-id>` must return only
 `errSecItemNotFound:-25300`. No match-all query, cached result, combined
 predicate, reordered call, or extra read can replace this probe. The helper
-then repeats peer audit-token/session and profile-expiry checks without
-releasing the coordinator; any mismatch or noncanonical result prevents send.
+then repeats peer audit-token/session, profile/token validity, and receipt-TTL
+checks without releasing the coordinator. Trusted time must be strictly before
+the signed receipt's `expires_at`; equality is expired. Any mismatch,
+noncanonical result or expired receipt prevents send. A post-permit denial
+is `ambiguous`, never a new send attempt or `failed_before_mutation`.
 
 Registry revisions, coordinator permit/closed records, and approval private
 keys are never deleted by this first-release protocol. Disjoint synthetic Gate
@@ -241,7 +254,9 @@ Wrong type, an empty/oversized reference, malformed metadata, or any uncertain
 result prevents deletion. The 8,192-byte projected item cap still applies to
 the complete result including that reference.
 
-Before deletion the helper validates the complete immutable active/permit/
+Before deletion the helper performs the fresh full bounded capacity classification
+below; a valid closed exhaustion sentinel is never deleted, and uncertainty
+never authorizes deletion. It then validates the complete immutable active/permit/
 closed chain and the exact terminal journal or registry candidate/outcome.
 A matching durable `closed` is mandatory even when the journal already holds
 terminal outcome or normal-closed candidate bytes. The exact delete dictionary
@@ -573,8 +588,8 @@ request, or signing work, the requesting peer constructs one compact canonical
 registry intent capped at 1,024 bytes. Its fields are, in order,
 `schema_version` integer `1`, `intent_type` exactly `registry_commit`,
 `transition_kind`, `artifact_descriptor_sha256`, `ceremony_nonce`,
-`requested_at`, and `expires_at`. The transition is exactly `enrollment`,
-`rotation`, `revocation`, or `recovery`; the nonce is unpadded base64url of 32
+`requested_at`, and `expires_at`. The transition is exactly `enroll`,
+`rotate`, `revoke`, or `recover`; the nonce is unpadded base64url of 32
 fresh random bytes; expiry is after issue and at most five minutes later. Its
 digest is SHA-256 of ASCII `YTA-REGISTRY-INTENT-V1` plus NUL followed by the
 exact canonical bytes. This `registry_intent_sha256` is available before the
@@ -642,7 +657,7 @@ in this order: `schema_version`, `record_type` exactly
 `apply_coordinator_active`, `lease_id`, `operation_kind` exactly `apply` or
 `registry_commit`, `coordinator_session_id`, `cli_audit_token_sha256`,
 `artifact_descriptor_sha256`, `authorization_context_sha256`,
-`registry_revision`, `plan_id`, `journal_revision`, `registry_intent_sha256`,
+`registry_revision`, `plan_id`, `journal_revision`, `receipt_sha256`, `registry_intent_sha256`,
 `created_at`, and `expires_at`. The session ID is unpadded base64url of 32
 fresh random bytes. The CLI digest is required for both operation kinds.
 Apply requires the exact context eligible for its closed mode—canonical
@@ -650,11 +665,11 @@ Apply requires the exact context eligible for its closed mode—canonical
 session under [isolated subruns](gate1b-isolated-subruns.md), the smoke receipt
 context only in activation smoke, or the grant-bound
 final context only in production/post-grant verification—plus registry
-revision, plan, and journal revision, and sets registry intent null. Production,
+revision, plan, journal revision, and signed receipt digest, and sets registry intent null. Production,
 smoke, and post-grant modes reject the Gate context before active acquisition.
 Registry commit requires the pre-read
 registry-intent digest and sets context, registry revision, plan, and journal
-revision null. Its eventual request/proposal/candidate is constructed and
+revision and signed receipt digest null. Its eventual request/proposal/candidate is constructed and
 validated later while the lease is held and must repeat the intent's
 transition and descriptor; its `challenge` equals the intent's decoded
 `ceremony_nonce` bytes re-encoded by the request codec, and its expiry equals
@@ -677,7 +692,7 @@ it is not a bearer token and is never returned as caller-selectable bytes.
 
 A closed value is compact canonical JSON capped at 4,096 bytes with fields
 `schema_version`, `record_type` exactly `apply_coordinator_closed`, `lease_id`,
-`active_sha256`, `permit_sha256`, `operation_kind`, `terminal_outcome`,
+`active_sha256`, `permit_sha256`, `receipt_sha256`, `operation_kind`, `terminal_outcome`,
 `journal_revision`, `registry_record_sha256`, `closed_at`, and `close_mode`, in
 that order. `close_mode` is exactly `normal`; recovery actor, recovery reason,
 and recovery-close fields are not part of this unimplemented codec. Journal
@@ -687,20 +702,67 @@ commit candidate and otherwise null only for a provably pre-candidate registry
 abort with `terminal_outcome=registry_not_committed`. Such an abort retains the
 exact intent and owner-produced normal close; the close binds the active digest
 and therefore that intent, and no candidate or revision add is inferred.
-Registry commit never has a permit.
+Registry commit never has a permit and sets `receipt_sha256` null.
+Apply requires this digest even when no permit exists; it repeats active and,
+when present, permit exactly.
 Apply permit digest is null only when the uninterrupted owner proves that no
 permit was issued, and required exactly when its permit exists.
 `terminal_outcome` is exactly `registry_committed`, `registry_not_committed`,
 `failed_before_mutation`, `applied`, or `ambiguous`.
+For apply, `failed_before_mutation` is legal if and only if no permit exists.
+After a permit, only verified success is `applied`; every other result is
+`ambiguous`, including a denied send with proven zero mutation bytes. Later
+eligible read-only reconciliation may report `resolved_not_applied`; it cannot
+rewrite the immutable close or authorize another permit.
 
 Only the original uninterrupted owner constructs and stores a normal close,
 after irreversible capability quiescence. Its exact bytes are durably retained
 with the terminal journal outcome or registry candidate/outcome evidence before
 the one close add. `closed/<lease-id>` and permit records remain immutable and
-are never deleted in this release. Reaching either 256-record bound blocks
-writes and registry ceremonies pending a separately reviewed retention protocol.
+are never deleted in this release. The capacity protocol below blocks new work
+at either 256-record bound without preventing the admitted owner's normal close.
 An outcome or locally retained closed candidate is not a substitute for the
 actual durable Keychain closed item.
+
+`receipt_sha256` is lowercase SHA-256 of the exact complete canonical
+signed receipt bytes, including its strict low-S signature. Before computing
+the digest or touching mutable authority, parse strictly and require canonical
+byte-for-byte re-encoding, including low-S DER validation. Under the acquired
+active lease, enumerate and validate ALL protected permit and closed history
+within the bounds above, independently of enumeration order, before any permit
+add. Any prior occurrence of this digest forbids a fresh permit, even after
+restoring a user-owned journal to `confirmed` or acquiring a new lease. The
+global invariant is at most one permit per signed receipt, across all leases.
+Repeated replay-denial closes with the same digest are valid only with null
+permit and `failed_before_mutation`; digest uniqueness is not required for
+closed records. Every normal pre-permit close burns the receipt, including a
+null-permit abort. An interrupted close remains quarantine. Journal CAS is
+crash bookkeeping, not same-user anti-replay authority.
+
+### Bounded lifetime and exhaustion sentinel
+
+Before acquisition, bounded read-only classification checks capacity. An
+admitted owner must finish its normal close first, then perform a fresh complete
+bounded enumeration of protected coordinator history while retaining its active
+item. If either permit or closed count reaches 256, it retains that matching
+VALID CLOSED active item as the exhaustion sentinel. Capacity must never prevent
+this owner's final close. If both counts remain below 256 and all linkage is
+valid, exact-reference cleanup may proceed. Uncertain classification never
+deletes active. All normal and recovery cleanup follows this same rule.
+
+The retained fixed account prevents a stale precheck in another process from
+acquiring after the last admitted owner closes. No cleanup, restart, expiry,
+or recovery deletes the sentinel. A valid exhausted history classifies as
+`capacity_exhausted` only after validating the full inventory and its matching
+valid closed active sentinel, with `allowed_action=stop` and status exit 0; acquire or
+recover returns `AUTHORITY_CAPACITY_EXHAUSTED`/exit 1. An expired valid sentinel
+remains capacity exhaustion, never recovery work. Corruption or an unclosed
+lease remains corruption or quarantine, never capacity success. The limit is
+256 lifetime closes, including registry ceremonies and failed/replayed attempts;
+an accepted attacker can exhaust this allowance as denial of service. There is
+no retention, reset, or implicit migration in this release. Exhausted history
+with a missing or mismatched sentinel is `AUTHORITY_STATE_CORRUPT`, never clear
+or capacity success; no helper recreates or repairs the sentinel.
 
 For an apply, the schema-3 receipt, active record, permit, and closed record
 form one context chain. The receipt, active, and permit repeat the identical
@@ -728,15 +790,27 @@ exact normal closed bytes already exist in a terminal journal.
 
 The uninterrupted apply order is exact:
 
-1. The connected helper authenticates the connected CLI and checks trusted
-   time before the descriptor expiry without reading mutable authority. If
-   expired, the CLI CASes `confirmed -> expired` and no active item exists.
+1. The connected helper authenticates the connected CLI, strictly parses the
+   canonical low-S signed receipt and computes its digest without reading
+   mutable authority. It requires trusted time strictly before both the
+   descriptor expiry and the signed receipt's `expires_at`, as well as the
+   applicable live token expiry. Equality or later is expired: the CLI CASes
+   `confirmed -> expired` and creates no active item.
    Otherwise it enters the serialized authority executor, takes the executor
-   guard, rechecks expiry, and creates the fixed active item. It retains the
+   guard, performs fresh complete bounded coordinator integrity/capacity
+   classification, and permits an active-add attempt only for a clear,
+   below-capacity result. Exhaustion or a missing/mismatched sentinel, corrupt
+   history, quarantine, or existing active state follows its classification
+   without a new add. This read-only coordinator check is not a ledger read or
+   a reservation; a later competing acquisition can still defeat the one add.
+   Immediately before that add it rechecks receipt, profile and token expiry.
+   It retains the
    guard through step 6 and active cleanup. This successful add is coordinator
    acquisition, not send authority.
 2. While retaining the same authenticated connection and excluding every
-   registry commit, it replays the complete ledger, validates the unexpired
+   registry commit, it validates the complete protected permit/closed history
+   and rejects any previously consumed receipt digest before any permit, then
+   replays the complete ledger, validates the unexpired
    helper profile and applicable live authority/context (the exact root-signed
    Gate token/context in Gate mode or the existing stage/production chain), and checks the receipt,
    project policy, credential binding, preconditions, plan, and journal
@@ -745,15 +819,22 @@ The uninterrupted apply order is exact:
    mutation bytes.
 3. The CLI durably compare-and-swaps `confirmed -> in_flight`, storing the
    exact historical registry and authorization evidence. This is the local
-   non-replay point; failure closes the lease as `failed_before_mutation`.
+   crash-bookkeeping point, not same-user anti-replay authority; failure closes
+   the lease as `failed_before_mutation`.
 4. The helper reauthenticates that same connection, rechecks the unchanged
-   ledger/context/profile cutoff and returned `in_flight` revision, then adds
+   ledger/context/profile/token cutoffs and returned `in_flight` revision,
+   and requires trusted time strictly before the signed receipt's `expires_at`
+   immediately before adding
    exactly one permit. The successful or exact-read-reconciled permit add is
    the sole send-authority linearization point.
 5. Only the same connection may send the one request whose exact bytes hash to
    `mutation_request_sha256`. The helper keeps the coordinator acquired across
    send and outcome handling, so rotation, revocation, recovery, enrollment,
-   and another apply cannot overlap it. There is no second permit, redirect,
+   and another apply cannot overlap it. Immediately before send it runs the
+   exact three-read state probe above and again checks receipt TTL, profile and
+   token validity on trusted time. Expiry at or after the receipt deadline
+   prevents all request bytes; since a permit exists, the outcome is ambiguous.
+   There is no second permit, redirect,
    retry, or resend.
 6. The original owner first irreversibly quiesces every send/sign/permit/commit
    capability, including queued callbacks and outstanding operations. Only
@@ -763,7 +844,9 @@ The uninterrupted apply order is exact:
    reads `closed/<lease-id>` first, accepts identical bytes as already
    committed, or performs one identical add only when the read was not found.
    Different/malformed bytes fail closed. Only after an identical durable close
-   does it exact-read and clean up `active` under the rules below. Durable
+   does it perform fresh full bounded capacity classification, retaining the
+   valid closed exhaustion sentinel or exact-reading and cleaning up `active`
+   under the rules below. Durable
    closed bytes are the close/fencing linearization point; active deletion is
    idempotent cleanup, never proof of closure.
 
@@ -786,8 +869,13 @@ capability.
 Registry enrollment, rotation, revocation, and recovery use the same active
 account with `operation_kind=registry_commit`. The peer first creates the
 canonical registry intent and the helper binds its digest into active; only
-after the serialized executor guard and a strict pre-acquisition profile-expiry
-check may it attempt the active add. At or after expiry it adds nothing. Only
+after the serialized executor guard, fresh complete bounded coordinator
+integrity/capacity classification yielding clear below-capacity state, and a
+strict immediately-pre-add profile/token-expiry check may it attempt the active
+add. Exhaustion, corrupt or missing sentinel, quarantine, or an existing active
+follows its classification without a new add; classification is not a capacity
+reservation. At or after expiry it adds nothing. This classification reads only
+coordinator state, not the registry ledger. Only
 after successful acquisition may the helper read the ledger or validate/build the
 request, proposal, or candidate. Under the same lease it rechecks exact peer,
 descriptor, intent, ledger, and trusted time strictly before profile expiry
@@ -796,6 +884,7 @@ signature, and again before the one revision add. It validates the eventual
 candidate against the active intent before commit, reconciles the one revision
 add exactly, irreversibly quiesces every capability, durably retains the
 exact candidate/outcome and normal close, adds that closed record once, and then performs
+fresh bounded capacity classification followed by sentinel retention or
 read-first active cleanup. No registry revision can linearize between an
 apply's in-flight CAS and durable close. If a registry operation acquires
 first, its revision and close are visible before a later apply revalidates, so
@@ -848,6 +937,8 @@ closed cleanup is allowed; otherwise absence/uncertainty remains quarantine.
 
 Already-closed cleanup requires a newly authenticated exact peer, the same
 artifact descriptor, and complete retained active/permit/closed/outcome linkage.
+It also requires fresh full bounded capacity classification; an exhaustion
+sentinel is retained and returns capacity exhaustion instead of cleanup.
 It requires no old process to be declared dead: the durable normal close proves
 that the owner irrevocably dropped its capabilities before publication. The
 new connection only reads and performs the exact persistent-reference deletion
@@ -900,9 +991,13 @@ also usage/exit 2. `status` is bounded and read-only. `recover` operates only
 on the exact already-closed active record,
 launches trusted native UI that displays profile, operation kind, lease digest,
 terminal classification, and proposed cleanup, and requires fresh user
-presence. Cancellation changes nothing. The command can run only the closed-
+presence. Cancellation changes nothing and must not trigger automatic retry;
+a later operator-requested invocation requires fresh presence. The command can run only the closed-
 cleanup subset above; it can never force-clear, select/delete an arbitrary
-item, or contact YouTrack. No active item at the initial read returns
+item, or contact YouTrack. A valid exhaustion sentinel returns
+`AUTHORITY_CAPACITY_EXHAUSTED`/exit 1 without deletion, including after expiry.
+With an expired profile and no active item, `HELPER_PROFILE_EXPIRED`/exit 12
+takes precedence. Otherwise no active item at the initial read returns
 `AUTHORITY_RECOVERY_DENIED`/exit 1 with zero mutation. An item disappearing
 after its valid closed linkage was captured may instead return the successful
 stale cleanup result below.
@@ -916,8 +1011,8 @@ it contains no count, cursor, authority state, or credential. `data` has these f
 `authority_status`, `artifact_descriptor_sha256`,
 `helper_profile_expires_at`, `active`, `permit`, `closed`, `journal`, and
 `allowed_action`. Status is `clear`, `busy`, `recovery_required`, or
-`expired_recovery_only`; action is respectively `none`, `wait`, `recover`, or
-`recover`. Every successful status response exits 0. `busy` is possible only
+`expired_recovery_only`, or `capacity_exhausted`; action is respectively `none`,
+`wait`, `recover`, `recover`, or `stop`. Every successful status response exits 0. `busy` is possible only
 when this helper retains the original live owning connection; non-owner unclosed state
 returns `AUTHORITY_STATE_QUARANTINED`/exit 1, never a success status.
 `recovery_required` and `expired_recovery_only` require a valid durable close.
@@ -968,6 +1063,7 @@ added to the public contract rather than disguised as existing exit 9:
 | `HELPER_PROFILE_EXPIRED` | 12 | `authorized helper profile has expired` | `install a newly authorized artifact; recovery cleanup only` |
 | `APPLY_PRE_PERMIT_ABORTED` | 13 | `mutation stopped before permit issuance` | `prepare a new plan and obtain a new confirmation` |
 | `AUTHORITY_STATE_QUARANTINED` | 1 | `local authority state is quarantined` | `stop and request operator investigation; do not retry or delete state` |
+| `AUTHORITY_CAPACITY_EXHAUSTED` | 1 | `authority capacity is exhausted` | `stop and request operator investigation; do not retry or delete state` |
 | `AUTHORITY_STATE_CORRUPT` | 1 | `local authority state is corrupt` | `stop and request operator repair; do not retry or delete state` |
 | `JOURNAL_V1_AUTHORITY_STATE_QUARANTINED` | 1 | `legacy authority journal state is quarantined` | `stop and request operator repair; do not migrate or retry it` |
 | `AUTHORITY_RECOVERY_DENIED` | 1 | `authority recovery evidence is invalid` | `stop and request operator repair; do not force clear state` |
@@ -997,9 +1093,11 @@ its tracked `.cursor/rules` compatibility mirror must be regenerated through
 provider compiler `--check` gate must pass. The embedded skill's
 `SKILL.md` and write-policy reference must be updated to route busy/recovery/
 expiry/reconfirm/corruption exactly as above, and the installed Codex/Claude
-copies must come only from that regenerated embedded skill. None of those
-production, generated-contract, canonical-rule, or tracked mirror files is
-changed by this design-only delta.
+copies must come only from that regenerated embedded skill. This design-only
+delta corrects embedded skill guidance; runtime commands, generated contracts,
+canonical rules, and tracked mirrors remain unchanged. Capacity adds a proposed
+reason on existing exit 1, not another exit number; current exits 0..9 remain
+untouched.
 
 ## Commit and ambiguous-result reconciliation
 
@@ -1088,6 +1186,28 @@ A-read/A-delete/B-acquire/stale-A-delete, direct old-reference absence, and an
 ambiguous delete followed by an exact-reference read. B always survives. No
 vector uses a local guard, PID death, launchd label, user-bootstrap identity,
 expiry, trusted UI, or reboot to prove that an unclosed owner was fenced.
+
+Required native anti-replay and capacity vectors extend the existing
+[Gate 1B isolated-subrun catalog](gate1b-isolated-subruns.md); they are
+requirements for future exact signed native execution, not proof from this
+documentation change. They cover restored `confirmed` journals after both a
+permit and a normal null-permit abort, a fresh lease with a previously consumed
+digest, reordered full history, and repeated replay-denial closes with null
+permit. Every schedule must preserve the global one-permit-per-receipt bound.
+Parser vectors reject noncanonical/high-S aliases before digest or authority
+access. Post-permit zero-byte denial must close ambiguous and allow only later
+eligible read-only `resolved_not_applied` reporting.
+
+Capacity vectors cover 255-to-256 closes, registry and denied-apply consumption,
+the last admitted owner's final close, a competing helper paused after a stale
+precheck, normal and recovery cleanup refusing the retained sentinel, expired
+sentinel classification, uncertain enumeration without deletion, and corrupted
+or unclosed state remaining failure. Typed projections exercise separate
+2,097,152-byte registry and 4,202,496-byte coordinator limits, including the
+full 513-item coordinator result. Output vectors pin status exit 0 with
+`capacity_exhausted`/`stop`, acquire/recover capacity exit 1, expired/no-active
+recover exit 12, and cancellation exit 11 without automatic retry or reused
+presence. No vector claims new signatures, retention, or rollback detection.
 
 Setup vectors retain both signed stage-token variants, exact setup enrollment
 IPC evidence, its five-entry transcript manifest, and the later setup snapshot.

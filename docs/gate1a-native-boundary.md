@@ -261,8 +261,44 @@ permit or manufactures a closed record. A non-owner finding active without a
 valid durable close returns `AUTHORITY_STATE_QUARANTINED` (exit 1), without
 journal CAS, close add, deletion, signing, key generation, permit, send, or
 registry commit. This holds after reboot, expiry, PID loss, or trusted UI.
+Before hashing the exact complete signed receipt or accessing mutable authority,
+strict canonical parsing and low-S DER validation are mandatory. Apply active
+and closed records require `receipt_sha256`, null for registry operations;
+permit repeats that digest. Under acquired active, the helper validates all
+protected permit/closed history independently of enumeration order before any
+permit. Any prior digest forbids a fresh permit across leases, including after
+a restored `confirmed` journal. Normal null-permit closes burn the receipt;
+repeated replay-denial closes are allowed only with null permit and
+`failed_before_mutation`. There is at most one permit per receipt globally.
+Journal CAS is crash bookkeeping, not same-user anti-replay authority.
+For apply close, `failed_before_mutation` is valid exactly when there is no
+permit; after permit, verified success is `applied` and every other result is
+`ambiguous`, even zero-byte denial. Later eligible read-only reconciliation may
+report `resolved_not_applied` without changing close or granting a new permit.
+
+The registry query cap is 256 items / 2,097,152 bytes; the separate coordinator
+cap is 513 items / 4,202,496 bytes, each item at most 8,192 bytes. The last
+admitted owner must complete normal close first, then freshly enumerate all
+bounded history under retained active. At either 256 permit or 256 closed
+records it retains the matching valid CLOSED active as an exhaustion sentinel.
+This prevents acquisition by a helper paused after a stale precheck. Normal
+and recovery cleanup never delete that sentinel, including after expiry;
+uncertainty also forbids deletion. Capacity cannot block the admitted owner's
+final close. Valid exhaustion yields status `capacity_exhausted`,
+`allowed_action=stop`, exit 0; acquire/recover yields
+`AUTHORITY_CAPACITY_EXHAUSTED`/exit 1, message `authority capacity is exhausted`,
+hint `stop and request operator investigation; do not retry or delete state`.
+Capacity success requires full validated inventory and a matching valid closed
+active sentinel; exhausted history with a missing or mismatched sentinel is
+corrupt, never clear, and cannot trigger sentinel recreation.
+Unclosed quarantine and corruption remain failures. This accepts a 256-close
+lifetime and attacker-driven denial of service. Protected-group integrity and
+signed-helper enforcement are trusted; whole-Keychain rollback is excluded.
+Transport enforcement covers this client, not independent credential use.
+
 Historical remote reconciliation is bounded read/report only, without CAS.
-An already-closed lease can be cleaned only by its exact lookup's bounded,
+An already-closed non-sentinel lease can be cleaned only after fresh full bounded
+capacity classification and by its exact lookup's bounded,
 nonempty CFData persistent reference (at most 4,096 bytes), passed in
 `kSecMatchItemList`; there is no attributes-only delete fallback. The exact dictionaries, projections,
 records, linearization points, and recovery rules live in the registry
@@ -302,7 +338,7 @@ a separate observer-only token and new session on the same preserved host;
 it cannot enroll, sign, send, reconcile remotely, CAS, delete, or reset. It retains no authority
 to use release-stage cleanup. Recovery-only sessions validate exact code and
 retained evidence but cannot adopt the old owner. They classify unclosed state
-as quarantined, or delete only a validated already-closed active item's exact
+as quarantined, or delete only a validated already-closed non-sentinel active item's exact
 persistent reference. They cannot journal-CAS, synthesize close, sign, acquire,
 permit, send, or commit.
 
@@ -314,7 +350,11 @@ existing connection, cached validation, Gate evidence, or already confirmed
 receipt survives that cutoff. Only the exact launchd-managed recovery-only
 launch and peer authentication may proceed after expiry, and only for status,
 unclosed-state quarantine, and persistent-reference cleanup of a validated
-already-closed lease; it cannot journal-CAS, synthesize close, enter ordinary auth,
+already-closed non-sentinel lease. Expired/no-active recover returns
+`HELPER_PROFILE_EXPIRED`/exit 12 before ordinary no-active denial; an expired
+valid sentinel remains capacity exhaustion. Recovery cancellation retains exit
+11 and never automatically retries; a later operator-requested attempt requires
+fresh presence. It cannot journal-CAS, synthesize close, enter ordinary auth,
 sign, acquire, commit, permit, construct transport, or send.
 
 Ordinary approval never enrolls. Enrollment has a distinct challenge and

@@ -62,7 +62,7 @@ but does not require that context to remain active. Before `in_flight`, the
 journal atomically retains one closed stage-tagged authority set. An E1/E2
 Gate 1A `gate` set contains the exact descriptor, exact root-signed Gate token,
 canonical `gate_receipt_context_v1`, complete bounded genesis-to-current
-registry chain, receipt, and digests; it contains no provisional authorization,
+registry chain and digests; it contains no provisional authorization,
 smoke token, activation grant, or production authority. Gate 1B instead retains
 `gate1b_isolated_authority_evidence_v1`, including the exact isolated unit token,
 inventory/unit/target/host binding and new receipt context, as specified by the
@@ -70,11 +70,14 @@ isolated-subrun ADR. It cannot accept the old single-suite Gate 1B token or
 substitute Gate 1A context bytes. An `activation_smoke`
 set contains the exact descriptor, signed provisional
 authorization, signed smoke token, provisional context, smoke receipt context,
-receipt, and digests; it contains no activation grant and a pre-socket hard
+and digests; it contains no activation grant and a pre-socket hard
 denial is terminalized as `activation_smoke_consumed`, never reconciled. A
 `production` or `post_grant_verification` set instead contains the exact
 descriptor, signed provisional authorization, signed activation grant, final
-grant-bound context, receipt, and digests. Historical verification rebuilds
+grant-bound context and digests. In every mode, `receipt` is a sibling of
+`authority_evidence` in the [journal v2 record](guarded-mutations.md#future-journal-record-v2-and-migration),
+not an additional field inside one of these closed authority objects.
+Historical verification rebuilds
 the matching pinned-root signature/hash chain and replays the complete retained
 registry chain to derive the verification key; a receipt digest, lone terminal
 record, or caller-selected SPKI is not sufficient, and fields from different
@@ -90,8 +93,12 @@ export only, with no remote reconciliation or resumption of receipt authority.
 Schema v3 apply receipts are consumed only through the helper-owned apply-authority
 coordinator defined by the registry protocol. The receipt's revision, active
 generation, applicable authorization context, exact request digest, plan ID,
-journal revision, and
-connected CLI audit token are copied into the active/permit chain. The durable
+journal revision, and connected CLI audit token are bound through the
+active/permit/closed chain using the registry protocol's exact field lists.
+The exact signed receipt digest in protected active, permit and closed records
+supplies the same-user anti-replay binding. Before any permit, the helper checks
+all retained permit/closed history for prior use, including a pre-permit burn;
+a restored journal or fresh lease cannot override it. The durable
 `confirmed -> in_flight` CAS precedes the sole permit; the permit precedes the
 sole send; the helper excludes every registry commit until a durable closed
 record exists and the original uninterrupted authenticated owner has
@@ -99,9 +106,15 @@ irrevocably quiesced every sign, permit, send, and commit capability, including
 queued callbacks. A crash without valid durable close quarantines the lease:
 permit absence proves zero authorized mutation, not permission for a new actor
 to CAS its journal, manufacture close, or delete active. Any uncertainty
-at or after permit is ambiguous, non-replayable, and read/report-only reconcile
-without journal CAS. Restart, reboot, expiry, PID loss, and trusted UI do not
+at or after permit is ambiguous and non-replayable. After a permit only verified
+success becomes `applied`; other dispatch outcomes, even known zero-byte
+denials, become `ambiguous`. `failed_before_mutation` requires no permit.
+Quarantined reconciliation is read/report-only without journal CAS; eligible
+normally closed evidence follows the journal's bounded reconciliation rules.
+Restart, reboot, expiry, PID loss, and trusted UI do not
 release unclosed state.
+At exhausted capacity, a valid closed active is retained as the non-deletable
+`capacity_exhausted` sentinel; it is not recovery work or unclosed quarantine.
 Neither a receipt signature nor an `in_flight` state alone authorizes network
 I/O. The helper also requires trusted current time strictly before the
 descriptor's `helper_profile_expires_at` at confirmation, coordinator

@@ -4,6 +4,10 @@ Status: **CLI direction approved; fail-closed first slice implemented locally**
 Evidence cutoff: **2026-09-01**
 Target baseline: **YouTrack 2026.2**, Codex, and Claude Code
 
+Current mutation surface: offline `prepare`, local `export`, and local `status`
+only. `confirm`, `apply`, and `reconcile` fail closed; the native authority
+workflow described below is not implemented.
+
 Native Gate readiness: **NOT PASSED**. The separate
 [isolated-subrun ADR](../docs/gate1b-isolated-subruns.md) specifies Gate 1B unit
 authorization, target lifecycle, and parent aggregation. Its inventory,
@@ -33,7 +37,7 @@ competing-acquisition ABA attempt between equality read and delete. Future
 E1/E2 receipts bind a separate Gate context and retained Gate authority set,
 so confirmation is testable before provisional authorization. These receipts
 are rejected by every non-Gate authority path.
-Activation-smoke/post-grant plans are setup-first (5/6 and 6/6 cases by
+Activation-smoke/post-grant plans are setup-first (5/6 and 6/7 cases by
 capability), bind a retained empty-inventory enrollment snapshot through all
 later evidence, retain terminal/replay-denial evidence, and accept case
 assertions only in a final runner observation after every transcript result.
@@ -46,10 +50,14 @@ quiescing every send/sign/commit capability. Non-owners quarantine an unclosed
 lease indefinitely, including after restart/reboot; reconciliation is bounded
 remote reading and reporting with no journal CAS. Cleanup of an already-closed
 lease deletes its exact persistent reference, never the reusable account name.
-Future
-authority commands retain JSON v1 but deliberately add distinct exits 10..13,
-map corruption to existing exit 1, and never emit exit 9; remote-uncertain
-reconciliation may retain it. Journal v2 and prepared-only v1
+Protected history burns the exact receipt digest even on a null-permit close;
+journal CAS cannot restore it. At 256 permits or closes the final owner closes
+and retains a valid closed active capacity sentinel. Future authority commands
+retain JSON v1 and use the proposed exits 10..13 alongside existing codes;
+the current runtime remains at 0..9. Capacity adds no further number: its status is
+`capacity_exhausted`/`stop`/exit 0; acquisition or recovery fails with existing
+exit 1 without deletion. See the [state contract](08-implementation-decision.md#complete-state-table)
+and [native constraints](../docs/gate1a-registry-protocol.md). Journal v2 and prepared-only v1
 migration/quarantine precede activation. These are unimplemented Gate
 requirements; all writes remain disabled.
 
@@ -84,6 +92,7 @@ This packet resolves the conflict conservatively: **an endpoint without an expli
 - [Evidence ledger](07-evidence.md)
 - [Implementation decision and Gate 1A](08-implementation-decision.md)
 - [Gate 1A approval-helper evidence report](09-gate-1a-report.md)
+- [PR #7 review dispositions](10-pr7-review-resolution.md)
 
 ## Recorded operator direction
 

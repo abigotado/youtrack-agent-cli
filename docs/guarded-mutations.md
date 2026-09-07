@@ -13,6 +13,10 @@ environment, stdin, PTY, or `--yes` approval fallback.
 
 ## Lifecycle
 
+Preparation/export/status are available now. The confirmation, dispatch and
+reconciliation stages below describe the future gated implementation, not
+additional commands or authority available in the current build.
+
 1. Narrow read helpers capture the exact issue, project, field schema, immutable
    IDs, and expected-state hashes.
 2. `mutation prepare --offline` validates the request and exact project
@@ -29,11 +33,12 @@ environment, stdin, PTY, or `--yes` approval fallback.
 The native helper protocol has two distinct byte sequences. It displays the
 exact bytes returned by `intent.ApprovalDisplayBytes`, stores their SHA-256 as
 `receipt.plan_sha256`, then signs the exact unsigned-receipt JSON returned by
-`approval.SigningBytes`. The signature therefore covers the displayed-plan
-hash together with receipt ID, nonce, TTL, approval-registry revision, active
-key generation/fingerprint, account, project, schema, request, expected-state,
-and SHA-256 of the fresh IPC challenge. A cross-language golden vector pins the
-unsigned-receipt encoding. The [Gate 1A protocol](gate1a-protocol.md) records
+`approval.SigningBytes`. The implemented v2 field order and signed bindings are
+defined by that [codec](../internal/approval/approval.go), including plan ID,
+profile identity, key generation/fingerprint, and the challenge digest.
+V2 does not contain the proposed registry revision or authorization-context
+digest. A cross-language golden vector pins the unsigned-receipt encoding.
+The [Gate 1A protocol](gate1a-protocol.md) records
 the implemented pre-Gate v2 contract and the mandatory activation-eligible v3
 registry-revision and authorization-context delta; neither constitutes a
 trusted helper or a passed Gate 1A.
@@ -65,15 +70,25 @@ paths reject the Gate context type.
    persists the matching complete `authority_evidence` branch and its exact
    canonical bytes/digests with the receipt before this transition. Branches
    are mutually exclusive and cannot supply missing fields for one another.
-   Before reading mutable authority it enters its helper process's serialized
-   executor and acquires the fixed-active Keychain coordinator also used by
+   Before registry-ledger reads it enters its helper process's serialized
+   executor, performs the registry protocol's bounded read-only coordinator
+   integrity/capacity classification, rechecks expiry, and attempts acquisition
+   only from clear below-capacity state. The fixed-active coordinator is also used by
    every enrollment/rotation/revocation/key-recovery commit. The executor guard
    orders only local callbacks. The fixed `SecItemAdd` primary key excludes
    independent same-UID helpers, including alternate bootstrap contexts;
    launchd registration is not a security singleton. While holding the
    coordinator, the helper revalidates the complete
    registry, the applicable context, and trusted current time strictly before the
-   descriptor's `helper_profile_expires_at`. Only after the durable
+   descriptor's `helper_profile_expires_at`. The exact canonical signed receipt
+   digest is bound in the protected active, permit and normal-close records.
+   Before permitting a request, the helper validates all retained permit/closed
+   history and rejects reuse of an already consumed digest under any new lease,
+   independently of the journal's contents or enumeration order. A normal
+   pre-permit close burns the receipt even with no permit; an interrupted close
+   leaves quarantine. Restoring a journal cannot restore approval authority.
+   The journal CAS is crash bookkeeping, not the same-user anti-replay boundary.
+   Only after the durable
    `confirmed -> in_flight` CAS may it create one permit bound to the exact
    request bytes. It holds the coordinator through that one send, durable
    outcome, and durable close; permit creation is the send linearization point
@@ -83,7 +98,8 @@ paths reject the Gate context type.
    transition cancels confirmation rather than authorizing apply. Every crash
    without a valid durable close quarantines the lease, including before
    permit and after a durable journal outcome. A permit makes uncertain remote
-   outcome ambiguous and never retryable. Expiry observed before
+   outcome ambiguous and never retryable. Receipt TTL, helper-profile expiry
+   and applicable token expiry are independent cutoffs. Expiry observed before
    coordinator acquisition transitions `confirmed -> expired`; expiry after
    acquisition while no permit exists burns the receipt and closes
    `failed_before_mutation` with zero dispatch. The final pre-send fence
@@ -103,6 +119,10 @@ paths reject the Gate context type.
    only the bounded opaque persistent reference obtained in the same exact
    read as A's attributes/value. If A is deleted and B acquired meanwhile,
    stale A deletion cannot remove B. No attributes-only fallback is permitted.
+   At exhausted coordinator capacity the valid closed active remains as a
+   durable sentinel: neither normal cleanup nor recovery may delete it. The
+   admitted owner must finish its close before this capacity decision. See the
+   registry protocol for the exact bounds and `capacity_exhausted` mapping.
    The future authority command contract assigns distinct exits 10..13 to
    wait for a local live owner, trusted already-closed cleanup, artifact
    replacement, and reconfirmation after an uninterrupted closed pre-permit
@@ -113,7 +133,9 @@ paths reject the Gate context type.
    the persisted historical receipt, exact authority sidecars, root signatures,
    descriptor/grant hash chain, context, and capability but does not require
    that authority to remain active. It may establish a unique applied result;
-   otherwise it reports `operator_resolution_required`. While the coordinator
+   otherwise it reports `operator_resolution_required`, unless bounded evidence
+   definitively proves non-application. Zero or multiple plausible matches do
+   not prove non-application and never justify an automatic new plan. While the coordinator
    is quarantined, even a unique remote match is a transient report only:
    no journal CAS, close add, active deletion, signing, permit, or replay is
    allowed. In the controlled Gate
@@ -124,13 +146,20 @@ paths reject the Gate context type.
    another confirmation, permit, or send. A separate reboot observer may only
    collect local quarantine evidence and export; it cannot reconcile remotely.
 
-When execution is enabled, normal terminal states are `reconciled`, `failed_before_mutation`, and
-`operator_resolution_required`. A timeout, reset, malformed/truncated response,
-proxy failure after send, or any failure at or after permit issuance is
-ambiguous and never authorizes replay. Merely reaching `in_flight` is not that
-boundary: the uninterrupted owner may durably close a proven pre-permit
-failure as `failed_before_mutation`, then require a new confirmation. A crash
-without durable close cannot take that transition. Restart, reboot, expiry,
+When execution is enabled, known application may become `reconciled`, definitive
+non-application may become `resolved_not_applied`, and an explicit local
+operator resolution may record `resolved_applied` or `resolved_not_applied`.
+Inconclusive evidence stays `operator_resolution_required`; none of these
+states revives a consumed receipt. In the future coordinator contract,
+`failed_before_mutation` requires an uninterrupted owner's valid durable close
+with no permit. After a durable permit, verified success is `applied`; every
+other dispatch outcome is conservatively `ambiguous`, including a local
+zero-byte pre-send denial or a rejection later used as non-application evidence.
+This classifies approval consumption, not a claim that YouTrack applied a write.
+Only subsequent bounded reconciliation of eligible closed state may establish
+`resolved_not_applied`. No post-permit path returns exit 13 or reuses approval.
+A crash without durable close cannot take any owner-only terminal transition.
+Restart, reboot, expiry,
 PID loss, and user presence cannot free an unclosed lease; it remains
 `AUTHORITY_STATE_QUARANTINED` pending a separately reviewed recovery/reset
 protocol. Read-only commands remain available.

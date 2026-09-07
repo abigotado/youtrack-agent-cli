@@ -147,6 +147,52 @@ any cap blocks contract freeze and requires another reviewed bound decision;
 it never truncates coverage, drops a variant, splits a race unsafely, or
 silently raises a cap. No literal inventory is supplied by this ADR.
 
+### Required affected-variant selectors
+
+The following mandatory additions/refinements preserve the 26 family IDs.
+They are coverage inputs for future tests, not executed conformance evidence
+or a complete compiler/inventory. Each listed selector expands to one fresh
+unit, `segment_ordinal=1`; its `requirement_id` is the variant ID and its
+`assertion_id` is the family ID plus `.` plus variant ID plus `.primary`.
+That final assertion verifies every condition in its row. These exact tuples
+must occur in both unit coverage and parent source mapping, alongside all
+unaffected catalog requirements. Comma-separated variants below each require
+their own unit and final assertion, not one combined matrix operation.
+
+| Family ID | Required variant IDs | Final assertion requirements |
+| --- | --- | --- |
+| `gate1b.coordinator.apply-vs-rotate-linearization` | `apply-first-atomic-contention`, `registry-first-atomic-contention`, `apply-first-ordered-transition`, `registry-first-ordered-transition` | Exact corresponding shared phase; atomic loser exits 10 permanently; ordered second actor begins only after close/deletion; zero overlap; leased registry intent/candidate validation and stale-apply cancellation where applicable. |
+| `gate1b.coordinator.apply-vs-revoke-linearization` | `apply-first-atomic-contention`, `registry-first-atomic-contention`, `apply-first-ordered-transition`, `registry-first-ordered-transition` | Same four shared phases with revoke as registry transition and revocation-first cancellation. |
+| `gate1b.coordinator.apply-vs-recovery-linearization` | `apply-first-atomic-contention`, `registry-first-atomic-contention`, `apply-first-ordered-transition`, `registry-first-ordered-transition` | Same four shared phases with registry recovery as transition and recovery-first cancellation. |
+| `gate1b.receipt.context-and-replay-deny` | `success-restore-confirmed` | Complete successful apply and normal close; restore caller-writable confirmed journal and attempt the same receipt under a fresh lease. Protected permit/closed history denies a second permit/send. |
+| `gate1b.receipt.context-and-replay-deny` | `null-permit-abort-restore` | Uninterrupted owner proves no permit, quiesces, terminalizes and durably closes with null permit; exit 13. Restore confirmed journal and retry with fresh lease: protected closed receipt digest denies permit/send. Repeated denied null-permit closes are allowed. |
+| `gate1b.receipt.context-and-replay-deny` | `interrupted-abort-quarantine` | Interrupt before durable normal close, restore confirmed journal, then observe through another helper: exit 1 quarantine; no close add, delete, permit or send. |
+| `gate1b.receipt.context-and-replay-deny` | `history-order-independent` | Permute returned protected history enumeration order within this unit; identical global receipt-burn decision, accepting repeated denied null-permit closes while rejecting more than one permit for any receipt digest. No mutation or reset between permutations. |
+| `gate1b.receipt.context-and-replay-deny` | `post-permit-zero-byte-deny` | Durable permit followed by local pre-send denial yields zero mutating bytes but `ambiguous`, never `failed_before_mutation` or exit 13; normal close burns receipt. Only verified success may close `applied`. |
+| `gate1b.authority.status-recover-contract` | `status-live-owner-busy` | Successful status has `busy`, action `wait`, exit 0; status does not emit exit 10. |
+| `gate1b.authority.status-recover-contract` | `recover-closed-cancel` | Valid closed cleanup with canceled trusted presence returns exit 11 and preserves bytes. |
+| `gate1b.authority.status-recover-contract` | `status-expired-no-active` | Exit 12; no fabricated cleanup work. |
+| `gate1b.authority.status-recover-contract` | `recover-expired-closed` | Valid below-capacity durable closed linkage permits only exact-reference cleanup; no new authority. |
+| `gate1b.authority.status-recover-contract` | `status-unclosed-quarantine`, `recover-unclosed-quarantine` | Exit 1, unchanged journal/active, zero authority writes. |
+| `gate1b.authority.fail-closed-matrix` | `permit-capacity-stale-contender`, `closed-capacity-stale-contender` | Begin below the respective 256-entry bound. Pause contender after its stale precheck; last owner reaches 256 permits or closes, durably closes and retains matching valid closed active sentinel. Resume contender: no new active acquisition. Cleanup cannot delete sentinel. Status is `capacity_exhausted`, action `stop`, exit 0; acquire/recover return `AUTHORITY_CAPACITY_EXHAUSTED`/exit 1. |
+| `gate1b.authority.fail-closed-matrix` | `expired-capacity-sentinel` | Valid closed exhaustion sentinel after profile expiry still returns status `capacity_exhausted`/`stop`/0 and recover capacity error/1; no deletion or recovery authority. |
+
+The status/recover family asserts only reachable exits: success 0, quarantine/
+corruption/recovery denial/capacity 1, rejected invocation 2, recovery cancel
+11, and expiry 12, as applicable to each declared command. Exit 10 is verified
+by atomic acquisition contention and invalid-enrollment contention; exit 13
+by `null-permit-abort-restore`, never by a status/recover invocation. Existing
+status flag, metadata, corruption, absence and migration variants remain
+mandatory and must be individually materialized before freeze.
+
+Protected history is searched globally by receipt digest, without dependence
+on lease, timestamp, enumeration order or restored local journal state. Any
+permit or normal closed receipt digest burns approval. Repeated null-permit
+denied closes do not imply corruption; the global permit count per receipt
+must remain at most one. A normal pre-permit failure requires proven absence
+of a permit. Once a permit exists, close outcome is only `applied` for verified
+success or `ambiguous` otherwise, even for proven zero-byte denial.
+
 ## Pre-token host and target allocation
 
 Trusted external lifecycle control prepares a genuinely fresh host and target
@@ -237,15 +283,17 @@ or reboot cannot renew a token, authorize another unit, or clear quarantine.
 The setup context's `setup_authorization` is exactly
 `gate1b_first_exact_artifact_enrollment_only`. Its only entry is the unit's
 first setup `enroll` operation, after the empty-state check. The ordinary
-first-enrollment ceremony creates revision/generation 1, durably closes and
+first-enrollment ceremony creates revision integer `1` and generation string
+`YTAG-00000000000000001`, durably closes and
 cleans its own lease, and retains the immutable baseline snapshot. Setup then
 ends irreversibly; it cannot sign receipts, send, rotate, recover, or enroll
 again. Every scenario uses ordinary registry operations under its unit's
 runtime context, not setup authority.
 
 The receipt's existing `authorization_context_sha256` is the plain digest of
-the new receipt-context object. Active and permit records bind the same digest;
-normal closed evidence binds their exact bytes. The retained authority branch
+the new receipt-context object. Active and permit records bind the same context
+digest; active and closed records also carry the receipt digest for apply.
+Normal closed evidence binds their exact bytes. The retained authority branch
 uses the shared base64url, genesis-to-current chain, SPKI, revision/generation,
 signature, and aggregate chain bounds without changing their encodings. It
 retains these new exact binding/token/context bytes and verifies their types,
@@ -422,7 +470,10 @@ per-leaf caps remain mandatory. Traversal streams bounded manifests/files,
 checks arithmetic and content-addressed path safety before reads, and rejects
 duplicate manifest entries rather than relying on deduplication to meet caps.
 Verification of E2 plus its E1 baseline checks at most two such parent
-closures, not an unbounded chain. Repeated Gate 1A prerequisites are resolved
+closures, not an unbounded chain. These are worst-case cost ceilings, not
+typical run sizes or performance estimates. Every required referenced body
+must still be read, hashed and validated; no hash-only shortcut, supplied pass
+bit, or reduced closure can satisfy these bounds. Repeated Gate 1A prerequisites are resolved
 once under their own fixed complete-set caps. No Gate 1B parent or private
 evidence closure is copied into the post-grant installed tree.
 

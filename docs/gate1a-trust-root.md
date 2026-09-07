@@ -353,7 +353,8 @@ binds a canonical registry-intent digest available before any ledger/proposal
 work; the eventual candidate is validated later under that lease. It
 holds it through the registry commit or apply's exact
 `confirmed -> in_flight -> one permit -> one send/outcome -> durable close`
-sequence; only then may it remove the active item. The active, permit, closed,
+sequence; only then may it classify fresh bounded history and remove the active
+item if capacity remains. The active, permit, closed,
 quarantine, and result-projection codecs are normative in the registry
 protocol. CLI filesystem locks never substitute for this cross-process
 boundary. Only the original uninterrupted authenticated owner can record
@@ -366,10 +367,46 @@ or trusted UI does not release it. Remote reconciliation may read and report
 only, never advance its journal. First-release availability is intentionally
 lost until a separately reviewed recovery protocol exists.
 
+Strict canonical receipt parsing and low-S DER validation precede hashing or
+mutable authority access. Active and closed require `receipt_sha256` for apply
+and null for registry commits; each permit repeats the digest of the complete
+canonical signed receipt bytes. While holding active, the helper validates ALL
+bounded protected permit/closed history independently of enumeration order
+before any permit. Any prior receipt digest forbids a fresh permit across
+leases, even after a same-user journal restore. The global bound is one permit
+per receipt. Normal null-permit aborts burn the receipt; repeated replay-denial
+closes may repeat its digest only with null permit and `failed_before_mutation`.
+Journal CAS provides crash bookkeeping, not same-user anti-replay protection.
+Interrupted closure remains quarantine.
+
+Registry queries allow 256 items / 2,097,152 bytes; coordinator queries separately
+allow one active plus 256 permit and 256 closed items / 4,202,496 bytes, with
+8,192 bytes per item. The last admitted owner must finish normal close first,
+then freshly enumerate complete bounded coordinator history under retained
+active. At either 256-record limit it retains its matching valid CLOSED active
+as an exhaustion sentinel. Normal and recovery cleanup never delete it, including
+after expiry; uncertainty also forbids deletion. This prevents a competing
+helper with a stale precheck from acquiring. Capacity cannot prevent the admitted
+owner's final close. A valid sentinel reports status `capacity_exhausted`,
+`allowed_action=stop`, exit 0; acquire/recover returns
+`AUTHORITY_CAPACITY_EXHAUSTED`/exit 1 with message `authority capacity is exhausted`
+and hint `stop and request operator investigation; do not retry or delete state`.
+Corruption and unclosed quarantine never become capacity success.
+Capacity success requires the full validated inventory and matching valid closed
+active sentinel; exhausted history with a missing or mismatched sentinel is
+corrupt and never recreates a clear state.
+
+This accepts deliberate denial of service and a 256-close lifetime, including
+registry ceremonies and denied attempts. The protected access group and signed
+helper enforcement are trusted; whole-Keychain rollback is excluded. The
+guarantee covers this client's guarded transport, not independent credential use.
+No retention, extra signature, presence reuse, or authority cache is introduced.
+
 For an already normally closed lease, an exact lookup returns the attributes,
 canonical data, and nonempty CFData persistent reference bounded to 4,096
 bytes. Cleanup validates the complete active/permit/closed and terminal-state
-bindings, then deletes only that reference using `kSecMatchItemList`, never an
+bindings and freshly checks full bounded history for capacity, then deletes
+only a non-sentinel reference using `kSecMatchItemList`, never an
 attributes-only predicate. If A was removed and B acquired after the lookup,
 deleting A's stale reference cannot delete B; A's absence is a stale no-op.
 Malformed or conflicting evidence quarantines. The helper enumerates registry
@@ -472,6 +509,11 @@ never retried. Profile expiry before acquisition closes
 `confirmed -> expired`; expiry after acquisition with no permit lets only the
 uninterrupted owner burn the receipt and close `failed_before_mutation` with
 zero dispatch after quiescence. A replacement actor must quarantine instead.
+For normal apply close, `failed_before_mutation` is valid if and only if no
+permit exists. After permit issuance, verified success closes `applied`; any
+other result, even proven zero-byte denial, closes `ambiguous`. Later eligible
+read-only reconciliation may report `resolved_not_applied`, without rewriting
+protected history or restoring permit authority.
 After the durable `confirmed -> in_flight`
 transition, reconciliation verifies
 the persisted historical key and authorization context but does not require
@@ -562,12 +604,17 @@ The sole exception is launch/peer authentication into an explicitly
 recovery-only helper session for bounded startup/status classification. If the
 profile is expired and no active record exists, it returns
 `HELPER_PROFILE_EXPIRED` with exit 12, never successful `authority_status=clear`,
-and closes. Successful post-expiry status requires a validated already-closed
-active record and advertises only its restricted cleanup path.
+and closes. This expiry result also precedes ordinary no-active recover denial.
+Successful post-expiry status requires a validated already-closed active record;
+an exhaustion sentinel advertises `capacity_exhausted`/`stop`, while another
+valid closed record advertises only its restricted cleanup path.
 Recovery-only classification continues only for the same exact descriptor and
 retained evidence. An unclosed active record remains quarantined with no
 mutations. A valid already-closed record permits only exact persistent-reference
-active cleanup; the session may not synthesize close or perform journal CAS. It cannot
+active cleanup only below capacity; an exhaustion sentinel cannot be deleted.
+Recovery cancellation keeps exit 11 and never retries automatically; a later
+operator-requested attempt requires fresh presence. The session may not synthesize
+close or perform journal CAS. It cannot
 enter ordinary confirmation/registry/apply authority, sign, acquire, permit,
 construct transport, or send; it closes when classification/cleanup finishes.
 
