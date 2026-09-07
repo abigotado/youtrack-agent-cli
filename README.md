@@ -83,8 +83,43 @@ Binary distribution, including Homebrew, is intentionally disabled until Gate
 source-built Formula cannot preserve the native approval helper's required
 signing identity and entitlements. Linux/Windows and unsigned portable archives
 are not a supported credential-bearing release path. The repository's Homebrew
-manifest and checker are readiness inputs, not an installable Formula; see
-[Homebrew readiness](docs/homebrew.md).
+manifest and checker validate dependency closure and offline source builds
+only—not Cask, signing, or native Gate readiness; see
+[the trust-root topology](docs/gate1a-trust-root.md) and
+[exact-artifact authorization](docs/gate1a-artifact-authorization.md), plus
+[Homebrew readiness](docs/homebrew.md). Even after complete Gate passes, a
+provisional authorization remains deny-only. A later offline-root-signed
+activation grant is issued only over the complete per-architecture pre-grant
+smoke evidence, and the real grant-bound production context must then pass a
+second per-architecture ordinary-command verification before publication.
+Every isolated Gate 1B E1/E2 execution unit begins with its own token-bound
+enrollment and retains that baseline in its leaf evidence. The offline parent
+set covers all units on all declared architectures; E2 binds the complete E1 set.
+Each activation-smoke and post-grant capability plan starts with a setup-only
+exact-artifact enrollment from a canonical empty disposable inventory, binds
+the retained revision-1 registry snapshot through every later observation and
+evidence index, and ends by retaining terminal and replay-denial evidence. Assertions
+are accepted only in a case-final runner observation emitted after every
+operation transcript is retained. A trusted external supervisor destroys the
+entire disposable host after evidence export and before the next activation
+grant or publication-envelope signature. A root-bound disposal attestation
+gates that signature; missing or uncertain disposal blocks release. Live
+`stage_cleanup`, deletion ACK recovery, and empty-inventory cleanup proofs are
+deferred, not delegated to the agent or native helper.
+The future write path, protected receipt consumption, expiry, pre-permit aborts,
+quarantine and bounded-capacity behavior are specified in the
+[registry/coordinator contract](docs/gate1a-registry-protocol.md) and
+[mutation lifecycle](docs/guarded-mutations.md). These are proposed native
+contracts, not implemented authority in this build. Their intentional
+availability limits include attacker-induced unclosed-crash quarantine and a
+256-record lifetime bound that requires a separate retention protocol; neither
+restart nor a new approval clears them. No native authority commands or future
+exits 10..13 are available until implementation updates the machine contract.
+
+[Gate 1B isolated subruns](docs/gate1b-isolated-subruns.md) defines the separate
+unit authorization and evidence-aggregation contract. Its complete inventory,
+validators, and native conformance still require implementation and verification;
+the historical case catalog alone cannot authorize activation or publication.
 
 ## Agent Skill
 

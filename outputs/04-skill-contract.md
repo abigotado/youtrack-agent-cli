@@ -1,6 +1,14 @@
 # `youtrack-agent` provider-neutral Agent Skill contract
 
-Status: Proposed; no skill has been created or installed
+Status: Portable skill created; guarded execution remains disabled; no installation claimed
+
+## Current build boundary
+
+The embedded skill supports offline `mutation prepare`, local `mutation export`,
+and local `mutation status`. `confirm`, `apply`, and `reconcile` fail closed.
+The workflows below describe the future gated contract, not enabled authority.
+Installed guidance links to its packaged command/contract references, never
+repository-external relative paths.
 
 ## Purpose
 
@@ -13,11 +21,13 @@ The skill is policy and orchestration. It does not contain credentials, configur
 ```text
 youtrack-agent/
 ├── SKILL.md
-└── references/
+└── reference/
     ├── read-policy.md
     ├── write-policy.md
     ├── profile-contract.md
-    └── untrusted-content.md
+    ├── untrusted-content.md
+    ├── commands.md
+    └── contract.md
 ```
 
 The first version should remain instruction-only. Add scripts only if deterministic local validation cannot live in the future CLI.
@@ -94,7 +104,7 @@ These rules are normative:
 6. Fetch comments or additional fields only for that issue and only when necessary.
 7. Label excerpts as untrusted tracker content.
 
-## Write workflow
+## Future write workflow — requires native and executor gates
 
 1. Confirm the user explicitly requested a write and selected the guarded-write profile.
 2. Read the exact current issue/project state and resolve the selected project's field schema. Bind immutable field/value IDs, types, and schema hash; names are display labels only.
@@ -102,8 +112,8 @@ These rules are normative:
 4. Run CLI `mutation prepare` in offline mode using the explicit payload and expected-state/schema snapshots. `prepare` allocates `plan_id` and includes it in the final marker/body before hashing.
 5. Show one immutable canonical snapshot: endpoints/issuer identity, account, project, target, exact field diff/comment, notifications behavior, plan ID, and reconciliation marker.
 6. A human uses a trusted approval UI outside agent-controlled input, with OS user-presence verification, to mint a short-lived receipt.
-7. Run CLI `mutation apply` once through the configured executor. The CLI verifies the current state, project policy, receipt, schema, and payload hash. A REST executor carries an explicit issue-move TOCTOU warning; a strict profile requires the custom MCP executor to recheck policy and mutate atomically.
-8. Report `reconciled`, `failed-before-mutation`, or `ambiguous/operator-resolution-required`. Never soften `ambiguous` into success.
+7. Run CLI `mutation apply` once through the configured executor under the complete [native authority constraints](../docs/gate1a-registry-protocol.md). Protected active/closed records bind the exact receipt digest; history rejects reuse under any new lease, including a close with no permit. Journal CAS is not authority. A REST executor carries an explicit issue-move TOCTOU warning; a strict profile requires the custom MCP executor to recheck policy and mutate atomically.
+8. Use the [state contract](08-implementation-decision.md#complete-state-table): `reconciled`, `resolved_applied`, `resolved_not_applied`, `failed_before_mutation`, or `operator_resolution_required`. Only the uninterrupted owner with proof of no durable permit and valid durable close establishes `failed_before_mutation`. After permit, verified success is applied and every other result is ambiguous, even known zero bytes or definitive rejection. Later eligible closed reconciliation may establish non-application; zero/non-unique matches cannot and never authorize an automatic fresh plan. Quarantined reconciliation reports evidence without journal CAS.
 
 ## Result envelope
 
@@ -125,7 +135,7 @@ Instance/account/project: <verified values>
 Receipt: <non-secret receipt ID>
 Operation: <kind and exact target>
 Mutation attempts: 0 or 1
-Outcome: reconciled | failed-before-mutation | ambiguous
+Outcome: reconciled | resolved_applied | resolved_not_applied | failed_before_mutation | operator_resolution_required
 ```
 
 ## Error behavior
@@ -137,7 +147,7 @@ Outcome: reconciled | failed-before-mutation | ambiguous
 - Permission denied/not found: report without guessing whether the object exists on another instance.
 - Precondition changed: abort before mutation and present the new exact state; require a new plan.
 - Transport error during mutation: enter reconciliation; never reapply automatically.
-- Inconclusive reconciliation: report the specific evidence checked and require operator resolution.
+- Inconclusive reconciliation: report the specific evidence checked and require operator resolution. Zero/non-unique matches are not proof of non-application and never trigger an automatic fresh plan.
 
 ## Compatibility tests
 

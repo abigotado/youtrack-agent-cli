@@ -5,6 +5,14 @@
 - Gate result: **NOT PASSED**
 - Production adapter: `approval.Unsupported`
 
+The complementary [trust-root and package-topology
+ADR](gate1a-trust-root.md) freezes the production bundle identifiers, nested
+layout, Team ID input, Keychain registry, enrollment lifecycle, and clean-host
+evidence required to instantiate this protocol. The normative
+[registry/ceremony codec](gate1a-registry-protocol.md) and
+[exact-artifact authorization](gate1a-artifact-authorization.md) remove the
+remaining implementation choices from those authority boundaries.
+
 ## Context
 
 YouTrack mutations require evidence that a human reviewed one exact, bounded
@@ -125,16 +133,81 @@ resolves that token with `SecCodeCopyGuestWithAttributes` and checks a pinned
 designated requirement. PID and filesystem path are diagnostics, never
 authority. Replacement, exec, PID reuse, peer-token failure, timeout, crash,
 EOF, malformed frames, and protocol disagreement fail before approval.
+The sealed outer bundle contains
+`Contents/Library/LaunchAgents/io.github.abigotado.youtrack-agent.approval.plist`.
+Explicit operator registration uses `SMAppService.agent(plistName:)`, subject
+to macOS approval, with its `BundleProgram` pointing relative to the outer
+bundle at the nested helper executable. The helper binds the exact ordinary
+path `/private/tmp/ytac-approval-<euid>/approval.sock` under the
+[trust-root endpoint contract](gate1a-trust-root.md#signed-bundle-and-identifiers):
+OS-derived canonical effective UID, checked `sun_path` capacity including NUL,
+nofollow-opened UID-owned mode-`0700` real parent, and a verified socket entry
+under that directory. Bind collision fails closed without unlinking an
+existing listener. Pathname checks are not authority and do not exclude
+same-UID replacement or denial of service. The CLI connects itself, and both
+peers validate actual connection-bound audit tokens and exact code before any
+protocol bytes. Neither a runner-selected socket nor
+a runner-preconnected descriptor is accepted. Disjoint fault-fixture listeners
+remain fixture-only. The fixed job label and launchd-parent constraint are
+lifecycle checks, not proof that another exact signed helper cannot run under
+the same UID in another bootstrap context.
 
 This boundary is grounded in Apple's published `LOCAL_PEERTOKEN` definition in
 the [XNU `sys/un.h` header](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/un.h),
 the Security framework's [guest-attribute keys](https://developer.apple.com/documentation/security/guest-attribute-dictionary-keys),
 and [`SecCodeCopyGuestWithAttributes`](https://developer.apple.com/documentation/security/seccodecopyguestwithattributes(_:_:_:_:)).
 
+The pinned production requirements are exact, not caller-configurable. Their
+full Developer ID Application expressions and identifiers are frozen in the
+[trust-root ADR](gate1a-trust-root.md#signed-bundle-and-identifiers).
+They are only the coarse publisher/build predicate. Exact authority also
+requires either the exact offline-root-signed Gate 1A E1/E2 token plus canonical
+`gate_receipt_context_v1`, or Gate 1B isolated-unit token plus
+`gate1b_isolated_receipt_context_v1`, in its matching authenticated session,
+or the descriptor, provisional authorization, and matching smoke or
+production-activation context for those later modes, plus Security.framework
+validity and a match between the running self and connection-bound peer
+`kSecCodeInfoUnique` / `kSecCodeInfoCdHashes` values and the authorized
+per-architecture set. Both peers exchange and agree on the descriptor digest
+and canonical authorization-context digest before display or signing. A
+descriptor-only, provisional-only, mixed provisional/grant, or smoke/active
+context disagreement fails closed. Production, smoke, and post-grant modes
+reject the Gate context, and a Gate session rejects every later-mode context.
+Gate receipt signing additionally requires the root-signed token to be
+currently unexpired and its Gate ID, plan, target/prerequisite null rules,
+architecture, runner/session, and capability to match exactly.
+
+The schema-3 receipt carries the Gate-context digest in its existing
+`authorization_context_sha256` field. Confirmation retains Gate 1A's closed
+`gate_authority_evidence_v1` branch or Gate 1B's distinct
+`gate1b_isolated_authority_evidence_v1` branch from the isolated-subrun ADR,
+including its unit/host/target/inventory binding, exact descriptor/token/context
+bytes and the complete bounded
+genesis-to-current registry chain. Historical verification derives the SPKI by
+replaying that chain; it never trusts a lone terminal record or unchecked
+retained key. The same digest is bound directly by receipt, coordinator active,
+and permit and transitively by the closed record's active/permit digests. Gate
+1B historical reconciliation remains read-only and requires the matching Gate
+runner/session connection; later token expiry cannot authorize another
+confirmation, permit, or send. The reboot observer is a separate local-only
+read session, not a continuation of that signing or remote-reconciliation path.
+
+`TEAM_ID` and positive decimal `RELEASE_BUILD` are required immutable
+operator-supplied build/Gate inputs with no repository defaults. Each peer
+requirement pins the other's exact signed `CFBundleVersion` in addition to its
+Team ID and identifier. The developer-only Gate runner has exact identifier
+`io.github.abigotado.youtrack-agent.gate1a` under a separate Gate policy and
+must never ship or be accepted by the production helper. Unset, wildcard,
+non-decimal, and ad-hoc inputs fail closed.
+
 The helper-only permanent key is P-256 Secure Enclave material stored through
 the data-protection Keychain with `kSecAttrAccessControl`. A new `LAContext`
-with zero reuse is bound to the actual private-key signing operation, used
-once, and invalidated. Password-fallback versus `biometryCurrentSet` remains an
+with zero reuse is present only in the exact signing-key lookup. The returned
+`SecKey`, not the context, is used exactly once with `SecKeyCreateSignature`,
+which has no context parameter; the context is invalidated on every lookup or
+signature outcome. Separate
+existence/delete queries carry no context and force authentication UI to fail.
+Password-fallback versus `biometryCurrentSet` remains an
 explicit operator-reviewed policy. PR A does not create this key or access any
 Keychain item.
 
@@ -147,6 +220,153 @@ and the `LAContext`
 control. These sources justify the future design; PR A contains no live use of
 those APIs.
 
+The helper-private data-protection Keychain access group is
+`$(AppIdentifierPrefix)io.github.abigotado.youtrack-agent.approval`; all item
+operations explicitly use `kSecUseDataProtectionKeychain`. The outer app and
+CLI are not entitled to that group and obtain bounded registry reads only from
+the peer-authenticated helper. Every generation attempt appends a fresh random
+128-bit lowercase-hex key ID to the tag prefix
+`io.github.abigotado.youtrack-agent.approval.signing.v1/`; the registry binds
+the exact tag, generation, SPKI, and fingerprint. The append-only versioned
+registry uses service
+`io.github.abigotado.youtrack-agent.approval.registry.v1` and immutable accounts
+formed as `revision/` plus a 20-digit decimal revision.
+The exact event records, proposal/acceptance transcript, final signing views,
+state derivation, bounds, and vectors are frozen in the
+[registry/ceremony protocol](gate1a-registry-protocol.md); no native
+implementation may infer a different codec.
+The helper entitlement requires compatible code signing and its own embedded
+Developer ID provisioning profile. The helper owns the key and registry; its
+ordinary registry-introspection API is read-only and bounded. Only the closed
+ceremony and coordinator protocols below may mutate helper-private state or
+issue a transport permit. Mutual peer identity and removal of arbitrary
+write/enrollment surfaces remain mandatory.
+
+The helper also owns the only write-capable transport permit. Every process
+that could apply a mutation or commit a registry revision must acquire the one
+fixed Keychain-backed coordinator `active` account. Each helper's non-reentrant
+serialized executor excludes only work inside its own process; the unique
+Keychain add alone provides cross-process exclusion. The
+registry peer supplies a canonical intent digest before any ledger/proposal
+work; the candidate is validated only after acquisition. The
+same authenticated connection is fenced by audit token, runner/session where
+applicable, lease ID, coordinator session, descriptor, final context, registry
+revision, plan, and journal revision. Apply may receive one exact-request
+permit only after durable `confirmed -> in_flight`; the helper retains the
+coordinator across the one send/outcome. Only that uninterrupted authenticated
+owner can write normal close, after irrevocably quiescing every sign, permit,
+send, and commit capability, including queued callbacks. Registry ceremonies
+use the same coordinator and cannot interleave. Restart never resumes a
+permit or manufactures a closed record. A non-owner finding active without a
+valid durable close returns `AUTHORITY_STATE_QUARANTINED` (exit 1), without
+journal CAS, close add, deletion, signing, key generation, permit, send, or
+registry commit. This holds after reboot, expiry, PID loss, or trusted UI.
+Before hashing the exact complete signed receipt or accessing mutable authority,
+strict canonical parsing and low-S DER validation are mandatory. Apply active
+and closed records require `receipt_sha256`, null for registry operations;
+permit repeats that digest. Under acquired active, the helper validates all
+protected permit/closed history independently of enumeration order before any
+permit. Any prior digest forbids a fresh permit across leases, including after
+a restored `confirmed` journal. Normal null-permit closes burn the receipt;
+repeated replay-denial closes are allowed only with null permit and
+`failed_before_mutation`. There is at most one permit per receipt globally.
+Journal CAS is crash bookkeeping, not same-user anti-replay authority.
+For apply close, `failed_before_mutation` is valid exactly when there is no
+permit; after permit, verified success is `applied` and every other result is
+`ambiguous`, even zero-byte denial. Later eligible read-only reconciliation may
+report `resolved_not_applied` without changing close or granting a new permit.
+
+The registry query cap is 256 items / 2,097,152 bytes; the separate coordinator
+cap is 513 items / 4,202,496 bytes, each item at most 8,192 bytes. The last
+admitted owner must complete normal close first, then freshly enumerate all
+bounded history under retained active. At either 256 permit or 256 closed
+records it retains the matching valid CLOSED active as an exhaustion sentinel.
+This prevents acquisition by a helper paused after a stale precheck. Normal
+and recovery cleanup never delete that sentinel, including after expiry;
+uncertainty also forbids deletion. Capacity cannot block the admitted owner's
+final close. Valid exhaustion yields status `capacity_exhausted`,
+`allowed_action=stop`, exit 0; acquire/recover yields
+`AUTHORITY_CAPACITY_EXHAUSTED`/exit 1, message `authority capacity is exhausted`,
+hint `stop and request operator investigation; do not retry or delete state`.
+Capacity success requires full validated inventory and a matching valid closed
+active sentinel; exhausted history with a missing or mismatched sentinel is
+corrupt, never clear, and cannot trigger sentinel recreation.
+Unclosed quarantine and corruption remain failures. This accepts a 256-close
+lifetime and attacker-driven denial of service. Protected-group integrity and
+signed-helper enforcement are trusted; whole-Keychain rollback is excluded.
+Transport enforcement covers this client, not independent credential use.
+
+Historical remote reconciliation is bounded read/report only, without CAS.
+An already-closed non-sentinel lease can be cleaned only after fresh full bounded
+capacity classification and by its exact lookup's bounded,
+nonempty CFData persistent reference (at most 4,096 bytes), passed in
+`kSecMatchItemList`; there is no attributes-only delete fallback. The exact dictionaries, projections,
+records, linearization points, and recovery rules live in the registry
+protocol and are part of the Gate 1B conformance surface, executed through
+[isolated subruns](gate1b-isolated-subruns.md). Its materialized coverage
+includes invalid enrollment before ledger read, durable-outcome-before-close,
+close-add ambiguity, post-close/pre-delete crash, active-delete ambiguity, and
+an ABA schedule where independent helpers remove A and acquire B between
+lookup and deletion, proving that deleting A's stale reference cannot remove B,
+all driven by exact binary barrier schedules and event traces. Future failures
+use the additive JSON v1 commands and distinct future exits 10..13 frozen
+there; corruption and unclosed-owner quarantine remain existing exit 1 and no native status creates retry
+authority.
+
+Activation-smoke and post-grant sessions are not allowed to assume a registry
+already exists. Their first compiled case derives a stage-token-bound setup
+context that permits only one exact-artifact revision-1 enrollment after exact
+bounded absence probes for the production registry and coordinator services,
+signing-key namespace, journal root, and mutable runner state. The retained
+generation/SPKI/fingerprint/descriptor/session snapshot binds every later
+observation and evidence index. Final evaluation retains terminal/zero-send
+and export evidence; a trusted external supervisor then destroys the entire
+disposable host on success or failure. Only the closed allowlisted evidence
+leaves the host, not mutable Keychain, journal, session, credential, or
+private-key state. The root-bound disposal attestation specified by the
+artifact protocol must precede activation-grant signing after smoke and
+publication-envelope signing after post-grant verification. A runner
+self-report, empty-inventory claim, partial cleanup, or reused host cannot
+satisfy that condition. Live `stage_cleanup`, cleanup intent/progress, and
+ACK-ledger deletion authority are deferred from the first release. Setup
+context cannot sign approval receipts, permit, send, or cross sessions.
+Gate 1B performs one token-bound enrollment on every isolated unit host in each
+E1/E2 pass and architecture. Its snapshot is that unit's baseline provenance,
+while later planned registry
+transitions must validate their current ledger state. Reboot continuation uses
+a separate observer-only token and new session on the same preserved host;
+it cannot enroll, sign, send, reconcile remotely, CAS, delete, or reset. It retains no authority
+to use release-stage cleanup. Recovery-only sessions validate exact code and
+retained evidence but cannot adopt the old owner. They classify unclosed state
+as quarantined, or delete only a validated already-closed non-sentinel active item's exact
+persistent reference. They cannot journal-CAS, synthesize close, sign, acquire,
+permit, send, or commit.
+
+The helper validates its CMS profile and requires trusted current time to be
+strictly before the descriptor-bound `helper_profile_expires_at` at ordinary launch,
+peer acceptance, signing, coordinator acquisition, each registry proposal/final
+signature, registry commit, permit issuance, and the last pre-send fence. No
+existing connection, cached validation, Gate evidence, or already confirmed
+receipt survives that cutoff. Only the exact launchd-managed recovery-only
+launch and peer authentication may proceed after expiry, and only for status,
+unclosed-state quarantine, and persistent-reference cleanup of a validated
+already-closed non-sentinel lease. Expired/no-active recover returns
+`HELPER_PROFILE_EXPIRED`/exit 12 before ordinary no-active denial; an expired
+valid sentinel remains capacity exhaustion. Recovery cancellation retains exit
+11 and never automatically retries; a later operator-requested attempt requires
+fresh presence. It cannot journal-CAS, synthesize close, enter ordinary auth,
+sign, acquire, commit, permit, construct transport, or send.
+
+Ordinary approval never enrolls. Enrollment has a distinct challenge and
+proposal and activation domains, fresh trusted UI/user presence, peer
+verification before and after the response, and an atomic helper-owned registry
+commit. Its final key signature covers the live CLI-acceptance digest together
+with the complete transition state. Rotation, revocation, recovery, retained
+verification keys, downgrade behavior, and the CLI
+`profile -> policy -> journal` lock order are defined by the
+[trust-root ADR](gate1a-trust-root.md). Confirmation snapshots key revision and
+generation before UI and revalidates them afterward.
+
 ## Consequences
 
 - Go and Swift consume shared URL, ID, plan, receipt, key, signature, display,
@@ -155,10 +375,17 @@ those APIs.
   fields, helper-supplied text, or integer byte order.
 - The pure Go validator requires an explicit enrolled key generation, exact
   SPKI, and fingerprint; the response cannot select its own verification key.
+- The implemented v2 receipt is pre-Gate evidence only. The signed candidate
+  requires the protocol document's v3 registry-revision binding and rejects v2.
 - `approval.Unsupported` remains the only production adapter. Gate 1A stays
   **NOT PASSED** until signed/notarized native execution, Secure Enclave
   isolation, peer validation, UI review, and clean-host lifecycle evidence all
   pass.
+- Durable confirmation code may be completed while unwired, but remote write
+  activation additionally waits for the packaged live Gate 1B integration.
+  Gate 1A itself must exercise the ordinary production confirmation entry point
+  in the exact signed candidate; a passing artifact is never rebuilt merely to
+  change wiring.
 
 ## Rejected alternatives
 
@@ -173,4 +400,4 @@ those APIs.
 - high-S ECDSA acceptance: permits a second wire representation of one
   signature;
 - source-built or ad-hoc helper as Gate evidence: does not prove the production
-  designated requirement, entitlements, notarization, or upgrade boundary.
+  designated requirement, entitlements, notarization, or release boundary.

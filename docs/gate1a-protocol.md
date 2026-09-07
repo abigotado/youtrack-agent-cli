@@ -1,12 +1,145 @@
-# Gate 1A approval protocol v2
+# Gate 1A approval protocol (pre-Gate v2)
 
 Status: frozen cross-language data contract for the feasibility spike. Gate 1A
 itself is **not passed**. `approval.Unsupported` remains the only production
 adapter, and this document does not enable confirmation, apply, release, or
 Homebrew installation.
 
+The accepted trust-root ADR found that v2 lacks the approval-registry revision
+needed to invalidate receipts after rotation, revocation, or recovery. V2
+remains evidence for the completed feasibility spike but is not eligible for a
+signed Gate candidate. The next implementation must apply the exact v3 delta
+below before any native adapter is wired.
+
+## Required schema v3 delta
+
+Schema v3 retains every v2 limit and encoding rule and makes only these signed
+contract changes:
+
+- `schema_version` is exactly `3`;
+- `registry_revision` is inserted immediately after `challenge_sha256` in both
+  unsigned and signed canonical JSON;
+- `registry_revision` is a JSON integer in `1..256`, matching the bounded
+  append-only helper ledger, with no alternate string or floating encoding;
+- `authorization_context_sha256` is inserted immediately after
+  `registry_revision` in both unsigned and signed canonical JSON. It is the
+  lowercase SHA-256 of the exact canonical authorization-context object
+  defined by the artifact-authorization protocol: canonical
+  `gate_receipt_context_v1` during an authenticated Gate 1A E1/E2 session,
+  `gate1b_isolated_receipt_context_v1` during an authorized Gate 1B execution
+  unit, smoke receipt context during activation smoke, or grant-bound final
+  context during production/post-grant verification;
+- `key_generation` is exactly `YTAG-` followed by the 20-digit decimal ledger
+  revision that introduced the key (`00000000000000000001` through
+  `00000000000000000256`), replacing the broader pre-Gate v2 label grammar;
+- the signature, receipt digest, IPC success response, Go/Swift parsers, and
+  golden vectors bind that added field;
+- candidate decoders reject schema v2 rather than inferring a revision or
+  authorization context.
+
+All ordinal field references below describe the implemented v2 spike. The v3
+implementation inserts `registry_revision` at position 5 and
+`authorization_context_sha256` at position 6, shifting subsequent fields by
+two.
+
 The native trust boundary, canonical URL/plan-ID grammar, and exact future IPC
 frame are specified in [Gate 1A native approval boundary](gate1a-native-boundary.md).
+The registry generation and transition authority are specified by the
+[Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md), and
+`registry_revision` and `authorization_context_sha256` are accepted only with
+the descriptor and exact root-signed Gate token/context, provisional/smoke
+pair, or provisional/activation pair authorized by
+[Gate artifact authorization](gate1a-artifact-authorization.md), with the
+Gate 1B-only types and bindings in [isolated subruns](gate1b-isolated-subruns.md). The Gate
+branch exists before provisional authorization and is accepted only through
+the matching authenticated Gate runner session; production, smoke, and
+post-grant modes reject it.
+Both authenticated peers agree on that context digest before the helper may
+display or sign. Confirmation and the `confirmed -> in_flight` transition
+require the same currently active context. Once a request is `in_flight`,
+read-only reconciliation verifies the persisted historical context and receipt
+but does not require that context to remain active. Before `in_flight`, the
+journal atomically retains one closed stage-tagged authority set. An E1/E2
+Gate 1A `gate` set contains the exact descriptor, exact root-signed Gate token,
+canonical `gate_receipt_context_v1`, complete bounded genesis-to-current
+registry chain and digests; it contains no provisional authorization,
+smoke token, activation grant, or production authority. Gate 1B instead retains
+`gate1b_isolated_authority_evidence_v1`, including the exact isolated unit token,
+inventory/unit/target/host binding and new receipt context, as specified by the
+isolated-subrun ADR. It cannot accept the old single-suite Gate 1B token or
+substitute Gate 1A context bytes. An `activation_smoke`
+set contains the exact descriptor, signed provisional
+authorization, signed smoke token, provisional context, smoke receipt context,
+and digests; it contains no activation grant and a pre-socket hard
+denial is terminalized as `activation_smoke_consumed`, never reconciled. A
+`production` or `post_grant_verification` set instead contains the exact
+descriptor, signed provisional authorization, signed activation grant, final
+grant-bound context and digests. In every mode, `receipt` is a sibling of
+`authority_evidence` in the [journal v2 record](guarded-mutations.md#future-journal-record-v2-and-migration),
+not an additional field inside one of these closed authority objects.
+Historical verification rebuilds
+the matching pinned-root signature/hash chain and replays the complete retained
+registry chain to derive the verification key; a receipt digest, lone terminal
+record, or caller-selected SPKI is not sufficient, and fields from different
+stage types cannot be mixed. Live Gate confirmation/acquisition/permit/send
+requires the matching unexpired Gate 1A token or Gate 1B isolated unit token
+and the same authenticated live runner session.
+After `in_flight`, later token expiry does not invalidate historical evidence,
+but Gate 1B may use it only for bounded read-only reconciliation in that still-
+authenticated unit session; it cannot authorize a new permit or send. The
+separate reboot observer token admits local read-only quarantine evidence and
+export only, with no remote reconciliation or resumption of receipt authority.
+
+Schema v3 apply receipts are consumed only through the helper-owned apply-authority
+coordinator defined by the registry protocol. The receipt's revision, active
+generation, applicable authorization context, exact request digest, plan ID,
+journal revision, and connected CLI audit token are bound through the
+active/permit/closed chain using the registry protocol's exact field lists.
+The exact signed receipt digest in protected active, permit and closed records
+supplies the same-user anti-replay binding. Before any permit, the helper checks
+all retained permit/closed history for prior use, including a pre-permit burn;
+a restored journal or fresh lease cannot override it. The durable
+`confirmed -> in_flight` CAS precedes the sole permit; the permit precedes the
+sole send; the helper excludes every registry commit until a durable closed
+record exists and the original uninterrupted authenticated owner has
+irrevocably quiesced every sign, permit, send, and commit capability, including
+queued callbacks. A crash without valid durable close quarantines the lease:
+permit absence proves zero authorized mutation, not permission for a new actor
+to CAS its journal, manufacture close, or delete active. Any uncertainty
+at or after permit is ambiguous and non-replayable. After a permit only verified
+success becomes `applied`; other dispatch outcomes, even known zero-byte
+denials, become `ambiguous`. `failed_before_mutation` requires no permit.
+Quarantined reconciliation is read/report-only without journal CAS; eligible
+normally closed evidence follows the journal's bounded reconciliation rules.
+Restart, reboot, expiry, PID loss, and trusted UI do not
+release unclosed state.
+At exhausted capacity, a valid closed active is retained as the non-deletable
+`capacity_exhausted` sentinel; it is not recovery work or unclosed quarantine.
+Neither a receipt signature nor an `in_flight` state alone authorizes network
+I/O. The helper also requires trusted current time strictly before the
+descriptor's `helper_profile_expires_at` at confirmation, coordinator
+acquisition, permit issuance, and immediately before send.
+
+Expiry of the applicable Gate, smoke, or post-grant runner token has one closed
+state rule: before coordinator acquisition a confirmed plan becomes `expired`;
+after acquisition with proven permit absence its receipt is burned and the
+existing uninterrupted owner may close as `failed_before_mutation` with zero
+dispatch only after irrevocable capability quiescence. A replacement actor
+must quarantine instead. At or
+after permit, an unresolved outcome is `ambiguous` and no new send is allowed.
+Existing durable outcomes, including `activation_smoke_consumed`, are preserved,
+never downgraded by expiry. The authenticated session may only finish the
+existing journal/close fence and allowed historical read-only reconciliation;
+this grants no new acquisition, signature, permit, registry commit, or send.
+Vectors cover token equality/after at each boundary, both sides of permit,
+durable-success preservation, and consumed-smoke preservation.
+The registry protocol's future command/exit contract preserves the JSON v1
+envelope but deliberately adds exits 10..13 for wait, trusted recovery,
+artifact replacement, and reconfirmation; corruption/operator escalation and
+`AUTHORITY_STATE_QUARANTINED` use existing exit 1. The future
+authority surface never emits exit 9; remote-uncertain reconciliation may
+retain it. The four additive exits do not exist in the current disabled
+production slice and never authorize retry.
 
 ## Authority and limits
 
@@ -46,6 +179,14 @@ This slice deliberately does not define an IPC transport, process lifecycle,
 or helper discovery mechanism. Those security-sensitive contracts require a
 separate reviewed decision; no implementation may infer one from these data
 fixtures.
+
+Likewise, the release-stage setup context is not an approval receipt-signing
+context. Live `stage_cleanup`, cleanup intent/progress, and ACK-ledger deletion
+authority are deferred from the first release; no receipt field grants such
+authority. Smoke/post-grant terminal and export evidence is followed by
+externally attested destruction of the entire disposable host before the
+successor root signature. The root-bound disposal attestation is historical
+release evidence, never runtime approval or deletion authority.
 
 ## Identifiers and time
 

@@ -1,6 +1,145 @@
 # Implementation plan and decision gates
 
-Status: In progress; phases 2-4 are implemented through the fail-closed Gate 1A boundary
+Status: In progress; existing phases 2-4 reach the fail-closed Gate 1A
+boundary, while the native coordinator, profile-expiry enforcement, Gates, and
+writes described below are not implemented
+
+Current mutation surface enables offline `prepare`, local `export`, and local
+`status` only; `confirm`, `apply`, and `reconcile` fail closed. The sequence
+below must not be presented as an available authority-command workflow.
+
+## Remaining order, native Gate not implemented
+
+The [isolated-subrun ADR](../docs/gate1b-isolated-subruns.md) specifies the
+Gate 1B topology: root-authorized atomic units, fresh host/target allocation,
+per-unit enrollment, observer-only reboot continuation, and offline parent
+aggregation. Implement and verify its fully materialized inventory and
+validators before command/token freeze or native execution. The old phase
+catalog is coverage input, not an executable single-session suite. No Gate
+pass, activation, or publication follows from this plan alone.
+
+1. Freeze the signed bundle, Team ID parameter, peer requirements,
+   data-protection Keychain namespace, enrollment/rotation/recovery, and package
+   topology in `docs/gate1a-trust-root.md`, with complete normative codecs in
+   `docs/gate1a-registry-protocol.md` and
+   `docs/gate1a-artifact-authorization.md`.
+2. Implement full durable receipt verification and two-phase confirmation behind
+   dependency injection while the current repository remains
+   `approval.Unsupported`.
+   Bind E1/E2 receipts to their canonical Gate context and retained signed-token
+   authority branch so the unpublished candidate can exercise the same v3
+   receipt protocol before provisional authorization exists. Reject Gate
+   contexts from production, smoke, and post-grant authority paths.
+3. Implement the signed native helper, OS-protected approval-key registry,
+   bounded Go client, and non-distributed operator runner. Keep the fresh-
+   `LAContext` UI-allow signing lookup separate from UI-fail/no-context
+   existence and delete queries; use only the returned `SecKey` for one
+   `SecKeyCreateSignature` call, invalidate the context on every outcome, and
+   freeze disjoint vectors for those boundaries.
+4. Produce one unpublished signed/notarized/stapled artifact with the ordinary
+   production confirmation path wired; create and retain its exact app-only
+   payload archive, then bind that archive and the exact Apple code identities
+   in the descriptor before E1; pass complete runner/session-bound E1
+   and clean-reset E2 Gate 1A evidence sets on every declared architecture,
+   including the closed first-install/reinstall/rollback/replacement/uninstall
+   set, Keychain-migration cancellation/interruption/partial-failure set, and
+   all 88 profile-expiry boundary vectors;
+   only then issue the confirm-only provisional authorization, pass its
+   network-disabled ordinary-command smoke set. Begin each smoke/post-grant
+   capability plan with the token/context-limited exact-artifact revision-1
+   enrollment from a canonical empty five-domain inventory, bind its retained
+   registry snapshot to every later observation/index/set, retain terminal and
+   replay-denial evidence, and accept assertions only in a case-final runner
+   evaluation after all operation/transcript results. Export sanitized evidence,
+   have the external supervisor destroy the whole disposable host, and verify
+   its root-bound disposal attestation. Only then issue the production
+   activation grant. Run the grant-bound ordinary-command verification on every
+   architecture under its deny-only runner token; failed evidence quarantines
+   the unpublished grant and candidate.
+5. Implement canonical fingerprints, typed `issue.create`, bounded
+   reconciliation, and the fixed-active cross-process Keychain coordinator
+   while the current repository apply remains disabled. SMAppService manages
+   the sealed embedded LaunchAgent lifecycle, not global singleton authority;
+   the local guard only serializes one process. Freeze the
+   exact Keychain dictionaries/projections and active/permit/closed records;
+   add canonical journal v2 with strict atomic prepared-only v1 migration and
+   quarantine; add only `mutation authority status` and trusted-UI
+   `mutation authority recover`; update `.agents/rules/cli-contract.md`, extend
+   the authoritative `internal/errx` reason/exit registry and both
+   contract/command reference generators, regenerate the tracked
+   `.cursor/rules` mirror through `.agents/scripts/sync-rules.py`, and pass the
+   rule-sync and machine-local provider-compiler checks;
+   require `confirmed -> in_flight` before the sole request-bound permit and
+   irreversible owner capability quiescence before durable normal close.
+   Bind the exact receipt digest in protected active/closed records and scan
+   protected history before new-lease consumption, including null-permit burns;
+   journal CAS is not authority. Enforce receipt TTL before acquisition and at
+   subsequent fences. Only no-durable-permit owner failures may close as
+   `failed_before_mutation`; after permit, verified success is applied and all
+   other outcomes are ambiguous, including zero bytes or definitive rejection.
+   Later eligible closed reconciliation may establish `resolved_not_applied`.
+   At 256 permit/closed records retain the last owner's valid closed active
+   sentinel; status returns `capacity_exhausted`/`stop`/exit 0 and acquire/recover
+   fails with existing exit 1, without deletion. Capacity adds no number beyond
+   the coordinator's proposed exits 10..13 and existing codes. Follow the
+   [state table](08-implementation-decision.md#complete-state-table) and complete
+   [registry constraints](../docs/gate1a-registry-protocol.md).
+   Non-owners quarantine every unclosed lease without journal CAS, even after
+   restart/reboot/expiry. Only an already-closed item may be deleted by its exact
+   persistent reference; stale deletion must leave a replacement item intact.
+6. Produce an unpublished exact candidate with ordinary `issue.create` apply
+   wired, rerun the two-pass Gate 1A sequence for its new descriptor, then run
+   the complete two-pass Gate 1B unit inventory expanded from its 26 coverage
+   families. Every unit/architecture/pass has a fresh host and disposable
+   YouTrack project, a token-bound enrollment, and its own retained baseline.
+   E2 tokens bind the complete disposed E1 parent set, not an individual leaf.
+   Later transition evidence records the planned registry changes;
+   the baseline remains enrollment provenance. The suite includes
+   Remote MCP/OAuth host tests, both apply-first and registry-first
+   rotation/revocation/recovery orderings, invalid-enrollment contention before
+   ledger read, crash before permit, crash after permit before send, crash after
+   send before outcome, crash after durable outcome before close, close-add
+   ambiguity, crash after close before active deletion, active-delete ambiguity,
+   independent cleanup of active A followed by acquisition of B before stale
+   persistent-reference deletion of A, two valid helpers in separate bootstrap
+   namespaces, unclosed restart/reboot quarantine, queued-send versus normal
+   close, exact binary barrier/trace assertions, exact
+   authority status/recover envelopes/exits, and v1-to-v2 migration/quarantine.
+   Issue only the `issue.create` provisional authorization
+   after E2, run the exact per-architecture network-isolated dispatch-boundary
+   smoke under the same setup-first/snapshot-bound/export-last case contract,
+   and issue the production activation grant only after that complete
+   evidence set and external whole-host disposal pass. Run the grant-bound
+   per-architecture ordinary-command verification and quarantine any failure.
+   Export sanitized evidence, destroy each whole disposable host externally,
+   and retain root-bound disposal evidence before publication-envelope signing.
+   Do not implement live stage deletion or ACK-recovery authority in this MVP.
+7. Sign the root publication envelope over the exact post-grant plan and
+   complete evidence set, then reuse the retained app-only payload to build one
+   outer delivery archive containing the app, authority objects, envelope,
+   plan, and closed evidence tree without changing app bytes;
+   keep update/comment disabled or require the strict custom-MCP transaction
+   gate.
+8. Complete the non-production pilot and independent security review with the
+   accepted executor-risk decision before publication.
+9. Publish those exact signed artifacts and an audited SHA-pinned Cask/private
+   tap last.
+
+Gate 1A cannot pass before durable confirmation exists in the candidate's
+ordinary production entry point. The unpublished candidate is the object under
+test; failure discards it, while PASS qualifies its exact descriptor/code
+identities without a
+post-Gate code change. Neither Gate token nor provisional authorization is
+production authority. The offline root signs a capability-specific provisional
+authorization only after E2; a separate content-addressed black-box smoke set
+must exercise that deny-only branch on every declared architecture before the
+root signs a production activation grant. The exact grant-bound production
+context must then pass a separate per-architecture ordinary-command
+verification in the trusted disposable pre-publication environment; only the
+later publication envelope binds that evidence. Packaging the envelope and
+bound evidence in an archive whose checksum is pinned by the Cask avoids a
+recursive hash cycle. Gate 1B
+applies the same rule to the first remote mutation.
 
 ## Gate 0 — operator architecture decision
 
@@ -10,7 +149,8 @@ requires the remaining explicit decisions:
 
 - approve/revise ADR-001;
 - choose executor assurance: REST with accepted issue-move TOCTOU residual risk, or custom MCP for strict atomic project policy;
-- select Stage A mutation kinds;
+- keep `issue.create` as the selected Stage A mutation and decide separately
+  whether update/comment may accept REST TOCTOU or require strict custom MCP;
 - decide receipt-marker policy;
 - state whether simultaneous same-instance multi-account MCP use is mandatory;
 - state whether Server with external Hub must be supported in the first MVP;
@@ -94,7 +234,17 @@ Exit criteria:
 5. Generate a signing key whose use is protected by OS user-presence policy (macOS Keychain/Secure Enclave + LocalAuthentication for the first adapter).
 6. Implement a trusted approval UI that loads, displays, and signs one immutable in-memory snapshot, outside agent-controlled terminal input, with no noninteractive bypass.
 7. Implement short-lived signed receipts and atomic nonce journal states.
-8. Add crash-consistency tests at every state transition.
+8. Implement the helper-owned coordinator shared by apply and every registry
+   commit: fixed active-account acquisition, exact-request permit after
+   `in_flight`, same-connection fences, durable closed record, narrow active
+   persistent-reference cleanup only for already-closed leases, and read-only
+   quarantine of any unclosed lease after restart. Quarantined reconciliation
+   reads/reports remote evidence without journal CAS or replay.
+9. Bind the CMS-validated helper profile expiry into the descriptor and enforce
+   the strict cutoff at Gate/publication/install/runtime and twice around
+   permit/send.
+10. Add crash-consistency tests at every journal, active, permit, send,
+    outcome, close, and cleanup boundary.
 
 Exit criteria:
 
@@ -121,7 +271,9 @@ For each operation:
 - bind project ID+key, field/value IDs/types, and schema hash into the plan;
 - enforce project policy according to the selected executor assurance level;
 - verify expected state before send;
-- send one mutation;
+- acquire the helper coordinator, persist `in_flight`, issue one permit for the
+  exact request, send one mutation, persist outcome and durable close, then
+  release active;
 - reconcile exact touched state;
 - inject failures before send, during send, after server commit, and before journal commit;
 - require a fresh plan after any state mismatch.
@@ -173,6 +325,9 @@ Exit criteria:
 4. Document incident response for leaked credentials and unresolved ambiguous writes.
 5. Add telemetry that contains only non-secret IDs, state transitions, timings, and status codes.
 6. Run an independent security review and threat-model update before production use.
+7. Publish only the first write-capable build; keep any second build blocked
+   until its release-rollover ADR and Gate cover old signed pairs, approval
+   state, credentials, and stale tokens.
 
 ## Phase 8 — custom MCP app RFC or hardening
 
@@ -201,22 +356,38 @@ Do not copy built-in mutation scripts and call them “guarded” without these 
 | Receipt | Tamper, expiry, replay, wrong profile/account/project/payload/schema/precondition, display-to-sign swap |
 | Mutation | Pre-send failure, server rejection, timeout before/after commit, process crash |
 | Reconciliation | Unique success, zero match, multiple match, unspecified comment order, unrelated concurrent update |
+| Local authority | Concurrent valid helpers/alternate bootstrap namespaces; fixed-active unique add; owner quiescence before close; unclosed restart/reboot quarantine; stale persistent-reference deletion of A leaves B intact; exact status/recover JSON + invocation meta/flags/exits; prepared-only v1 migration |
+| Release stages | Exact setup-first capability plans; snapshot-bound terminal/replay-denial evidence; case-final assertions; sanitized export followed by external whole-host destruction; root-bound disposal attestation before successor signature; no live stage deletion or empty-inventory cleanup claim |
 | Secrets | Config/argv/log/error/crash-output scan |
 | Portability | Same skill scenarios in Codex and Claude Code |
 
 ## Initial effort order
 
-The shortest safe path is:
+The shortest safe path from the current repository is:
 
 ```text
-read-plane compatibility + hidden-call spike
-  -> shared instruction-only skill
-  -> profile/auth foundation
-  -> offline receipt protocol
-  -> schema snapshot
-  -> selected REST/custom executor assurance
-  -> issue.create/update/comment
-  -> pilot/security review
+trust/storage/package topology
+  -> exact registry codec + pinned artifact-authorization root
+  -> durable confirmation, injected and unwired
+  -> native helper + protected key registry + operator runner
+  -> exact Keychain dictionaries/projections + apply-authority coordinator
+  -> signed/stapled candidate + retained app-only archive
+  -> descriptor with production confirm wiring and archive digest
+  -> complete per-architecture Gate 1A E1 + clean-reset E2 evidence sets
+  -> confirm-only provisional authorization + black-box smoke evidence set
+  -> confirm-only production activation grant
+  -> per-architecture post-grant production-context verification
+  -> fingerprints + disabled issue.create engine
+  -> new exact descriptor with production issue.create wiring
+  -> per-architecture two-pass Gate 1A rerun + live YouTrack Gate 1B sets
+  -> Gate 1B apply/registry ordering + permit/crash/restart/ABA fencing cases
+  -> issue.create provisional authorization + dispatch-boundary smoke set
+  -> issue.create production activation grant
+  -> per-architecture post-grant production-context verification
+  -> update/comment risk decision or strict custom MCP
+  -> non-production pilot + independent security review
+  -> publication envelope + complete verification tree inside a SHA-pinned
+     Cask archive/private tap
 ```
 
 The custom YouTrack app is outside the critical path only when the operator explicitly accepts the REST executor's project-move TOCTOU residual risk. It is on the critical path for strict atomic project allowlisting.

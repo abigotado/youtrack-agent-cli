@@ -2,6 +2,10 @@
 
 Status: Accepted; fail-closed first-slice surface implemented
 
+Current mutation boundary: only offline `prepare`, local `export`, and local
+`status` are enabled. `confirm`, `apply`, and `reconcile` fail closed. Native
+authority commands, permits, and the future workflow below are unimplemented.
+
 ## Remote MCP read surface
 
 The MVP exposes exactly these official tools through each read profile:
@@ -90,6 +94,29 @@ The implemented first slice enables only `prepare`, `export`, and `status`. `con
 `apply`, and `reconcile` are present as stable fail-closed commands while Gate
 1A and the executor compatibility gate remain open.
 
+The future native-authority slice adds exactly these local commands:
+
+```text
+youtrack-agent-cli --profile <name> mutation authority status
+youtrack-agent-cli --profile <name> mutation authority recover
+```
+
+Both require explicit `--profile`. They accept only text/JSON output (including
+the retained `--json` alias), timeout, and verbose inherited flags; they reject
+`--yes`, `--dry-run`, `--fields`, raw output, plan/lease/force selectors,
+positional/stdin input, and environment overrides. Authority status is
+bounded/read-only; recovery requires trusted UI and may delete only an exact
+already-closed active item by its persistent reference. It has no YouTrack
+network capability. An unclosed item is quarantined with exit 1 and no local
+mutation; restart, reboot, expiry, or UI cannot clear it. Remote reconciliation
+while quarantined only reads and reports, without journal CAS. Their exact
+JSON v1 data plus required invocation `meta`, errors, and proposed exit-code
+mapping (including 11/12) are specified in the registry
+protocol and are not implemented by the current command tree.
+They require journal record v2. Only a valid v1 `prepared` record migrates;
+every other v1 state, including `failed_before_mutation`, is retained unchanged
+and quarantined.
+
 ### `prepare --offline`
 
 Guarantees zero DNS, socket, browser, or OAuth activity. It:
@@ -105,17 +132,17 @@ Guarantees zero DNS, socket, browser, or OAuth activity. It:
 
 It cannot claim that credentials, permissions, or current server state are valid.
 
-### `confirm`
+### Future `confirm` — disabled
 
-Launches a trusted approval UI that loads canonical plan bytes once and displays that immutable in-memory snapshot. Only after OS-verified user presence, the helper stores the displayed-byte SHA-256 in `plan_sha256` and signs the deterministic unsigned receipt that binds that digest to SHA-256 of the fresh IPC challenge, receipt ID, nonce, TTL, key identity, account, project, schema, request, and preconditions. It must not re-read a mutable plan file after display. A normal pseudo-terminal prompt is not sufficient when the agent host can inject input. The macOS MVP should bind the signing key to Keychain/Secure Enclave access control and LocalAuthentication, or use a genuinely out-of-band approval service. There is no `--yes`, environment override, piped stdin approval, or model-callable noninteractive mode. If no trustworthy presence adapter is available, `confirm` fails closed and guarded writes remain disabled.
+Launches a trusted approval UI that loads canonical plan bytes once and displays that immutable in-memory snapshot. Before accepting bytes, both peers must validate the offline-root-authorized exact Apple code identities and agree on the artifact-descriptor digest and exact authorization-context digest. Only after OS-verified user presence, the helper stores the displayed-byte SHA-256 in `plan_sha256` and signs the deterministic unsigned receipt that binds that digest to SHA-256 of the fresh IPC challenge, receipt ID, nonce, TTL, exact approval-registry revision, authorization context, active key generation/fingerprint, account, project, schema, request, and preconditions. It must not re-read a mutable plan file after display. A normal pseudo-terminal prompt is not sufficient when the agent host can inject input. The macOS MVP should bind the signing key to Keychain/Secure Enclave access control and LocalAuthentication, or use a genuinely out-of-band approval service. There is no `--yes`, environment override, piped stdin approval, or model-callable noninteractive mode. If no trustworthy presence adapter is available, `confirm` fails closed and guarded writes remain disabled.
 
-### `apply`
+### Future `apply` — disabled
 
-Validates receipt signature/TTL/nonce, plan ID, payload/schema hashes, resolves the exact current target/project/account, checks the expected-state fingerprint, atomically marks the intent `in_flight`, sends at most one mutation request through the configured executor, and reconciles with reads.
+Must satisfy the complete [native authority constraints](../docs/gate1a-registry-protocol.md), including receipt TTL and final send fences. After bounded read-only coordinator integrity/capacity classification, and before registry-ledger reads, apply contends with every registry commit on the unique fixed-active Keychain account. Protected active/closed records bind the exact receipt digest and bounded history rejects reuse under a new lease, including a null-permit burn; journal CAS is not authority. The uninterrupted owner enters `in_flight`, obtains one exact-request permit, sends once, records the outcome, irrevocably quiesces all capabilities, and adds durable normal close. Unclosed authority remains quarantined without journal CAS, including after reboot. The last owner reaching 256 permits or closes must close and retain its valid closed active item as the capacity sentinel. Status reports `capacity_exhausted` with action `stop` and exit 0; acquire/recover returns `AUTHORITY_CAPACITY_EXHAUSTED` with existing exit 1 and never deletes the sentinel. Capacity introduces no number beyond the coordinator's proposed exits 10..13 and existing codes; the current runtime remains at 0..9. See the [state table](08-implementation-decision.md#complete-state-table) for outcomes and expiry; all these requirements remain unimplemented.
 
-### `reconcile`
+### Future `reconcile` — disabled
 
-Never mutates. It re-runs only the method-specific bounded evidence checks and records `reconciled` or `operator_resolution_required`.
+Never mutates YouTrack. It re-runs method-specific bounded evidence checks; only eligible already-closed records may transition to `reconciled`, `resolved_not_applied`, or `operator_resolution_required`. Explicit local operator resolution may record `resolved_applied` or `resolved_not_applied`. Quarantined records allow reports only, without journal CAS. Historical validation retains the receipt and its complete authority branch without making either current authority; see the [state contract](08-implementation-decision.md#complete-state-table) and [native constraints](../docs/gate1a-registry-protocol.md).
 
 ## MVP operation kinds
 
@@ -195,12 +222,11 @@ Reliable create/comment reconciliation benefits from a stable marker. Recommende
 ## One-shot and reconciliation rules
 
 - Preflight GETs and postflight GETs are allowed; “one-shot” means exactly one mutating request.
-- A definitive HTTP validation/auth/policy failure before server acceptance is `failed-before-mutation`.
+- `failed_before_mutation` requires the uninterrupted owner, proof that no durable permit exists, and valid durable close. After permit, verified success is applied and every other result is ambiguous, even a definitive rejection or known zero bytes sent. Later eligible closed reconciliation may establish `resolved_not_applied`.
 - A success response containing the created/updated entity is followed by exact verification.
-- Timeout, connection reset, invalid/truncated response, proxy 5xx after send, or process crash after `in_flight` is `ambiguous`.
+- Timeout, connection reset, invalid/truncated response, or proxy 5xx after send is `ambiguous`. A crash without a valid durable close quarantines the unchanged journal, regardless of apparent permit absence. Only an uninterrupted owner can prove and close `failed_before_mutation`; no uncertainty authorizes replay.
 - The CLI never resends the mutation for the same receipt.
-- A unique reconciliation match changes state to `reconciled`.
-- Zero or multiple plausible matches after an ambiguous result is `operator_resolution_required`; it is not automatically considered failure.
+- For an eligible already-closed record, a unique reconciliation match changes state to `reconciled`; zero/multiple plausible matches require operator resolution, are not proof of non-application, and never authorize an automatic fresh plan. While quarantined, both results are reports only and never change the journal or release authority.
 
 ## Versioned machine response
 
