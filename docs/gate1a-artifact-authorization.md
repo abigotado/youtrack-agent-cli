@@ -4,6 +4,12 @@ Status: **NOT ACTIVATED**. The authority key is not enrolled, no Gate token is
 issued, and no production artifact is activated. `approval.Unsupported`
 remains the only production adapter. Gate 1A and Gate 1B are **NOT PASSED**.
 
+Gate 1B is also **NOT IMPLEMENTATION-READY**: the coordinator cases below are
+a required future conformance catalog, not an accepted executable suite. The
+[execution-topology blocker](#gate-1b-execution-topology-blocker) forbids Gate
+1B token issuance, command-contract digest freeze, and evidence acceptance
+until a separately reviewed subrun/aggregation/target-reset protocol exists.
+
 Developer ID identity, Team ID, bundle identifiers, and build number establish
 publisher and release identity, but they do not distinguish a Gate-tested
 binary from a separately rebuilt binary with the same semantic identity. This
@@ -67,6 +73,7 @@ its final field. Each signed object is capped before parsing or allocation:
 | production activation grant | `YTA-PRODUCTION-ACTIVATION-GRANT-V1\0` | 8,192 |
 | post-grant verification token | `YTA-POST-GRANT-VERIFICATION-V1\0` | 4,096 |
 | publication envelope | `YTA-PUBLICATION-ENVELOPE-V1\0` | 8,192 |
+| host-disposal attestation | `YTA-HOST-DISPOSAL-V1\0` | 4,096 |
 
 The descriptor is not itself root-signed. Its exact SHA-256 is the subject of
 each signed token or authorization. It is capped at 16,384 bytes and its digest
@@ -144,13 +151,16 @@ by the descriptor architecture order. Every entry has these fields in order:
 9. `entitlements_semantic_sha256`
 10. `actual_designated_requirement_data_sha256`
 
-The launchd job label is not an additional caller-selected descriptor field:
-it is the protocol constant equal to `helper_identifier`. Static validation
-requires the signed app's packaged service declaration to register exactly one
-per-user launchd job for that label and one fixed endpoint, with no alternate
-server mode, second label/listener, or directly spawnable server entry. Runtime
-evidence binds the one launchd-owned helper PID and endpoint to the descriptor's
-helper code slice before authority traffic.
+The fixed launchd label equals `helper_identifier`. Static validation requires
+the sealed `Contents/Library/LaunchAgents/io.github.abigotado.youtrack-agent.approval.plist`
+with its fixed `Label` and bundle-relative `BundleProgram`; it is registered
+through `SMAppService.agent(plistName:)` only after explicit operator consent.
+The plist is sealed non-executable bundle content, not a third code-slice role.
+The helper owns the fixed per-user listener described by the trust-root
+protocol. Packaging, parent launch constraints, and SMAppService are lifecycle
+controls, not proof that another exact signed helper cannot run. Every
+coordinator safety claim must survive two simultaneous valid helpers and
+alternate same-UID bootstrap contexts.
 
 Each `cdhashes` entry contains `digest_algorithm` as a JSON integer in
 `1..255` and `value` as exactly 40 lowercase hexadecimal characters encoding
@@ -232,9 +242,6 @@ a closed list for the profile-expiry claim:
 | `profile-expiry.registry-commit` | accept | deny | deny | deny after final signature validation | registry revision add |
 | `profile-expiry.coordinator-permit` | accept | deny | deny | deny after `in_flight` CAS | permit add |
 | `profile-expiry.mutation-pre-send` | accept | deny | deny | deny after permit add | socket creation or mutating request byte |
-| `profile-expiry.stage-cleanup-authenticate` | accept | deny | deny | deny after stage-token/context validation | first cleanup Keychain read |
-| `profile-expiry.stage-cleanup-pre-read` | accept | deny | deny | deny after previous cleanup operation/progress acknowledgement | next cleanup item read, including reconciliation |
-| `profile-expiry.stage-cleanup-pre-delete` | accept | deny | deny | deny after durable delete-attempt marker acknowledgement | `SecItemDelete` invocation |
 
 Every boundary ID has four mandatory vectors, with no sampled-time tolerance:
 `.just-before` supplies a trusted instant exactly one nanosecond before expiry
@@ -249,36 +256,27 @@ vector specifically proves a helper launched just before expiry cannot
 authenticate a peer at equality. The coordinator-permit and mutation-pre-send
 vectors prove that an acquired lease and existing permit respectively cannot
 extend authority. The registry-sign/commit vectors prove the same under a
-registry lease after proposal construction. The three cleanup boundaries apply
-to both smoke and post-grant cleanup and every item operation; their vectors
-exercise expiry between operations and after marker ACK but before delete.
-The latter invokes zero deletes and retains the pending marker; expiry cannot
-reset the attempt or authorize retry. The session is quarantined and its
-disposable environment destroyed under the existing failure policy.
-All 100 vector IDs are the boundary
-ID plus one of those four
-suffixes, and the fixture manifest must contain exactly that Cartesian product.
+registry lease after proposal construction.
+All 88 vector IDs are the 22 boundary IDs plus one of those four suffixes;
+the fixture manifest must contain exactly that Cartesian product.
 Missing, duplicate, differently rounded, reordered, cached-time, or
 caller-controlled-time variants fail both language implementations and every
 Gate plan that relies on the expiry claim.
 
-The only post-expiry runtime exception is a recovery-only launch of the exact
-launchd-managed helper and recovery-only authentication of the exact CLI. It
-is accepted only to perform bounded startup/status classification under the
-serialized authority-executor fence. If no unresolved active record exists,
-it returns bounded `authority_status=clear` with the expired profile field and
-closes without another operation.
-Trusted recovery proceeds only when classification finds one unresolved active
-record for the same descriptor and retained evidence. That session may perform
-only `mutation authority status`, trusted-UI recovery
-authorization, terminal journal v2 CAS, exact-read-first closed-record
-reconciliation, and executor-guarded byte-equal active cleanup. It cannot
-enter an ordinary helper session, confirmation, registry ceremony,
-coordinator acquisition, signing lookup, permit, transport construction, or
-send. The ordinary `profile-expiry.helper-launch` and
-`profile-expiry.peer-authenticate` vectors therefore still deny at equality;
-separate recovery negatives prove that an expired session is accepted only in
-this cleanup subset and is closed after classification/cleanup.
+The only post-expiry runtime exception is exact-code-authenticated bounded
+authority status and cleanup of an already durably closed lease. An absent
+active record with an expired profile returns `HELPER_PROFILE_EXPIRED`/exit 12
+and closes. An unclosed active record remains read-only quarantine, even after
+owner death, helper restart, reboot, expiry, or user-presence approval. No
+journal CAS, closed add, key generation, signing lookup, permit, send, registry
+commit, or deletion is authorized by that classification. Bounded historical
+remote reconciliation can report results but cannot rewrite the quarantined
+journal or replay a mutation. For an already valid normal close, the only
+mutation permitted is deletion of the exact captured active persistent
+reference under the registry protocol; no replacement active can be deleted.
+The ordinary launch/authentication expiry vectors still deny ordinary
+authority at equality. Separate recovery-only vectors prove this narrow
+status/closed-cleanup exception cannot enter ordinary work.
 
 ### Code, entitlement, profile, notary, and staple evidence
 
@@ -612,6 +610,12 @@ different code digest satisfy a valid signed authorization.
 
 ## Canonical Gate, smoke, and post-grant plans
 
+The Gate 1B branch of this section is conditional on resolving the
+[execution-topology blocker](#gate-1b-execution-topology-blocker). Its case
+order, candidate counts, and codecs document required coverage, not a frozen
+executable contract. The other stages remain unactivated and their own gates
+are unchanged.
+
 A Gate plan is data, never a script. Each of the six Gate 1A, Gate 1B,
 capability-specific activation-smoke, and capability-specific post-grant-
 verification plans is capped at 1,048,576 bytes (1 MiB). Their
@@ -648,9 +652,7 @@ compact canonical fields are, in order:
     `gate1b_first_exact_artifact_enrollment_v1` for Gate 1B, or exactly
     `first_exact_artifact_enrollment_v1` for activation smoke and post-grant
     verification
-20. `stage_cleanup_policy`, null for Gate 1A/Gate 1B or exactly
-    `attributed_stage_cleanup_v1` for activation smoke and post-grant
-    verification
+20. `host_disposal_policy`, exactly `external_whole_host_disposal_v1`
 21. `cases`, an ordered array
 
 `gate_plan_sha256` always means SHA-256 of these complete exact plan bytes,
@@ -688,21 +690,24 @@ runner/verifier supervisors. No fixture identity is accepted on an
 which is never an accepted protocol peer; no production identity is accepted
 on a `disjoint_fixture` case.
 
-Every policy permits only the ordinary helper-owned or runner-preopened
-`AF_UNIX` `SOCK_SEQPACKET` IPC descriptor. For `exact_artifact`, its only
-socket-address components relative to the already opened mode-0700 session
-root are exactly `ipc` and `approval.sock`; for `disjoint_fixture` they are
-exactly `fixture-ipc` and `approval.sock`. The matching helper or runner creates
-and connects it before sandbox entry and passes the connected descriptor. The
-receiver validates the connection-bound audit token and exact peer requirement
-before any protocol byte, including Team ID, identifier, build, active-slice
-unique/cdhash set, descriptor or fixture-manifest digest, and the stage's Gate
-or authorization context. Cross-namespace descriptors and callers creating,
-binding, connecting, or redirecting an additional Unix socket are rejected.
-The negative peer receives only a runner-preopened descriptor under
-`negative-peer-ipc` and `approval.sock`; it cannot address either ordinary or
-fixture registry state and the candidate must close it on audit-token/build
-rejection.
+Every policy permits the fixed per-user helper-owned `AF_UNIX`
+`SOCK_SEQPACKET` listener from the trust-root protocol. The exact outer CLI
+connects itself: a connected descriptor created by the runner would
+authenticate the runner, not that CLI, and is forbidden for ordinary peer
+traffic. The receiver validates `LOCAL_PEERTOKEN` and the exact peer
+requirement before any protocol byte, including Team ID, identifier, build,
+active-slice unique/cdhash set, descriptor, and authorization context.
+Runner session authority arrives on a separately authenticated control
+connection and cannot substitute for CLI/helper authentication. Only its
+compiled control transport and endpoints are admitted in addition to the
+ordinary listener. Disjoint fixtures use their separate fixed
+`fixture-ipc/approval.sock` namespace beneath their opened session root and
+self-connect there; production identities never gain fixture authority.
+The manifest-pinned old-build negative outer self-connects to the ordinary
+listener and must be rejected before authority traffic. The negative helper
+is contacted only by the compiled rejection probe in its disjoint endpoint;
+it is never installed or substituted for the ordinary listener. No runner
+preconnected descriptor can stand in for either peer.
 Gate 1A and confirm-only smoke deny `AF_INET`,
 `AF_INET6`, and every other socket family/type. `gate1b_target_v1` permits only
 the exact target origin and methods required by its declared workflows.
@@ -720,13 +725,12 @@ ceremony, not a signing credential or standalone signing endpoint; the helper
 still performs the ceremony's ordinary proposal and final registry signatures
 with its exact enrolled key and fresh user-presence checks. Rotation, recovery,
 revocation, a second enrollment, receipt signing, and mutation dispatch are
-outside setup authority. Gate 1B retains `stage_cleanup_policy=null`; the
-release-stage cleanup policy remains exclusive to activation smoke and
-post-grant verification.
-`stage_cleanup_policy` is likewise not ambient deletion authority. It permits
-only the distinct `stage_cleanup` IPC protocol over the exact retained cleanup
-intent and cleanup context; ordinary production and non-stage processes retain
-the no-delete rule.
+outside setup authority. No stage grants live per-item deletion authority.
+`stage_cleanup` IPC, cleanup contexts, cleanup intents, progress/ACK ledgers,
+and cleanup restart authority are absent from the first-release protocol.
+Every host is disposable; the trusted external supervisor destroys it after
+bounded sanitized evidence export. This lifecycle action is outside the
+candidate sandbox and must not be implemented as a helper or CLI operation.
 An inherited non-IPC descriptor, alternate Unix path, missing audit-token
 check, IPv6/hostname loopback, datagram/raw socket, or undeclared socket attempt
 is a Gate failure. Any policy change requires a protocol revision, not a new
@@ -807,7 +811,7 @@ An assertion-set manifest has fields `schema_version` integer `1`,
 `assertion_id`, `evaluator`, and `expected_sha256`, in that order. Evaluator is
 exactly `json_envelope`, `exit_code`, `filesystem_state`, `keychain_state`,
 `code_identity`, `network_transcript`, `byte_equality`, `ui_observation`, or
-`cleanup_state`, or `concurrency_trace`; its expected object is one canonical
+`archive_state`, or `concurrency_trace`; its expected object is one canonical
 fixture in the fixture set. The verifier, not the plan, implements these
 evaluators.
 
@@ -903,17 +907,22 @@ requirements, not maxima that permit omitted cases or additional authority.
 | Plan/capability | Cases / final evaluations | Operations | Observations | Transcript entries | Assertion entries |
 | --- | --- | --- | --- | --- | --- |
 | Gate 1A | 23 | 78 | 101 | 381 | 69 |
-| Gate 1B | 26 | 164 | 190 | 1,039 | 127 |
-| Activation smoke / confirm-only | 5 | 14 | 19 | 66 | 20 |
-| Activation smoke / issue-create | 6 | 17 | 23 | 90 | 22 |
-| Post-grant / confirm-only | 6 | 13 | 19 | 67 | 21 |
-| Post-grant / issue-create | 6 | 14 | 20 | 80 | 22 |
+| Gate 1B | 26 | 166 | 192 | 1,053 | 128 |
+| Activation smoke / confirm-only | 5 | 12 | 17 | 58 | 16 |
+| Activation smoke / issue-create | 6 | 15 | 21 | 77 | 18 |
+| Post-grant / confirm-only | 6 | 11 | 17 | 59 | 17 |
+| Post-grant / issue-create | 6 | 12 | 18 | 68 | 18 |
+
+The Gate 1B row checks the proposed catalog's structure only; it cannot be
+used to freeze a digest, authorize execution, or claim a passing suite while
+the execution-topology blocker remains open.
 
 The longest derived transcript ID in these fixed tables is 121 ASCII bytes,
-within the unchanged 128-byte ID limit. Gate 1B alone requires 1,039 transcript
-entries and 380 per-observation result manifests before other referenced
-evidence files; it must not inherit the fixture/assertion entry cap or the
-post-grant-only install-manifest file cap. All six evidence-index codecs use
+and the longest observation ID is 102 bytes, both within the unchanged
+128-byte limit. Gate 1B alone requires 1,053 transcript entries and
+384 per-observation result manifests before other referenced evidence files;
+it must not inherit the fixture/assertion entry cap or the post-grant-only
+install-manifest file cap. All six evidence-index codecs use
 the same independent 1 MiB object, 256-observation, 4,096-referenced-file,
 8 MiB-per-file, and 256 MiB-aggregate limits. Exact membership and ordering
 remain mandatory within those limits. Per-observation assertion-result and
@@ -973,7 +982,9 @@ exact Gate 1A case order is:
 This closed Gate 1A list contains exactly 23 cases; the compiled case table
 below must contain the same IDs once each in this exact order.
 
-The exact Gate 1B case order is:
+The proposed Gate 1B coverage order is below. It is subject to the
+[execution-topology blocker](#gate-1b-execution-topology-blocker), not an
+accepted executable case order:
 
 1. `gate1b.setup-exact-artifact-enrollment`
 2. `gate1b.issue-create.prepare-confirm-apply-success`
@@ -994,7 +1005,7 @@ The exact Gate 1B case order is:
 17. `gate1b.coordinator.crash-after-closed-before-active-delete`
 18. `gate1b.coordinator.active-delete-ambiguity`
 19. `gate1b.coordinator.active-cleanup-aba-deny`
-20. `gate1b.coordinator.restart-fence-and-close-recovery`
+20. `gate1b.coordinator.multi-helper-unclosed-quarantine`
 21. `gate1b.authority.status-recover-contract`
 22. `gate1b.journal.v1-v2-migration-and-quarantine`
 23. `gate1b.capability.update-comment-other-deny`
@@ -1002,8 +1013,9 @@ The exact Gate 1B case order is:
 25. `gate1b.receipt.context-and-replay-deny`
 26. `gate1b.authority.fail-closed-matrix`
 
-This closed Gate 1B list contains exactly 26 cases; the compiled case table
-below must contain the same IDs once each in this exact order.
+This proposed Gate 1B catalog contains exactly 26 cases; the coverage table
+below must contain the same IDs once each in this order. Neither is a frozen
+or executable command contract until the topology blocker is resolved.
 
 For activation smoke, `confirm_only` has exactly these cases:
 
@@ -1029,7 +1041,7 @@ Post-grant verification for `confirm_only` has exactly these cases:
 3. `post-grant.confirm.apply-all-deny`
 4. `post-grant.confirm.receipt-terminal-replay-deny`
 5. `post-grant.confirm.authority-negatives`
-6. `post-grant.confirm.cleanup`
+6. `post-grant.confirm.seal-evidence`
 
 Post-grant verification for `issue_create` has exactly these cases:
 
@@ -1038,11 +1050,12 @@ Post-grant verification for `issue_create` has exactly these cases:
 3. `post-grant.issue-create.zero-mutating-bytes`
 4. `post-grant.issue-create.receipt-terminal-replay-deny`
 5. `post-grant.issue-create.authority-negatives`
-6. `post-grant.issue-create.cleanup`
+6. `post-grant.issue-create.seal-evidence`
 
 The four stage lists therefore contain exactly 5, 6, 6, and 6 cases in the
 order shown. Each first case is the only setup-authorized case; each last case
-contains or is the final cleanup and final empty-inventory proof.
+contains or is the final sanitized evidence-export verification. Host disposal
+is attested afterward outside the candidate, without an index/attestation cycle.
 
 The verifier compiles the following closed case contracts. Operation step IDs
 and case-final assertion suffixes occur in the shown order; a suffix forms the
@@ -1054,7 +1067,7 @@ observation.
 
 | Gate 1A case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
-| `gate1a.artifact.static-validation` | `validate` | `.primary`, `.all-architectures`, `.launchd-single-helper-server` | `security_framework` |
+| `gate1a.artifact.static-validation` | `validate` | `.primary`, `.all-architectures`, `.sealed-launchagent-and-fixed-endpoint` | `security_framework` |
 | `gate1a.artifact.runtime-peer-validation` | `launch`, `handshake`, `launch-negative-outer`, `reject-negative-outer`, `launch-negative-helper`, `reject-negative-helper` | `.primary`, `.mixed-cli-peer-deny`, `.mixed-helper-peer-deny`, `.negative-peer-no-authority` | `ipc`, `security_framework` |
 | `gate1a.protocol.positive-vectors` | `verify` | `.primary` | `ipc` |
 | `gate1a.protocol.negative-vectors` | `verify` | `.primary`, `.all-negatives-rejected` | `ipc` |
@@ -1120,16 +1133,16 @@ one is a Gate failure.
 | `gate1b.coordinator.apply-vs-revoke-linearization` | `apply-first`, `revoke-after-close`, `reset`, `revoke-first`, `apply-after-revocation` | `.primary`, `.pre-read-registry-intent-bound`, `.candidate-validated-under-lease`, `.apply-first-serialized`, `.revocation-first-cancels`, `.zero-overlap` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
 | `gate1b.coordinator.apply-vs-recovery-linearization` | `apply-first`, `recover-after-close`, `reset`, `recover-first`, `apply-after-recovery` | `.primary`, `.pre-read-registry-intent-bound`, `.candidate-validated-under-lease`, `.apply-first-serialized`, `.recovery-first-cancels`, `.zero-overlap` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
 | `gate1b.coordinator.invalid-enrollment-contention` | `acquire-apply`, `attempt-enrollment`, `verify-busy-before-ledger-read`, `close-apply` | `.primary`, `.one-losing-active-add`, `.busy-before-enrollment-validation`, `.zero-later-authority-read-or-write`, `.closed-and-fenced`, `.busy-code-exit10` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
-| `gate1b.coordinator.crash-before-permit` | `prepare`, `confirm`, `acquire`, `crash-before-in-flight`, `recover-before-in-flight`, `reset`, `prepare-again`, `confirm-again`, `acquire-again`, `mark-in-flight`, `crash-before-permit`, `recover-after-in-flight`, `audit` | `.primary`, `.both-pre-permit-states-failed_before_mutation`, `.both-receipts-burned`, `.zero-mutation-dispatch`, `.closed-and-fenced`, `.pre-permit-code-exit13` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
-| `gate1b.coordinator.crash-after-permit-before-send` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `crash`, `recover`, `reconcile`, `audit` | `.primary`, `.ambiguous-no-retry`, `.zero-mutation-dispatch`, `.closed-and-fenced` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
-| `gate1b.coordinator.crash-after-send-before-outcome` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `send`, `crash`, `recover`, `reconcile`, `audit` | `.primary`, `.ambiguous-no-retry`, `.at-most-one-created-issue`, `.closed-and-fenced` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
-| `gate1b.coordinator.crash-after-durable-outcome-before-closed-add` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `send`, `record-outcome-and-normal-close-bytes`, `crash`, `recover-close`, `audit` | `.primary`, `.outcome-and-normal-close-atomic`, `.new-recovery-actor-bound`, `.no-retry`, `.closed-and-fenced`, `.at-most-one-created-issue` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
-| `gate1b.coordinator.closed-add-ambiguity` | `run-equal-winner`, `reset`, `run-not-found-then-recover`, `reset-again`, `run-conflicting-winner`, `audit` | `.primary`, `.read-first`, `.equal-reconciled-success`, `.not-found-code-exit11-then-one-identical-add`, `.conflict-code-exit1`, `.no-blind-add`, `.no-resend` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.crash-before-permit` | `prepare`, `confirm`, `acquire`, `crash-before-in-flight`, `classify-before-in-flight`, `reset`, `prepare-again`, `confirm-again`, `acquire-again`, `mark-in-flight`, `crash-before-permit`, `classify-after-in-flight`, `audit` | `.primary`, `.both-unclosed-states-quarantined`, `.journal-byte-preserved`, `.zero-mutation-dispatch`, `.zero-close-add-or-delete`, `.quarantine-code-exit1` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.crash-after-permit-before-send` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `crash`, `classify`, `reconcile-read-only`, `audit` | `.primary`, `.unclosed-quarantined-no-retry`, `.zero-mutation-dispatch`, `.zero-state-writes` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.crash-after-send-before-outcome` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `send`, `crash`, `classify`, `reconcile-read-only`, `audit` | `.primary`, `.unclosed-quarantined-no-retry`, `.at-most-one-created-issue`, `.zero-recovery-state-writes` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.crash-after-durable-outcome-before-closed-add` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `send`, `record-outcome-and-normal-close-bytes`, `crash`, `classify-unclosed`, `audit` | `.primary`, `.outcome-does-not-authorize-close-add`, `.unclosed-quarantined`, `.no-retry`, `.zero-recovery-state-writes`, `.at-most-one-created-issue` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.closed-add-ambiguity` | `run-equal-winner`, `reset`, `run-not-found-then-quarantine`, `reset-again`, `run-conflicting-winner`, `audit` | `.primary`, `.read-first`, `.equal-reconciled-success`, `.not-found-quarantined-no-add`, `.conflict-code-exit1`, `.no-blind-add`, `.no-resend` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
 | `gate1b.coordinator.crash-after-closed-before-active-delete` | `prepare`, `confirm`, `acquire`, `mark-in-flight`, `permit`, `send`, `record-outcome`, `add-closed`, `crash`, `recover-delete`, `audit` | `.primary`, `.closed-fence-survives`, `.no-resend`, `.single-active-delete`, `.at-most-one-created-issue` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
 | `gate1b.coordinator.active-delete-ambiguity` | `run-not-found`, `reset`, `run-equal-active-then-recover`, `reset-again`, `run-different-active`, `reset-third`, `run-malformed-active`, `audit` | `.primary`, `.read-first`, `.not-found-reconciled-success`, `.equal-code-exit11-then-one-matching-delete`, `.different-active-stale-noop`, `.malformed-code-exit1`, `.no-blind-delete`, `.closed-fence-survives`, `.no-resend` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
-| `gate1b.coordinator.active-cleanup-aba-deny` | `seed-closed-active`, `start-recovery`, `pause-after-equal-read`, `attempt-competing-acquisition`, `delete-active`, `release-guard`, `acquire-competitor`, `close-competitor`, `audit` | `.primary`, `.single-launchd-helper`, `.executor-guard-held`, `.competitor-zero-keychain-before-release`, `.no-aba-replacement`, `.post-release-acquisition`, `.fixed-active-lock` | `ipc`, `ui`, `security_framework`, `concurrency_trace` |
-| `gate1b.coordinator.restart-fence-and-close-recovery` | `acquire`, `restart`, `stale-permit`, `recover-close`, `reacquire`, `close`, `audit` | `.primary`, `.new-actor-authenticated`, `.old-token-session-historical`, `.stale-session-denied`, `.single-active`, `.recovery-close-binds-actor-session`, `.durable-close-before-delete`, `.no-retry`, `.recovery-code-exit11` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
-| `gate1b.authority.status-recover-contract` | `status-clear`, `status-expired-clear`, `seed-unresolved`, `status-recovery`, `reject-flags`, `recover-cancel`, `recover-confirm`, `seed-expired-unresolved`, `recover-expired-cleanup`, `status-after` | `.primary`, `.required-invocation-meta`, `.exact-json-v1-shapes`, `.exact-exits-10-through-13-and-corruption-exit1`, `.explicit-profile`, `.closed-inherited-flags`, `.no-plan-id-or-force-clear`, `.expired-clear-status-closes`, `.cancel-no-change`, `.fresh-presence`, `.new-actor-session-bound`, `.expired-recovery-only`, `.recovery-only-capabilities`, `.zero-network-bytes` | `network`, `ipc`, `ui`, `security_framework` |
+| `gate1b.coordinator.active-cleanup-aba-deny` | `seed-closed-active`, `capture-active-reference`, `pause-cleaner`, `second-helper-delete-old`, `acquire-replacement`, `resume-stale-delete`, `verify-replacement`, `close-replacement`, `audit` | `.primary`, `.two-valid-helpers`, `.persistent-ref-bound`, `.replacement-survives`, `.old-ref-not-found-stale-noop`, `.no-attribute-delete`, `.fixed-active-lock` | `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.coordinator.multi-helper-unclosed-quarantine` | `pause-before-permit`, `probe-second-helper`, `reset`, `pause-after-permit`, `probe-alternate-bootstrap`, `reset-again`, `pause-before-close`, `probe-reboot-expiry-ui`, `audit` | `.primary`, `.two-valid-helpers-authenticated`, `.same-uid-bootstrap-in-scope`, `.owner-may-still-run`, `.unclosed-active-preserved`, `.journal-byte-preserved`, `.zero-close-add-delete-or-sign`, `.zero-permit-send-or-commit`, `.no-retry`, `.quarantine-code-exit1` | `network`, `ipc`, `ui`, `security_framework`, `concurrency_trace` |
+| `gate1b.authority.status-recover-contract` | `status-clear`, `status-expired-no-active`, `seed-unresolved`, `status-quarantine`, `reject-flags`, `recover-cancel`, `recover-unclosed-deny`, `seed-expired-unresolved`, `recover-expired-unclosed-deny`, `status-after` | `.primary`, `.required-invocation-meta`, `.exact-json-v1-shapes`, `.exits-10-through-13-and-quarantine-exit1`, `.explicit-profile`, `.closed-inherited-flags`, `.no-plan-id-or-force-clear`, `.expired-no-active-exit12`, `.cancel-no-change`, `.ui-not-fencing-proof`, `.unclosed-byte-preserved`, `.expired-closed-cleanup-only`, `.recovery-only-capabilities`, `.zero-network-bytes` | `network`, `ipc`, `ui`, `security_framework` |
 | `gate1b.journal.v1-v2-migration-and-quarantine` | `seed-v1-prepared`, `migrate-prepared`, `seed-v1-canceled`, `quarantine-canceled`, `seed-v1-expired`, `quarantine-expired`, `seed-v1-failed_before_mutation`, `quarantine-failed_before_mutation`, `seed-v1-confirmed`, `quarantine-confirmed`, `seed-v1-in-flight`, `quarantine-in-flight`, `seed-v1-remote-state`, `quarantine-remote-state`, `interrupt-before-rename`, `interrupt-after-rename`, `audit` | `.primary`, `.exact-v2-schema`, `.prepared-only-migration-atomic`, `.all-other-valid-v1-byte-preserved`, `.failed_before_mutation-quarantined`, `.quarantine-code-exit1`, `.ambiguous-write-readback`, `.no-authority-from-v1` | `ipc` |
 | `gate1b.capability.update-comment-other-deny` | `prepare-negatives`, `apply-negatives` | `.primary`, `.zero-mutation-dispatch` | `network`, `ipc` |
 | `gate1b.target.origin-account-project-deny` | `prepare-negatives`, `apply-negatives` | `.primary`, `.zero-target-bytes` | `network`, `ipc` |
@@ -1142,7 +1155,7 @@ one is a Gate failure.
 | `smoke.confirm.prepare-confirm-success` | `prepare`, `confirm` | `.primary`, `.smoke-context` | `ipc`, `ui` |
 | `smoke.confirm.apply-all-deny` | `apply-negatives` | `.primary`, `.zero-network-bytes` | `network`, `ipc` |
 | `smoke.confirm.receipt-context-ineligible` | `consume`, `copy-context`, `replay` | `.primary`, `.terminal-state`, `.ordinary-context-denied` | `ipc` |
-| `smoke.confirm.authority-negatives` | `verify-matrix`, `derive-cleanup-context`, `retain-cleanup-intent`, `stage-cleanup`, `verify-cleanup` | `.primary`, `.all-negatives-rejected`, `.cleanup-intent-retained`, `.stage-cleanup-authority`, `.delete-attempt-marked-before-invocation`, `.unresolved-attempt-no-redelete`, `.attributed-deletes-only`, `.cleanup-complete`, `.final-inventory-empty` | `ipc`, `security_framework` |
+| `smoke.confirm.authority-negatives` | `verify-matrix`, `seal-evidence`, `verify-export` | `.primary`, `.all-negatives-rejected`, `.terminal-evidence-retained`, `.sanitized-export`, `.no-live-delete` | `ipc`, `security_framework` |
 
 | Issue-create smoke case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
@@ -1151,7 +1164,7 @@ one is a Gate failure.
 | `smoke.issue-create.zero-mutating-bytes` | `audit` | `.primary`, `.zero-mutation-bytes` | `network` |
 | `smoke.issue-create.update-comment-other-deny` | `prepare-negatives`, `apply-negatives` | `.primary`, `.zero-mutation-dispatch` | `network`, `ipc` |
 | `smoke.issue-create.receipt-context-ineligible` | `terminalize`, `copy-context`, `replay` | `.primary`, `.terminal-state`, `.ordinary-context-denied` | `network`, `ipc` |
-| `smoke.issue-create.authority-negatives` | `verify-matrix`, `derive-cleanup-context`, `retain-cleanup-intent`, `stage-cleanup`, `verify-cleanup` | `.primary`, `.all-negatives-rejected`, `.cleanup-intent-retained`, `.stage-cleanup-authority`, `.delete-attempt-marked-before-invocation`, `.unresolved-attempt-no-redelete`, `.attributed-deletes-only`, `.cleanup-complete`, `.final-inventory-empty` | `network`, `ipc`, `security_framework` |
+| `smoke.issue-create.authority-negatives` | `verify-matrix`, `seal-evidence`, `verify-export` | `.primary`, `.all-negatives-rejected`, `.terminal-evidence-retained`, `.sanitized-export`, `.no-live-delete` | `ipc`, `security_framework` |
 
 | Post-grant confirm case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
@@ -1160,7 +1173,7 @@ one is a Gate failure.
 | `post-grant.confirm.apply-all-deny` | `apply-negatives` | `.primary`, `.zero-network-bytes` | `network`, `ipc` |
 | `post-grant.confirm.receipt-terminal-replay-deny` | `consume`, `replay` | `.primary`, `.terminal-state`, `.replay-denied` | `ipc`, `security_framework` |
 | `post-grant.confirm.authority-negatives` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `ipc`, `security_framework` |
-| `post-grant.confirm.cleanup` | `derive-cleanup-context`, `retain-cleanup-intent`, `stage-cleanup`, `verify-cleanup` | `.primary`, `.cleanup-intent-retained`, `.stage-cleanup-authority`, `.delete-attempt-marked-before-invocation`, `.unresolved-attempt-no-redelete`, `.attributed-deletes-only`, `.cleanup-complete`, `.final-inventory-empty` | `ipc`, `security_framework` |
+| `post-grant.confirm.seal-evidence` | `seal-evidence`, `verify-export` | `.primary`, `.terminal-evidence-retained`, `.sanitized-export`, `.no-live-delete` | `ipc`, `security_framework` |
 
 | Post-grant issue-create case | Exact operation step IDs | Case-final assertion suffixes | Additional transcripts |
 | --- | --- | --- | --- |
@@ -1169,15 +1182,15 @@ one is a Gate failure.
 | `post-grant.issue-create.zero-mutating-bytes` | `audit` | `.primary`, `.zero-mutation-bytes` | `network` |
 | `post-grant.issue-create.receipt-terminal-replay-deny` | `consume`, `replay` | `.primary`, `.terminal-state`, `.replay-denied` | `network`, `ipc`, `security_framework` |
 | `post-grant.issue-create.authority-negatives` | `verify-matrix` | `.primary`, `.all-negatives-rejected` | `network`, `ipc`, `security_framework` |
-| `post-grant.issue-create.cleanup` | `derive-cleanup-context`, `retain-cleanup-intent`, `stage-cleanup`, `verify-cleanup` | `.primary`, `.cleanup-intent-retained`, `.stage-cleanup-authority`, `.delete-attempt-marked-before-invocation`, `.unresolved-attempt-no-redelete`, `.attributed-deletes-only`, `.cleanup-complete`, `.final-inventory-empty` | `network`, `ipc`, `security_framework` |
+| `post-grant.issue-create.seal-evidence` | `seal-evidence`, `verify-export` | `.primary`, `.terminal-evidence-retained`, `.sanitized-export`, `.no-live-delete` | `ipc`, `security_framework` |
 
 The command-contract compiler has one closed Gate 1B setup route. Only
 `gate1b.setup-exact-artifact-enrollment` may contain
 `pre-enrollment-inventory`, `enroll`, and `snapshot`, in that order.
 `pre-enrollment-inventory` and `snapshot` execute as
 `gate_runner`/`gate_runner`; `enroll` executes as `cli`/`outer`, with the
-descriptor-pinned helper reachable only through the already authenticated
-preopened IPC channel. Their argv templates contain only compiled literals and
+descriptor-pinned helper reached by that exact CLI's own authenticated
+connection to the fixed ordinary listener. Their argv templates contain only compiled literals and
 digest-bound fixture paths; the Gate token and setup context arrive through
 that authenticated runner session and are never argv, environment, stdin, or
 caller-selected path values. The smoke and post-grant setup cases retain their
@@ -1255,165 +1268,202 @@ with the declared argv, closed stdin, empty environment, no shell, no current-
 directory inheritance, and an independent hard timeout. The runner rejects an
 undeclared file access, transcript, assertion, network origin, or subprocess.
 
+### Gate 1B execution-topology blocker
+
+The 26-case Gate 1B list and the 21-row coordinator phase table are required
+future conformance catalogs only. Their arithmetic counts are candidate
+coverage checks, not proof that a valid single-run plan can execute them.
+Crash/quarantine and ambiguity phases require fresh mutable state. Resetting
+the entire host between those phases destroys the authenticated runner session,
+the one setup enrollment, and its baseline provenance; silently reusing the
+same token/session/snapshot would violate this document's authority contract.
+No first-release codec currently resolves that conflict.
+
+Before any Gate 1B implementation or native execution, a separate plan must
+define independently root-authorized subruns, their exact enrollment/session/
+host identity and retained baseline, bounded parent evidence aggregation, and
+disposable YouTrack target reset semantics. That plan must pass architecture
+and security review before changing any codec. This document deliberately
+does not invent that subrun protocol or permit reset under an old session.
+
+Until then, Gate 1B command-contract digest freeze, Gate 1B E1/E2 token
+issuance, Gate 1B E1/E2 evidence acceptance, and issue-create provisional
+authorization from this incomplete catalog are forbidden. Fixture simulations
+cannot clear the blocker or be presented as native exact-artifact execution.
+Gate 1A remains separately pending/NOT PASSED; no production activation follows
+from this partial design. The endpoint adversarial technique below is a
+proposal requiring the same separate ADR and native evidence, not a proven
+topology or substitute for the missing subrun and aggregation protocol.
+
 ### Deterministic two-party coordinator schedules
 
-Every Gate 1B coordinator case uses a content-addressed schedule fixture; no
-sleep, scheduler luck, polling race, shell, environment variable, inherited
-working directory, or caller-selected event may determine its ordering. The
-runner creates two unidirectional anonymous pipes per child before direct
-spawn, maps only the child release-read end to file descriptor 3 and its
-arrival-write end to descriptor 4 with `posix_spawn_file_actions`, closes every
-other inherited descriptor, and retains the complementary ends. These four
-ends are the only extra descriptors admitted by the sandbox for such a step.
-The exact artifact recognizes them only over the already authenticated Gate 1B
-runner session bound by E1/E2; an ordinary production invocation, Gate 1A,
-smoke, or post-grant token cannot enter a barrier. A crash phase directly
-spawns a recovery child only after the crashed child has exited; there are
-never more than two live candidate children in one phase.
+This entire schedule/trace subsection is a proposed coverage catalog subject
+to the [execution-topology blocker](#gate-1b-execution-topology-blocker), not an
+accepted closed command contract. No schedule digest or token may be frozen
+from it yet.
 
-Each pipe message is exactly 16 bytes: bytes 0..7 are ASCII `YTABARR` followed
-by NUL; byte 8 is version `0x01`; byte 9 is kind `0x01` for runner release or
-`0x02` for child arrival; byte 10 is actor `0x01` apply, `0x02` registry, or
-`0x03` recovery; byte 11 is the event code below; bytes 12..15 are the unsigned
-big-endian sequence number starting at one. No short frame, trailing byte,
-unknown value, repeated/out-of-order sequence, arrival before release, or
-arrival with fields unequal to its release is accepted. The runner releases
-one event and waits for that exact arrival within the step timeout before
-releasing the next. For `process.crash`, arrival means the child reached the
-declared crash boundary; the runner then sends `SIGKILL` to that exact PID and
-requires `waitpid` to report that signal before releasing `recovery.start`.
+Every Gate 1B coordinator case uses a digest-bound schedule fixture. Ordering
+comes from release/arrival barriers, never sleeps, scheduler luck, shell
+commands, environment values, or caller-selected events. The runner directly
+spawns at most two CLI actors per phase; each self-connects to its selected
+exact signed helper. Multi-helper phases deliberately run two valid helpers,
+including an alternate same-UID bootstrap context. The fixture records each
+helper's exact signed identity, PID, audit-token digest, bootstrap-context
+identifier, and session. A job label or parent constraint must never collapse
+these distinct actors into an assumed global singleton.
+
+The proposed adversarial technique uses only the one fixed ordinary socket
+pathname. First CLI A self-connects to helper A and retains that accepted
+connection. While A is paused, the trusted external Gate supervisor captures
+the exact socket entry's inode, type and path through preopened no-follow
+parent descriptors, verifies it is the expected disposable-host socket, and
+unlinks only that entry. A's existing accepted connection remains open. Exact
+helper B is then launched in the alternate same-UID bootstrap context, binds
+the same literal pathname, and CLI B self-connects to B. Both helpers are live,
+but there is only one current pathname; no candidate receives another endpoint
+or a runner-created connected descriptor. The deletion is a narrowly scoped
+adversarial Gate-supervisor action, not a production/helper unlink capability.
+Native evidence must show A's old connection survives, B's new connection
+authenticates independently, and both exact code identities match. A
+pathname/type/inode ambiguity or failure to realize this OS behavior fails
+the technique; simulation cannot stand in for that evidence. This technique
+remains behind the same Gate 1B digest/token/evidence freeze blocker until the
+separate architecture decision and native conformance evidence accept it.
+
+The trusted runner creates two anonymous unidirectional pipes per CLI actor
+before direct spawn. Only the child's release-read end at descriptor 3 and
+arrival-write end at descriptor 4 are inherited; all other unexpected
+descriptors are closed. Barrier authority is available only through the
+authenticated Gate 1B runner control session, never ordinary production,
+Gate 1A, smoke, or post-grant authority. The pipes carry ordering only and are
+not substitutes for ordinary helper peer authentication.
+
+Each frame is exactly 16 bytes: bytes 0..7 are ASCII `YTABARR` plus NUL;
+byte 8 is version `0x01`; byte 9 is release `0x01` or arrival `0x02`;
+byte 10 is actor apply `0x01`, registry `0x02`, or cleanup/status `0x03`;
+byte 11 is the event code below; bytes 12..15 are the unsigned big-endian
+sequence starting at one. Unknown, short, extra, duplicate, out-of-order, or
+unreleased arrivals fail. Each release must receive its matching arrival
+within the step timeout before another release. A crash arrival means the
+boundary was reached; the runner then kills only that scheduled actor and
+requires its exact signal exit before a later probe. Killing one actor is not
+evidence that another valid helper or owner has stopped.
 
 | Code | Event | Required durable observation after arrival |
 | ---: | --- | --- |
-| `0x01` | `apply.acquire` | exact apply active exists; no permit or close exists |
-| `0x02` | `coordinator.acquire-busy` | exactly one losing active `SecItemAdd` returns duplicate/`APPLY_COORDINATOR_BUSY`; zero later ledger/key/journal/permit/closed read or state write follows |
-| `0x03` | `apply.in-flight` | journal is durably `in_flight`; no permit exists |
-| `0x04` | `apply.permit` | exactly one equal permit exists |
-| `0x05` | `apply.send` | exactly one mutating request begins; no second dispatch exists |
-| `0x06` | `apply.outcome` | one terminal/non-replayable journal outcome is durable |
-| `0x07` | `coordinator.close` | exactly one equal closed record exists |
-| `0x08` | `coordinator.delete-active` | active is absent after the one delete or is classified ambiguous |
-| `0x09` | `registry.acquire` | exact registry-commit active binds pre-read `registry_intent_sha256`; zero ledger/proposal work preceded it |
-| `0x0a` | `registry.commit` | candidate matches that intent under the same lease and exactly one revision winner or deterministic absence exists |
-| `0x0b` | `registry.close` | exact registry closed record exists |
-| `0x0c` | `registry.delete-active` | active is absent after the one delete |
-| `0x0d` | `apply.cancel-stale` | no permit/send; journal and lease are terminal before close |
-| `0x0e` | `enrollment.busy-before-ledger` | invalid enrollment loses acquisition before ledger validation or mutation |
-| `0x0f` | `process.crash` | selected child reached the boundary; runner then proves its `SIGKILL` exit |
-| `0x10` | `recovery.start` | new CLI audit token/helper session pass exact code-identity, descriptor, retained-evidence, trusted-UI, and recovery-fence checks; old token/session are historical; zero sign/acquire/permit/send/commit |
-| `0x11` | `coordinator.close-ambiguous-return` | one close add occurred; exact read classifies equal, absent, or conflict |
-| `0x12` | `coordinator.delete-ambiguous-return` | one active delete occurred; exact read classifies not-found, equal, or conflict |
-| `0x13` | `stale.send-probe` | recovery actor presents the stale permit/session tuple and receives a pre-network denial |
-| `0x14` | `helper.restart` | old exact helper connection is invalidated; a newly authenticated exact helper has a different session ID and zero send |
-| `0x15` | `coordinator.stale-active-noop` | active contains a different well-formed newer lease; recovery succeeds without delete, close, permit, or send |
-| `0x16` | `coordinator.active-equality-read` | under the held authority-executor guard, exact active bytes equal the retained recovery bytes and no delete has begun |
-| `0x17` | `coordinator.acquisition-guard-blocked` | a competing authenticated acquisition request is queued between equality read and delete; it performs zero `SecItemAdd`, coordinator reads, or state changes |
-| `0x18` | `authority.guard-release` | byte-equal active cleanup and its reconciliation are complete, old active is absent, recovery close is durable, and the executor guard is released exactly once |
+| `0x01` | `apply.acquire` | unique active add won; no permit or close |
+| `0x02` | `coordinator.acquire-busy` | duplicate active add; zero subsequent authority read/write |
+| `0x03` | `apply.in-flight` | durable in-flight journal; no permit |
+| `0x04` | `apply.permit` | exact one permit |
+| `0x05` | `apply.send` | at most one mutating request begins |
+| `0x06` | `apply.outcome` | response/non-replay decision observed; terminal journal CAS has not run |
+| `0x07` | `owner.quiesce` | first irrevocably drop all send/sign/permit/commit capability and queued callbacks, then atomically retain terminal outcome plus exact normal-close candidate; acknowledge only after both |
+| `0x08` | `coordinator.close` | owner-only exact normal closed record durable after quiescence |
+| `0x09` | `coordinator.capture-reference` | exact active attributes, bytes and bounded CFData persistent reference captured in one lookup; validated normal close links retained |
+| `0x0a` | `coordinator.delete-reference` | one delete selects only that persistent reference; no attributes-only fallback |
+| `0x0b` | `registry.acquire` | unique active add binds pre-read intent; no prior ledger read |
+| `0x0c` | `registry.commit` | candidate matches leased intent; one revision winner or deterministic absence |
+| `0x0d` | `apply.cancel-stale` | stale decision observed with zero permit/send; no terminal CAS until owner quiescence |
+| `0x0e` | `enrollment.busy-before-ledger` | invalid initial enrollment loses before ledger validation |
+| `0x0f` | `process.crash` | exact scheduled actor reaches boundary, then confirmed signal exit |
+| `0x10` | `status.unclosed-quarantine` | unclosed active/journal byte-preserved; zero CAS/close/delete/keygen/sign/permit/send/commit |
+| `0x11` | `coordinator.close-ambiguous-return` | one owner close add; read-only classify exact equal, absent, or conflict |
+| `0x12` | `coordinator.delete-ambiguous-return` | one reference delete; read-only classify that reference, never replacement item |
+| `0x13` | `stale.send-probe` | non-owner stale tuple denied before network |
+| `0x14` | `helper.restart` | old Unix connection closes; replacement helper authenticates independently, without inferred fencing |
+| `0x15` | `coordinator.stale-reference-noop` | captured old reference absent; replacement active unchanged |
+| `0x16` | `remote.reconcile-read-only` | bounded remote report; no quarantined journal/coordinator writes and no replay |
 
-The event registry contains exactly 24 codes, `0x01` through `0x18`, without
-aliases or extension slots in this protocol version.
-
-`A`, `R`, and `H` below mean actor bytes apply, registry, and recovery. Every
-arrow is one release/arrival pair in the shown order. Rotate, revoke, and
-recovery use the same two schedules with the transition fixed by their case ID:
-
-The `reset` and `reset-again` steps in multi-phase ambiguity cases are runner-
-controlled reversions to the case's clean disposable VM snapshot after every
-actor exits. They are not candidate commands, do not delete a production
-Keychain item, reuse no receipt/lease/target data, and revalidate the same
-descriptor and artifact before the next direct spawn.
+The proposed catalog has exactly 22 event codes with no aliases. `A`, `R`, and `H` below
+mean apply, registry, and cleanup/status actor. Each arrow is a release/arrival
+pair. Reset labels identify a requirement for independently authorized clean
+subruns, not permission to revert a host within an existing authenticated
+session. Their execution and aggregation remain blocked as specified above.
 
 | Case/phase | Exact released event sequence |
 | --- | --- |
-| apply-first rotate/revoke/recovery | `A:apply.acquire -> R:coordinator.acquire-busy -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-active -> R:registry.acquire -> R:registry.commit -> R:registry.close -> R:registry.delete-active` |
-| registry-first rotate/revoke/recovery | `R:registry.acquire -> A:coordinator.acquire-busy -> R:registry.commit -> R:registry.close -> R:registry.delete-active -> A:apply.acquire -> A:apply.cancel-stale -> A:coordinator.close -> A:coordinator.delete-active` |
-| invalid enrollment contention | `A:apply.acquire -> R:enrollment.busy-before-ledger -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-active` |
-| crash while confirmed after acquire | `A:apply.acquire -> A:process.crash -> H:recovery.start -> H:coordinator.close -> H:coordinator.delete-active` |
-| crash while in-flight before permit | `A:apply.acquire -> A:apply.in-flight -> A:process.crash -> H:recovery.start -> H:coordinator.close -> H:coordinator.delete-active` |
-| crash after permit before send | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:process.crash -> H:recovery.start -> H:apply.outcome -> H:coordinator.close -> H:coordinator.delete-active` |
-| crash after send before outcome | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:process.crash -> H:recovery.start -> H:apply.outcome -> H:coordinator.close -> H:coordinator.delete-active` |
-| crash after durable outcome before closed add | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:process.crash -> H:recovery.start -> H:coordinator.close -> H:coordinator.delete-active` |
-| closed-add ambiguity / equal winner | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close-ambiguous-return -> A:coordinator.delete-active` |
-| closed-add ambiguity / not found | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close-ambiguous-return -> H:recovery.start -> H:coordinator.close -> H:coordinator.delete-active` |
-| closed-add ambiguity / conflicting winner | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close-ambiguous-return -> H:recovery.start` |
-| crash after closed before active delete | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:process.crash -> H:recovery.start -> H:coordinator.delete-active` |
-| active-delete ambiguity / not found | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-ambiguous-return` |
-| active-delete ambiguity / equal active | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-ambiguous-return -> H:recovery.start -> H:coordinator.delete-active` |
-| active-delete ambiguity / different active | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-ambiguous-return -> H:recovery.start -> H:coordinator.stale-active-noop` |
-| active-delete ambiguity / malformed active | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:coordinator.close -> A:coordinator.delete-ambiguous-return -> H:recovery.start` |
-| active-cleanup ABA denial | `H:recovery.start -> H:coordinator.active-equality-read -> R:coordinator.acquisition-guard-blocked -> H:coordinator.delete-active -> H:authority.guard-release -> R:registry.acquire -> R:registry.commit -> R:registry.close -> R:registry.delete-active` |
-| restart fence and close recovery | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:helper.restart -> H:recovery.start -> H:apply.outcome -> H:coordinator.close -> H:coordinator.delete-active -> H:stale.send-probe` |
+| apply-first rotate/revoke/registry-recovery | `A:apply.acquire -> R:coordinator.acquire-busy -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:owner.quiesce -> A:coordinator.close -> A:coordinator.capture-reference -> A:coordinator.delete-reference -> R:registry.acquire -> R:registry.commit -> R:owner.quiesce -> R:coordinator.close -> R:coordinator.capture-reference -> R:coordinator.delete-reference` |
+| registry-first rotate/revoke/registry-recovery | `R:registry.acquire -> A:coordinator.acquire-busy -> R:registry.commit -> R:owner.quiesce -> R:coordinator.close -> R:coordinator.capture-reference -> R:coordinator.delete-reference -> A:apply.acquire -> A:apply.cancel-stale -> A:owner.quiesce -> A:coordinator.close -> A:coordinator.capture-reference -> A:coordinator.delete-reference` |
+| invalid enrollment contention | `A:apply.acquire -> R:enrollment.busy-before-ledger -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:owner.quiesce -> A:coordinator.close -> A:coordinator.capture-reference -> A:coordinator.delete-reference` |
+| crash confirmed before in-flight | `A:apply.acquire -> A:process.crash -> H:status.unclosed-quarantine` |
+| crash in-flight before permit | `A:apply.acquire -> A:apply.in-flight -> A:process.crash -> H:status.unclosed-quarantine` |
+| crash after permit before send | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:process.crash -> H:status.unclosed-quarantine -> H:remote.reconcile-read-only` |
+| crash after send before outcome | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:process.crash -> H:status.unclosed-quarantine -> H:remote.reconcile-read-only` |
+| crash after outcome before close | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:owner.quiesce -> A:process.crash -> H:status.unclosed-quarantine` |
+| close ambiguity / equal | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:owner.quiesce -> A:coordinator.close-ambiguous-return -> H:coordinator.capture-reference -> H:coordinator.delete-reference` |
+| close ambiguity / absent | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:owner.quiesce -> A:coordinator.close-ambiguous-return -> H:status.unclosed-quarantine` |
+| close ambiguity / conflict | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:owner.quiesce -> A:coordinator.close-ambiguous-return` |
+| crash after durable close | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> A:owner.quiesce -> A:coordinator.close -> A:process.crash -> H:coordinator.capture-reference -> H:coordinator.delete-reference` |
+| delete ambiguity / absent old reference | `H:coordinator.capture-reference -> H:coordinator.delete-ambiguous-return -> H:coordinator.stale-reference-noop` |
+| delete ambiguity / same reference remains | `H:coordinator.capture-reference -> H:coordinator.delete-ambiguous-return` |
+| delete ambiguity / replacement active | `H:coordinator.capture-reference -> H:coordinator.delete-ambiguous-return -> R:registry.acquire -> H:coordinator.stale-reference-noop` |
+| delete ambiguity / malformed result | `H:coordinator.capture-reference -> H:coordinator.delete-ambiguous-return` |
+| two-helper active replacement ABA | `H:coordinator.capture-reference -> R:coordinator.capture-reference -> R:coordinator.delete-reference -> R:registry.acquire -> H:coordinator.delete-reference -> H:coordinator.stale-reference-noop -> R:registry.commit -> R:owner.quiesce -> R:coordinator.close -> R:coordinator.capture-reference -> R:coordinator.delete-reference` |
+| simultaneous helper before permit | `A:apply.acquire -> A:apply.in-flight -> H:status.unclosed-quarantine` |
+| alternate-bootstrap helper after permit | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> H:status.unclosed-quarantine -> H:stale.send-probe` |
+| simultaneous helper before close | `A:apply.acquire -> A:apply.in-flight -> A:apply.permit -> A:apply.send -> A:apply.outcome -> H:status.unclosed-quarantine` |
+| restart/expiry/UI cannot clear | `A:apply.acquire -> A:helper.restart -> H:status.unclosed-quarantine` |
 
-This schedule table contains exactly 18 phases. Each Gate 1B coordinator case
-selects only its named phase or phases; an extra, missing, or reordered phase
-invalidates the plan digest.
+The table has exactly 21 phases. The first two each expand to three named
+registry transitions without changing event order. The last phase additionally
+has historical state variants for confirmed owner death, reboot, TTL expiry,
+profile expiry, and UI acceptance; each still requires identical no-write
+quarantine. A real reboot is an external lifecycle action followed by a fresh
+authenticated observation, not proof supplied by a PID or caller flag. A
+staged historical fixture may test that parser/decision rule but cannot stand
+in for required native multi-helper execution.
 
-The schedule fixture is a compact canonical object capped at 32,768 bytes with
-fields, in order, `schema_version`, `schedule_type` exactly
-`gate1b_coordinator`, `case_id`, `phase_id`, `actors`, and `events`; every event
-contains `sequence`, `actor`, `event_code`, and `expected_state_sha256` in that
-order. `actors` is order-bearing by direct-spawn ordinal and every entry
-contains `actor`, `spawn_sequence`, `executable_role`, `executable_component`,
-`code_slice_sha256`, and `expected_termination` exactly `exit_zero`,
-`exit_nonzero`, or `crash_signal`; it names exactly the children required by
-the phase and no supervisor shell. Apply, registry, and recovery actors are
-separately direct-spawned outer-CLI processes; they connect to the same already
-validated exact helper. `code_slice_sha256` is SHA-256 of the matching compact
-canonical descriptor code-slice object. It is one ordinary fixture entry and its bytes are therefore covered by
-the Gate fixture-set digest; no digest is invented in this document. The
-runner emits one compact canonical `concurrency_trace` transcript with fields
-`schema_version`, `case_id`, `phase_id`, `schedule_fixture_sha256`,
-`runner_session_id`, `actor_processes`, and ordered `events`.
-`actor_processes` exactly equals the schedule's actor order. Each entry has
-`actor`, `spawn_sequence`, positive `pid`, connection-bound
-`audit_token_sha256`, `executable_sha256`, `ksec_code_info_unique`,
-`started_monotonic_ns`, `termination_kind`, and `exit_status` in that order;
-code identity must equal the schedule/descriptor and each actor's events must
-come from that one authenticated process. Each trace event contains
-`sequence`, `actor`, `event_code`, `release_monotonic_ns`,
-`arrival_monotonic_ns`, `pre_state_sha256`, `post_state_sha256`,
-`mutating_request_count`, and `mutating_request_sha256` in that order. Time is
-diagnostic only; the exact frame order and state hashes are authoritative.
-For comparison, the verifier projects every trace event to `sequence`,
-`actor`, `event_code`, and `expected_state_sha256` (the trace
-`post_state_sha256`) in that order; that canonical projected array must equal
-the schedule's `events` bytes exactly. Assertions also require every pre-state
-to equal the preceding post-state within a phase, the mutating count to remain zero before
-`apply.send` and never exceed one, no registry commit between `apply.in-flight`
-and `coordinator.close`, and no event from a crashed/stale actor except the
-explicit recovery-side stale-session rejection probe. The process assertion also requires exactly
-the scheduled child count, direct parent PID equal to the runner, no
-intermediate process, one unique PID/audit token per spawn ordinal, and the
-scheduled termination classification. Missing, extra, reordered, duplicated,
-or unacknowledged events or processes fail the case.
+The ordinary apply-versus-registry and invalid-enrollment contention phases
+use the same helper that retains the original uninterrupted owning connection;
+their losing acquisition therefore returns `APPLY_COORDINATOR_BUSY`/exit 10.
+An independent helper observing that same unclosed item instead returns
+`AUTHORITY_STATE_QUARANTINED`/exit 1 without later authority work. The
+`owner.quiesce` arrival covers a strict internal order: irreversible capability
+drop, then terminal journal/normal-close-candidate CAS, then arrival. Merely
+observing a response or deciding stale cancellation cannot acknowledge it.
+If the actor crashes after this CAS but before the actual normal closed item
+is durable, a non-owner still quarantines; retained close-candidate bytes are
+not permission to synthesize a close.
 
-For `active-cleanup ABA denial`, the registry child sends its authenticated
-acquisition request only after the recovery child has acknowledged
-`coordinator.active-equality-read`. The single helper's Gate-only executor
-instrumentation acknowledges `coordinator.acquisition-guard-blocked` when that
-request is queued behind the still-held guard, before any acquisition
-Keychain call. The runner then releases recovery's delete and guard-release
-events; only after the exact guard-release arrival may the queued registry
-request execute its one active add. The trace must show the old active digest
-until delete, absence at guard release, the new active digest only afterward,
-one helper PID throughout, and zero `SecItemAdd` or coordinator read from the
-competitor between the equality read and guard release. A replacement active,
-a second helper PID/listener, or an acquisition event before release fails the
-case.
+A schedule fixture is canonical JSON capped at 32,768 bytes: `schema_version`
+integer `1`, `schedule_type` exactly `gate1b_coordinator`, `case_id`,
+`phase_id`, `actors`, `events`. Each actor contains `actor`,
+`spawn_sequence`, `executable_role`, `executable_component`,
+`code_slice_sha256`, `helper_slot` integer 1 or 2, and
+`expected_termination` exactly `exit_zero`, `exit_nonzero`, or
+`crash_signal`. Slots identify independently authenticated exact helper
+sessions, not security rank. Each event contains `sequence`, `actor`,
+`event_code`, and `expected_state_sha256`. `actors` is ordered by direct
+spawn ordinal and `events` by exact schedule order.
 
-`helper.restart` is available only to the authenticated Gate 1B schedule. The
-apply child requests the exact helper's compiled terminate-at-boundary action,
-observes its XPC invalidation, and acknowledges only after the old helper PID
-has exited and launchd reports no running instance for the per-user job label.
-The runner then asks launchd to activate the normal signed helper service
-through its fixed service endpoint—never a shell, direct server spawn, second
-listener, or substitute binary—and the
-recovery child's authentication records the new PID, audit-token digest, code
-identity, and coordinator session in the IPC/Security.framework transcripts.
-The old and new code identities must equal the descriptor, while PID and
-session must differ; the new helper's serialized authority executor completes
-startup classification under its guard before ordinary work; no permit/send
-capability or in-process guard crosses that restart.
+The canonical `concurrency_trace` transcript contains `schema_version`,
+`case_id`, `phase_id`, `schedule_fixture_sha256`, `runner_session_id`,
+`actor_processes`, `helper_processes`, and `events`. Actor entries contain
+`actor`, `spawn_sequence`, `pid`, `audit_token_sha256`,
+`executable_sha256`, `ksec_code_info_unique`, `helper_slot`,
+`termination_kind`, `exit_status`. Helper entries in slot order contain
+`helper_slot`, `pid`, `audit_token_sha256`, `code_slice_sha256`,
+`bootstrap_context_id`, `coordinator_session_id`; the bootstrap ID is a
+bounded 1..128 printable-ASCII diagnostic label observed by the trusted
+supervisor, never helper authority. Each event contains `sequence`,
+`actor`, `event_code`, `release_monotonic_ns`, `arrival_monotonic_ns`,
+`pre_state_sha256`, `post_state_sha256`, `mutating_request_count`,
+`mutating_request_sha256`. PIDs/spawn ordinals are positive integers;
+monotonic values are non-negative integers; exit statuses use 0..255, null
+until a classified crash where the exact signal is separately in its fixture.
+Process IDs are diagnostic and never fences.
+
+Projection to `sequence`, `actor`, `event_code`,
+`expected_state_sha256` (the post-state digest) must byte-match the schedule
+events. Every pre-state equals the preceding post-state; mutating count never
+exceeds one; no registry commit overlaps an active apply; non-owner unclosed
+probes never write. Normal close requires prior irreversible owner quiescence.
+The ABA phase specifically captures active A's CFData reference (1..4,096
+bytes), lets the other helper delete A and acquire B, then invokes the stale
+reference delete. B and its unique lock must survive unchanged, even if B's
+attributes resemble A's. Absence of A is a successful stale no-op, never an
+attributes-only delete of B. Unknown/conflicting results quarantine, and an
+ambiguous deletion is never blindly repeated.
 
 The positive issue-create workflow contains three distinct ordered steps:
 `prepare`, `confirm`, then `apply`. `confirm` obtains `plan_id` only from the
@@ -1446,6 +1496,10 @@ compiled final assertion/transcript IDs. It cannot be computed before the last
 operation result exists.
 
 ## E1 Gate authorization
+
+Gate 1B issuance is forbidden until its
+[execution-topology blocker](#gate-1b-execution-topology-blocker) is resolved.
+The Gate 1B fields below are proposed, not an authorization to run the catalog.
 
 E1 permits only the exact descriptor to execute one named Gate suite. Its
 unsigned fields are:
@@ -1505,6 +1559,9 @@ architecture. A token is invalid on a different architecture, and passing one
 slice cannot stand in for another.
 
 ## E2 Gate authorization
+
+The same [Gate 1B execution-topology blocker](#gate-1b-execution-topology-blocker)
+forbids issuing or accepting Gate 1B E2 from the current coverage catalog.
 
 E2 exists only after a complete E1 pass for the same descriptor, Gate ID, plan,
 target, and capability. It permits a clean-reset repetition of that complete
@@ -1641,7 +1698,7 @@ capability.
 
 Each Gate 1B E1 or E2 run begins with
 `gate1b.setup-exact-artifact-enrollment` on its own clean-reset disposable
-macOS user or VM. The root-signed Gate token and plan value
+macOS VM or physical host. The root-signed Gate token and plan value
 `stage_setup_policy=gate1b_first_exact_artifact_enrollment_v1` allow the
 authenticated runner and exact artifact to derive one compact canonical setup
 context capped at 4,096 bytes. Its fields are, in order:
@@ -1708,19 +1765,15 @@ to bind the retained baseline `registry_snapshot_sha256` while their own
 registry evidence describes the current state; neither value may be
 substituted for the other.
 
-Gate 1B has no item-attributed cleanup authority:
-`stage_cleanup_policy`, every cleanup-context/intent/progress field, and the
-`stage_cleanup` IPC operation are null or absent as their containing schema
-requires. On success, failure, timeout, or partial enrollment, the trusted
-runner destroys or reverts the whole disposable host at the stage boundary.
-It never derives the activation-smoke/post-grant cleanup context and never
-performs a per-item production Keychain or journal delete. Host
-destruction/revert is a trusted supervisor lifecycle duty outside signed Gate
-pass evidence; the Gate makes no destruction attestation. Every failed run remains
-invalid, and the next E1/E2 run independently proves its own canonical empty
-start. E1 and E2 therefore each execute this setup from a separate clean host;
-the E1 snapshot is evidence input to E2 authorization but no E1 mutable state
-is carried into the E2 run.
+Gate 1B has no item-attributed cleanup authority or `stage_cleanup` IPC.
+Success, failure, timeout, and partial enrollment all end with trusted external
+whole-host disposal after sanitized evidence export. Candidate per-item
+Keychain/journal deletion is forbidden. The disposal policy and bounded
+attestation below apply to each E1/E2 run; complete prior-stage evidence and
+its matching attestation are required before a successor E2/provisional
+signature. Failed runs remain invalid even after successful destruction.
+E1 mutable state is never inherited by E2, which independently proves its
+own canonical empty start.
 
 ## Gate evidence codec
 
@@ -1852,17 +1905,15 @@ scope order is exactly `exact_artifact`, then `disjoint_fixture`; Gate 1B and
 smoke contain only `exact_artifact`. `architectures` exactly equals the
 descriptor array.
 For Gate 1A sets, `indexes` has one entry per architecture in that same order,
-with fields `architecture`, `evidence_index_sha256`, `gate_token_sha256`, and
-`gate_session_id` in order. Gate 1B uses the same four fields followed by
+with fields `architecture`, `evidence_index_sha256`, `gate_token_sha256`,
+`gate_session_id`, `export_manifest_sha256`, and `host_disposal_attestation_sha256`
+in order. Gate 1B uses the same six fields followed by
 `setup_context_sha256`, `pre_enrollment_inventory_sha256`, and
-`registry_snapshot_sha256`, in that order. For activation smoke, each entry
-uses the Gate 1A four-field prefix and appends
+`registry_snapshot_sha256`, in that order. For activation smoke, each entry uses the same six-field prefix and appends
 `setup_context_sha256`, `pre_enrollment_inventory_sha256`,
-`registry_snapshot_sha256`, `cleanup_context_sha256`,
-`cleanup_intent_sha256`, `final_cleanup_progress_sha256`,
-`final_cleanup_ack_ledger_sha256`, `final_cleanup_ack_ledger_entry_count`,
-`helper_cleanup_evidence_sha256`, `stage_cleanup_evidence_sha256`,
-`cleanup_evidence_sha256`, and `final_empty_inventory_sha256`, in that order.
+`registry_snapshot_sha256`, and `terminal_journal_evidence_sha256`,
+in that order. Disposal and export digests name the external objects defined
+below and are never fields of the earlier evidence index.
 The non-null
 `registry_snapshots` array for Gate 1B and activation smoke has one entry per
 descriptor architecture, in that order, with fields `architecture` and
@@ -1871,10 +1922,10 @@ For Gate 1B, each index tuple must exactly project the generated setup-context,
 empty-inventory, and baseline-snapshot digests from its canonical index and
 retained evidence. Only their pre-run descriptor, plan, target, token,
 architecture, runner, and session inputs must match the root-signed Gate token;
-the token does not contain these post-run digests. No cleanup field is added.
+the token does not contain these post-run digests.
 For activation smoke, every
 tuple must match its canonical index, root-signed token, and retained
-setup/cleanup evidence. All token and session IDs are unique across all sets.
+setup/export/disposal evidence. All token and session IDs are unique across all sets.
 
 An evidence-set digest is SHA-256 over the exact manifest bytes. A Gate stage
 passes only as the complete set; no per-architecture index, subset, combined
@@ -1947,8 +1998,8 @@ not the context accepted by ordinary peers or production receipts.
 ### Stage-only first exact-artifact enrollment
 
 Every activation-smoke and post-grant capability plan begins with its compiled
-`setup-exact-artifact-enrollment` case on a newly created disposable macOS user
-or VM. The stage token contains `setup_authorization` exactly
+`setup-exact-artifact-enrollment` case on a newly created disposable macOS VM
+or physical host. The stage token contains `setup_authorization` exactly
 `first_exact_artifact_enrollment_only`. After validating that token, the exact
 runner and artifact derive a compact canonical setup context capped at 4,096
 bytes with fields, in order, `schema_version` integer `1`, `context_type`
@@ -1964,22 +2015,9 @@ confirmation, apply, coordinator permit, or network access. The ordinary smoke
 receipt context or final production context, not this setup context, controls
 all later workflow authority.
 
-After the retained setup snapshot exists, the runner and exact artifact derive
-a second compact canonical context capped at 4,096 bytes with fields, in order,
-`schema_version` integer `1`, `context_type` exactly
-`stage_attributed_cleanup`, `stage_type`, `descriptor_sha256`,
-`stage_token_sha256`, `setup_context_sha256`, `registry_snapshot_sha256`,
-`architecture`, `approved_capability`, `gate_runner_unique`, `gate_session_id`,
-and `cleanup_authorization` exactly `attributed_stage_cleanup_only`.
-`cleanup_context_sha256` is plain SHA-256 of those exact bytes. It is accepted
-only by the final case's distinct `stage_cleanup` IPC operation and only while
-the root-signed stage token remains valid. Neither setup nor cleanup context is
-a signing credential or standalone signing endpoint. The setup context is only
-the bound authorization input to the normal first-enrollment ceremony, whose
-required registry signatures still use the generated signing key and fresh
-user-presence checks; neither context itself can sign a registry record or
-receipt, acquire or exercise a permit, send, cross a session, or substitute for
-smoke receipt/final production authority.
+The setup context is not a signing credential or standalone endpoint. The
+ordinary enrollment ceremony still uses its newly generated exact signing key
+and fresh user presence. No second cleanup context exists in this release.
 
 Before any registry, coordinator, signing-key, journal, plan, receipt, socket,
 or loopback state is created, the first case emits a compact canonical
@@ -2077,50 +2115,124 @@ key identity. The helper can deterministically reconstruct these bytes from
 that token/context and the supplied snapshot's enrollment-field projection,
 checked against those valid registry/closed records. It compares both the
 reconstructed content SHA-256 and byte count to the selected `ipc` entry.
-Reconstruction requires no additional cleanup-intent field. The reconstructed
+Reconstruction requires no later-stage authority field. The reconstructed
 object contains no timestamp, snapshot digest, `setup_transcript_manifest_sha256`,
 or other manifest digest. The dependency order is strictly enrollment commit and closed
 record, then enrollment IPC content, then the complete durable five-entry
 enroll transcript-result manifest, then snapshot, then setup final evaluation.
 No object may depend on its own digest or on a later object in this sequence.
 
-When these two evidence codecs are reused with `stage_type=gate1b`, this is the
-end of their shared contract: none of the cleanup context, cleanup inventory,
-cleanup intent, cleanup progress, or attributed-deletion rules below applies.
-Those rules remain exclusive to `stage_type=activation_smoke` and
-`stage_type=post_grant_verification`; Gate 1B uses only whole-host
-destroy/revert as specified above.
+These setup codecs apply identically to Gate 1B, activation smoke, and
+post-grant verification, with the specified stage/token bindings. Their
+pre-inventory, context, snapshot, selected enrollment transcript/result
+manifest, and failure evidence are retained as immutable content-addressed
+files outside the disposable host before proceeding. They never authorize
+cleanup, recovery, or a later registry ceremony.
 
-The pre-enrollment inventory, setup context, registry snapshot, every result
-they reference, and failure evidence are written to immutable
-content-addressed storage outside the disposable user/session root and outside
-the disposable Keychain namespace before the runner advances. The runner may
-read them only by preopened digest-bound handles. The final cleanup emits the
-same inventory schema with `evidence_type` exactly
-`stage_final_empty_inventory`; every account/tag array and both mutable-state
-inventories must again be empty. Its digest is `final_empty_inventory_sha256`.
-Cleanup passes only when this final inventory is byte-equivalent to the initial
-empty state after ignoring the two evidence-type/timestamp fields and when the
-recorded registry revision/key and all later journal/session state have been
-removed. Before its first deletion, the runner must retain the cleanup context,
-canonical intent, and initial progress bytes required by the registry
-protocol's [release-stage cleanup authority](gate1a-registry-protocol.md#release-stage-cleanup-authority).
+### External whole-host disposal and successor-signature gate
 
-Every stage failure or timeout runs one bounded cleanup decision from the last
-retained inventory and append-only evidence. Attributed deletion is attempted
-only when the valid setup snapshot, cleanup context, intent, initial progress,
-and unexpired token already exist; it then uses only `stage_cleanup`. A failure
-before that complete authority exists performs read-only five-domain probes.
-If they are not canonically empty—including enrollment committed but snapshot
-not retained—the trusted runner quarantines and destroys the entire disposable
-user/VM without a per-item delete. If even the pre-enrollment inventory was not
-retained, the same probes run and any incomplete result is uncertain. If a
-valid stage cleanup or read-only probe proves the final empty inventory, the
-failed run and all candidate outputs are still invalid. Otherwise destruction
-is mandatory; no best-effort delete can qualify the run. Failure, cleanup
-uncertainty, missing retained evidence, or destruction uncertainty invalidates
-every observation, index, evidence set, token-derived context, and publication
-input from that session.
+The first release contains no `stage_cleanup` IPC, per-item stage delete,
+cleanup intent/progress/ACK ledger, restart cleanup session, or signed
+empty-final-inventory claim. A host-local runner cannot prove disposal of its
+own execution environment. The trusted external release supervisor controls a
+fresh disposable host for each stage/architecture, exports only the bounded
+sanitized evidence closure, stops all test execution, and destroys the entire
+host and all writable disks/snapshots belonging to that run. A reused macOS
+user or an in-place empty-directory/Keychain probe is not whole-host disposal.
+The provisioning inventory must bind the unique host instance and all of its
+writable disks/snapshots before the stage starts. Destruction removes the
+whole enrolled-key and mutable journal/session environment, not selected
+objects, and never invokes candidate cleanup tools.
+
+Each passing run first completes all operation observations and final
+evaluations. The final `seal-evidence` and `verify-export` operations are
+bounded read-only archive checks, not mutations or disposal commands. Their
+compiled `release_verifier` route checks the sanitized retained content by
+already opened digest-bound handles; it exports neither signing-key values,
+credentials, raw mutable journals/plans/receipts, connected sockets, nor live
+test-authority/session tokens. Necessary public receipt/registry projections
+and terminal state hashes use the existing explicit evidence codecs. Private
+retained authority bytes needed by historical Gate verification remain in the
+access-controlled release incident/evidence store and are never installed.
+
+After the immutable index exists, the external verifier emits a canonical
+export manifest capped at 2,097,152 bytes with fields in order:
+`schema_version` integer `1`, `manifest_type` exactly
+`stage_sanitized_evidence_export`, `stage_type` exactly `gate1a`,
+`gate1b`, `activation_smoke`, or `post_grant_verification`,
+`descriptor_sha256`, `stage_token_sha256`, `architecture`,
+`gate_runner_unique`, `gate_session_id`, `evidence_index_sha256`,
+`files`, `exported_at`, and `result` exactly `verified`.
+`files` uses the install-manifest path/size/digest grammar below and is the
+complete sorted sanitized closure, including the index but excluding this
+manifest and every later attestation/set object. It has 1..4,096 entries,
+8 MiB per file and 256 MiB aggregate, checked before allocation/read. Each
+entry is exactly `path`, `size`, `sha256`. Missing, extra, linked,
+case-colliding, secret-bearing, or mutable-state files fail export. This cap
+covers the larger Gate 1B closure and is distinct from the smaller post-grant
+installed-tree cap. Export manifests are historical evidence, not authority
+loaded by the candidate.
+
+Only after export verification and independently observed complete disposal
+does the offline root sign a host-disposal attestation under
+`YTA-HOST-DISPOSAL-V1\0`. Its unsigned fields, in exact order, are:
+
+1. `schema_version`, integer `1`
+2. `attestation_type`, exactly `external_whole_host_disposal`
+3. `authority_key_id`
+4. `descriptor_sha256`
+5. `stage_type`, matching the export manifest
+6. `stage_token_sha256`, the digest only, never embedded session-token bytes
+7. `architecture`
+8. `gate_runner_unique`
+9. `gate_session_id`
+10. `evidence_index_sha256`
+11. `export_manifest_sha256`
+12. `disposable_host_id`, canonical unpadded base64url of 32 random bytes,
+    assigned and recorded by the trusted external supervisor before host creation
+13. `host_inventory_sha256`
+14. `destruction_evidence_sha256`
+15. `exported_at`
+16. `destroyed_at`
+17. `attested_at`
+18. `result`, exactly `destroyed`
+
+The signature is the final field and the entire signed object is capped at
+4,096 bytes. The inventory and destruction evidence are bounded canonical
+supervisor objects, each capped at 16,384 bytes. Inventory fields are
+`schema_version` integer `1`, `evidence_type` exactly
+`disposable_host_inventory`, `disposable_host_id`, `stage_token_sha256`,
+`host_instance_id`, `writable_resource_ids`, and `created_at`.
+The host/resource IDs are supervisor-observed 1..128 printable-ASCII strings;
+the resource array is byte-sorted, unique, and contains 1..64 identifiers for
+every writable disk and snapshot under this run's lifecycle control.
+Destruction fields are `schema_version` integer `1`, `evidence_type`
+exactly `disposable_host_destroyed`, `disposable_host_id`,
+`host_inventory_sha256`, `export_manifest_sha256`,
+`host_instance_absent` exactly true, `destroyed_resource_ids` exactly
+the inventory array, `verified_at`, and `result` exactly `destroyed`.
+The supervisor verifies absence through its trusted host-lifecycle control
+plane; candidate success output, an empty local inventory, PID death, or a
+disconnected socket cannot satisfy this evidence. OS/supervisor compromise
+remains the explicitly trusted release-environment boundary, not a
+cryptographic claim supplied by these JSON objects.
+
+The offline ceremony rechecks the complete evidence/export closure,
+independently reviews the inventory/destruction record and operator observation,
+then signs. Times require `finished_at <= exported_at <= destroyed_at <=
+attested_at`; equality is permitted at whole-second resolution, but actual
+ceremony sequencing is mandatory. The next E2/provisional signature, smoke
+activation-grant signature, or post-grant publication-envelope signature must
+occur after that ceremony and not earlier than `attested_at`.
+Each complete evidence-set tuple references its index, export manifest, and
+attestation digests; none of those earlier objects references the later set.
+The attestation is never a candidate runtime capability and grants no signing,
+deletion, recovery, or write permission. A missing, invalid, cross-stage,
+cross-host, cross-session, or uncertain disposal blocks the successor
+signature. Every host is never reused. Failed runs remain invalid; failed
+destruction quarantines the host and all successor artifacts until a
+separately reviewed operator lifecycle resolution, never an automatic retry
+of a candidate mutation.
 
 ## Mandatory activation smoke
 
@@ -2140,7 +2252,7 @@ with a fresh runner session. Its unsigned fields are:
 11. `gate_session_id`
 12. `setup_authorization`, exactly
     `first_exact_artifact_enrollment_only`
-13. `cleanup_authorization`, exactly `attributed_stage_cleanup_only`
+13. `host_disposal_policy`, exactly `external_whole_host_disposal_v1`
 14. `loopback_origin`, null for `confirm_only` or `http://127.0.0.1:` followed
     by one canonical decimal port in `1..65535` for `issue_create`
 15. `dispatch_deny_code`, null for `confirm_only` or exactly
@@ -2152,11 +2264,12 @@ The smoke plan's descriptor, capability, architecture set, and provisional
 context must match the token and provisional authorization; the plan must begin
 with the capability-specific setup case and carry
 `stage_setup_policy=first_exact_artifact_enrollment_v1` and
-`stage_cleanup_policy=attributed_stage_cleanup_v1`. Smoke tokens and
+`host_disposal_policy=external_whole_host_disposal_v1`. Smoke tokens and
 sessions are unique across architectures and every E1/E2 session. The token
-uses its setup and cleanup fields only through the separately derived setup
-and cleanup contexts. Outside the first setup case and final cleanup case it
-only restricts provisional authority inside its authenticated runner session.
+uses its setup field only through the separately derived setup context.
+The disposal field imposes an external successor-signature condition, never a
+candidate operation. Outside the first setup case it only restricts provisional
+authority inside its authenticated runner session.
 It cannot activate ordinary use and is never shipped.
 
 Both smoke workflows first run their exact-artifact setup case, retain the
@@ -2193,8 +2306,8 @@ pre-socket dispatch denial and zero-mutation evidence, `terminalize` moves it
 to `activation_smoke_consumed`. That state cannot be reconciled, applied,
 confirmed, or returned to an earlier state; replay must return
 `RECEIPT_ALREADY_CONSUMED` without UI, preflight, or network access. After
-evidence capture the runner deletes that root through its bounded cleanup path.
-Copied, retained, or cleanup-failed smoke receipts remain
+evidence capture the external supervisor destroys the whole disposable host.
+Copied, retained, or disposal-failed smoke receipts remain
 context-ineligible under the later activation grant and cannot be reconciled
 or applied in an ordinary profile.
 
@@ -2209,29 +2322,11 @@ that order. `prior_state` is `confirmed` for `confirm_only` and `in_flight` for
 `issue_create`. The evidence and replay-denial observation are mandatory; a
 smoke `in_flight` record is never eligible for ordinary reconciliation.
 
-The last smoke case performs bounded cleanup and then `verify-cleanup`; no
-operation follows it except its case-final evaluation. It emits a compact
-canonical object capped at 8,192 bytes with fields, in order,
-`schema_version` integer `1`, `evidence_type` exactly
-`activation_smoke_cleanup`, `descriptor_sha256`, `smoke_token_sha256`,
-`architecture`, `gate_session_id`, `registry_snapshot_sha256`,
-`cleanup_context_sha256`, `cleanup_intent_sha256`,
-`final_cleanup_progress_sha256`, `final_cleanup_ack_ledger_sha256`,
-`final_cleanup_ack_ledger_entry_count`, `helper_cleanup_evidence_sha256`,
-`stage_cleanup_evidence_sha256`,
-`terminal_journal_evidence_sha256`, `pre_enrollment_inventory_sha256`,
-`removed_registry_record_sha256`, `removed_signing_key_tags`,
-`journal_cleanup_sha256`, `final_empty_inventory_sha256`, `finished_at`, and
-`result` exactly `pass`. The removed record and single key tag exactly equal
-the retained setup snapshot. The six cleanup digests resolve to the immutable
-context, intent, completed prefix, ACK-ledger container, and helper/runner
-evidence objects defined by the registry protocol. The canonical entry count
-equals the container's count, and their token, context, snapshot, and session
-bindings agree. UI-fail exact reads prove the registry,
-coordinator, and signing-key namespace absent; the no-follow filesystem probe
-proves the journal/session root empty. A copied sidecar, plan, receipt, socket,
-loopback account, registry item, coordinator item, key, or journal file makes
-the final inventory nonempty and invalidates the complete smoke set.
+The last smoke case verifies the retained terminal/non-replay evidence and
+sanitized export inputs. No operation follows except the case-final
+evaluation. The immutable index is finalized before the external export
+manifest and host-disposal attestation; the complete smoke evidence set binds
+all three. No helper deletion or signed empty-inventory proof is produced.
 
 Each architecture produces a canonical smoke evidence index capped at
 1,048,576 bytes (1 MiB) with these fields in order: `schema_version` integer
@@ -2249,23 +2344,20 @@ null, `evidence_scopes` exactly the one-element array `exact_artifact`,
 `provisional_context_sha256`, `setup_context_sha256`,
 `pre_enrollment_inventory_sha256`, `registry_snapshot_sha256`,
 `smoke_receipt_context_sha256`, `terminal_journal_evidence_sha256`,
-`cleanup_context_sha256`, `cleanup_intent_sha256`,
-`final_cleanup_progress_sha256`, `final_cleanup_ack_ledger_sha256`,
-`final_cleanup_ack_ledger_entry_count`, `helper_cleanup_evidence_sha256`,
-`stage_cleanup_evidence_sha256`,
-`cleanup_evidence_sha256`, `final_empty_inventory_sha256`, and `observations`.
+`observations`.
 Observations exactly equal the capability-specific smoke plan, including
 the first setup case, case-final evaluations, authority-negative,
-receipt-context, cleanup, ordered preflight, dispatch-deny, and zero-mutating-
+receipt-context, sanitized export, ordered preflight, dispatch-deny, and zero-mutating-
 byte assertions. The setup `snapshot` observation and every observation after
-it carry the index's exact `registry_snapshot_sha256`. The cleanup and final
-inventory digests resolve to the retained objects above. The per-architecture
+it carry the index's exact `registry_snapshot_sha256`. The terminal evidence digest resolves to its retained object; the later
+export/disposal digests occur only in the complete evidence-set tuple. The per-architecture
 indexes form the canonical `activation_smoke` evidence-set manifest defined
 above.
 
 ## Production activation grant
 
-Only after the complete smoke evidence set passes may the offline root sign a
+Only after the complete smoke evidence set and every matching externally
+observed whole-host disposal attestation pass may the offline root sign a
 production activation grant. Its unsigned fields are:
 
 1. `schema_version`, integer `1`
@@ -2375,7 +2467,7 @@ are:
 12. `gate_session_id`
 13. `setup_authorization`, exactly
     `first_exact_artifact_enrollment_only`
-14. `cleanup_authorization`, exactly `attributed_stage_cleanup_only`
+14. `host_disposal_policy`, exactly `external_whole_host_disposal_v1`
 15. `loopback_origin`, null for `confirm_only` or `http://127.0.0.1:` followed
     by one canonical decimal port in `1..65535` for `issue_create`
 16. `dispatch_deny_code`, null for `confirm_only` or exactly
@@ -2389,15 +2481,15 @@ context before signing. The post-grant plan's descriptor, capability,
 architecture set, and `authorization_context_sha256` must match the token and
 authority pair; the plan begins with the matching setup case and carries
 `stage_setup_policy=first_exact_artifact_enrollment_v1` plus
-`stage_cleanup_policy=attributed_stage_cleanup_v1`. Tokens and sessions
+`host_disposal_policy=external_whole_host_disposal_v1`. Tokens and sessions
 are fresh and globally distinct from every
 E1, E2, and activation-smoke token/session. The candidate accepts the token
 only through the same runner-identity, audit-token, native-architecture,
 challenge-response, expiry, and mode-0700 session checks as E1. It is never
 installed, shipped, or accepted by an ordinary process outside that exact
-authenticated session. Its setup and cleanup fields are accepted only through
-their separately derived contexts in the first and final cases; neither can
-substitute for the grant-bound final production context used by the intervening
+authenticated session. Its setup field is accepted only through its derived context in the first
+case; disposal is an external publication-signature prerequisite. Neither can
+substitute for the grant-bound final production context used by the subsequent
 workflow.
 
 The runner stages the real detached descriptor, provisional authorization,
@@ -2430,7 +2522,7 @@ An earlier validation, authority, journal, preflight, or capability failure
 does not satisfy the positive dispatch-denial assertion. Update, comment, and
 every other capability remain denied before preflight.
 
-### Non-replayable journal and cleanup evidence
+### Non-replayable journal and export evidence
 
 Post-grant verification uses a runner-created mode-0700 profile and journal
 root and no production credential. It introduces one compiled, runner-only
@@ -2443,7 +2535,7 @@ the durable `confirmed -> in_flight` transition, and only after the exact
 post-grant dispatch-denial result is captured does the runner atomically change
 `in_flight` to the same terminal state. Neither path can return to `prepared`
 or `confirmed`. The receipt ID, nonce, plan ID, and journal revision are burned
-even if later evidence collection or cleanup fails.
+even if later evidence collection or host disposal fails.
 
 The terminal transition produces one compact canonical journal evidence object
 capped at 8,192 bytes. Its fields are, in order: `schema_version` integer `1`,
@@ -2462,64 +2554,16 @@ receipt and its 32-byte nonce. The journal CAS and a repeated ordinary
 confirm/apply attempt must both prove the terminal record and return the stable
 `RECEIPT_ALREADY_CONSUMED` reason without UI, preflight, or network access.
 
-Cleanup runs only after the terminal record, its replay-denial observations,
-and every authority-negative observation have been retained by digest. It is
-the final case and final state-changing action for the post-grant session; no
-step may restage a plan, receipt, socket, copied sidecar, or Keychain object
-after its final probe. Its compact canonical evidence object is capped
-at 8,192 bytes and contains, in order: `schema_version` integer `1`,
-`evidence_type` exactly `post_grant_cleanup`, `descriptor_sha256`,
-`production_activation_grant_sha256`, `architecture`, `gate_session_id`,
-`setup_context_sha256`, `pre_enrollment_inventory_sha256`,
-`registry_snapshot_sha256`, `terminal_journal_evidence_sha256`,
-`cleanup_context_sha256`, `cleanup_intent_sha256`,
-`final_cleanup_progress_sha256`, `final_cleanup_ack_ledger_sha256`,
-`final_cleanup_ack_ledger_entry_count`, `helper_cleanup_evidence_sha256`,
-`stage_cleanup_evidence_sha256`,
-`pre_cleanup_inventory_sha256`, `removed_inventory_sha256`,
-`keychain_cleanup_evidence_sha256`, `post_cleanup_probe_sha256`,
-`final_empty_inventory_sha256`, `finished_at`, and `result` exactly `pass`. The
-three filesystem inventory/probe digests name canonical
-fixture objects enumerating every regular file by session-root-relative
-component, mode, size, and content digest; symlinks, hard links, non-regular
-entries, traversal, and files outside the already opened session root fail
-cleanup. The removed inventory must exactly equal the pre-cleanup inventory,
-and the post-cleanup probe must prove that no plan, receipt, journal, loopback
-account, socket, or copied authority sidecar remains beneath that root. Cleanup
-does not delete or alter the immutable evidence files retained outside the
-disposable root. The final empty inventory additionally proves the exact
-registry service, coordinator service, signing-key namespace, journal root,
-and mutable runner-session state are empty and matches the setup contract's
-initial inventory comparison rule.
-
-The six stage-cleanup digests resolve to the immutable context, intent,
-completed progress, ACK-ledger container, helper evidence, and complete runner
-evidence defined by the registry protocol. The canonical entry count equals
-the container's count. Their token, descriptor, snapshot, architecture,
-capability, runner, and session values must equal this cleanup object. They are
-the sole authority and reconciliation record for Keychain deletion; the
-filesystem inventory fields neither widen nor reconstruct that authority.
-
-The Keychain cleanup digest names a compact canonical object capped at 8,192
-bytes with fields `schema_version` integer `1`, `evidence_type` exactly
-`post_grant_keychain_cleanup`, `descriptor_sha256`, `architecture`,
-`gate_session_id`, `registry_snapshot_sha256`, `registry_service`,
-`registry_accounts`, `coordinator_service`, `coordinator_accounts`, `key_tags`,
-`registry_lookup_statuses`, `coordinator_lookup_statuses`,
-`key_lookup_statuses`, `checked_at`, and `result` exactly `pass`, in that order.
-Services, accounts, and tags are the exact bounded values produced by the
-approval-registry/coordinator protocols during this session;
-`key_tags` are sorted bytewise and contain every created tag exactly once.
-The account arrays contain every created account once in canonical byte order;
-each corresponding status array has one entry in the same order with its
-`account` then `status` fields, and status exactly numeric
-`errSecItemNotFound` (`-25300`).
-`key_lookup_statuses` has one entry per tag in the same order with fields
-`key_tag` and `status` exactly `-25300`. Any successful lookup, authentication
-cancel, transient/unknown status, unbounded enumeration, or extra matching
-item fails cleanup and quarantines the candidate.
-This object is a final absence projection of the completed
-`stage_cleanup_keychain` evidence, not an independent deletion instruction.
+The final evidence-sealing case runs only after the terminal record,
+replay-denial observations, and every authority-negative observation have
+been retained by digest. It verifies those public projections and sanitized
+archive inputs without deleting or modifying Keychain/journal state. No later
+candidate operation may restage a plan, receipt, socket, copied sidecar, or
+key. The external supervisor then verifies the final index/export closure,
+destroys the entire disposable host, and obtains the separately root-signed
+host-disposal attestation before publication can be authorized. The index
+cannot contain that later attestation digest: the evidence-set tuple binds
+both in dependency order.
 
 Each architecture emits a compact canonical post-grant evidence index capped
 at 1,048,576 bytes (1 MiB) with these fields in exact order:
@@ -2548,16 +2592,7 @@ at 1,048,576 bytes (1 MiB) with these fields in exact order:
 22. `finished_at`
 23. `result`, exactly `pass`
 24. `terminal_journal_evidence_sha256`
-25. `cleanup_context_sha256`
-26. `cleanup_intent_sha256`
-27. `final_cleanup_progress_sha256`
-28. `final_cleanup_ack_ledger_sha256`
-29. `final_cleanup_ack_ledger_entry_count`
-30. `helper_cleanup_evidence_sha256`
-31. `stage_cleanup_evidence_sha256`
-32. `cleanup_evidence_sha256`
-33. `final_empty_inventory_sha256`
-34. `observations`
+25. `observations`
 
 The observations exactly equal the capability-specific post-grant plan and use
 the Gate evidence observation/result codecs. They begin with exact-artifact
@@ -2565,10 +2600,10 @@ setup and its case-final evaluation; the setup snapshot observation and every
 later observation bind the index's retained `registry_snapshot_sha256`. They
 include ordinary authority loading, both-peer final-context equality, schema-3 receipt parsing and
 signature validation, capability denials, terminal CAS, ordinary replay
-denial, cleanup, runner/session negatives, and, for `issue_create`, the exact
+denial, sanitized export, runner/session negatives, and, for `issue_create`, the exact
 read-only loopback transcript, unique dispatch code, and zero mutating bytes.
 The index digest is SHA-256 of those exact bytes. Its setup, pre-inventory,
-snapshot, terminal, cleanup, and final-inventory digests must resolve to the
+snapshot, and terminal digests must resolve to the
 objects above and agree with their observation result manifests.
 
 The per-architecture indexes form one complete compact canonical evidence-set
@@ -2585,26 +2620,15 @@ per architecture in that order, with fields `architecture`,
 `evidence_index_sha256`, `post_grant_verification_token_sha256`,
 `gate_session_id`, `setup_context_sha256`,
 `pre_enrollment_inventory_sha256`, `registry_snapshot_sha256`,
-`terminal_journal_evidence_sha256`, `cleanup_context_sha256`,
-`cleanup_intent_sha256`, `final_cleanup_progress_sha256`,
-`final_cleanup_ack_ledger_sha256`, `final_cleanup_ack_ledger_entry_count`,
-`helper_cleanup_evidence_sha256`, `stage_cleanup_evidence_sha256`,
-`cleanup_evidence_sha256`, and
-`final_empty_inventory_sha256`, in that order. `registry_snapshots` contains
-one entry per descriptor architecture, in that order, with fields
-`architecture` and `registry_snapshot_sha256`, and exactly projects the index
-entries. Every value must equal its token, plan, index, authority pair,
-context, and retained file.
-
-Every smoke/post-grant cleanup index and evidence-set tuple binds the final
-cleanup ACK-ledger container digest and entry count to both helper and complete
-stage-cleanup evidence. The count is a canonical integer equal to final progress
-revision plus one, bounded by `2N+1` (seven for confirm, eleven for issue-create).
-The complete entry chain, canonical container, and all referenced intent,
-progress, marker, and result bytes must be retained; the install evidence tree
-includes those objects under its ordinary closed manifest rules. Verification
-uses the registry protocol's exact codecs and rejects any missing reference,
-fork, or digest/count disagreement before accepting an evidence index.
+`terminal_journal_evidence_sha256`, `export_manifest_sha256`, and
+`host_disposal_attestation_sha256`, in that order.
+`registry_snapshots` contains one entry per descriptor architecture in that
+order, with fields `architecture` and `registry_snapshot_sha256`, exactly
+projecting the index tuples. Each export/attestation must match the earlier
+index and exact stage/token/architecture/session tuple; each signed
+attestation is verified under the pinned root's distinct disposal domain.
+No cleanup ledger, intent, progress, marker, final-empty inventory, or
+candidate deletion evidence exists in this set.
 
 `install_evidence_manifest_sha256` is SHA-256 of the exact compact canonical
 `install-files.json` bytes. That separate object is capped at 2,097,152 bytes
@@ -2629,7 +2653,8 @@ non-negative JSON integer no greater than the file-type cap, and `sha256` is
 the digest of the exact file bytes. The list includes every per-architecture
 evidence index and every referenced fixture, transcript, assertion, result
 manifest, setup context, pre-enrollment inventory, registry snapshot, terminal
-record, cleanup object, final empty inventory, and inventory/probe object. Neither
+record, export manifest, root-signed host-disposal attestation, and its
+supervisor host-inventory/destruction records. Neither
 manifest is self-listed: the fixed `index.json` path is authenticated by the
 publication envelope's `post_grant_verification_evidence_set_sha256`, and the
 fixed `install-files.json` path is authenticated by the evidence-set
@@ -2659,7 +2684,7 @@ prepublication custody on the clean Gate/release hosts. They must not be put in
 a delivery archive, draft release, Cask, ordinary installation root, shared
 artifact store, or developer workstation. This custody is a release-process
 trust assumption, not a cryptographic revocation mechanism. Any post-grant
-failure, timeout, missing architecture, cleanup failure, or evidence mismatch
+failure, timeout, missing architecture, disposal failure/uncertainty, or evidence mismatch
 quarantines the descriptor, provisional authorization, grant, tokens, and all
 derived artifacts; no publication envelope is signed, no quarantined object is
 later reused, and a retry starts from a newly built, signed, notarized, stapled,
@@ -2668,8 +2693,9 @@ the access-controlled release incident record.
 
 ## Publication envelope
 
-After the complete post-grant verification set passes, the offline root signs
-the publication envelope. It has these unsigned fields:
+After the complete post-grant verification set and every matching whole-host
+disposal attestation pass, the offline root signs the publication envelope.
+The signature occurs after disposal and attestation, never on the live stage host. It has these unsigned fields:
 
 1. `schema_version`, integer `1`
 2. `envelope_type`, exactly `youtrack_agent_publication`
@@ -2757,34 +2783,32 @@ bytes, SHA-256 values, Ed25519 public key/signature, and parsed values for:
   descriptor/token/context bytes and genesis-to-current registry chains, and
   the context-bound active/permit/closed linkage plus Gate 1B historical
   read-only reconciliation;
-- every exact Security.framework key/registry/coordinator dictionary
-  projection, coordinator active/permit/closed record, apply-first and
-  registry-first linearization, and pre/post-permit restart outcome;
-- code/entitlement, profile CMS, certificate-chain/policy, notary, and
-  non-circular staple evidence wrappers, including exact tool find/version
-  captures, retained output digests, and CMS-certificate multiset framing with
-  duplicate DER values and digest-sort ties;
-- `confirm_only` and `issue_create` provisional authorizations, provisional
-  contexts, final grant-bound production contexts, smoke receipt contexts,
-  both stage-only setup and cleanup contexts, canonical empty pre-enrollment/
-  final inventories, post-enrollment registry snapshots, cleanup intents and
-  progress prefixes, acknowledged `delete_attempt_started` markers,
-  canonical ACK-ledger genesis/entries/container with both ACK kinds and every
-  valid bounded head, including final helper/index/set digest-count equality,
-  same-directory exclusive-`0600` canonical marker/pending-progress
-  publication with file/directory fsync and no-follow reopen/hash evidence,
-  the dedicated operation-result digest domain and every exhaustive nullable
-  field-shape row,
-  helper/runner stage-cleanup evidence, and the three post-invocation/
-  pre-result-persistence crash outcomes: success and direct-not-found
-  reconciled by exact absence, plus ambiguous exact presence quarantined
-  without another delete;
-- both per-architecture activation-smoke token/index variants, complete smoke
-  evidence sets and cleanup objects, production activation grants, both per-architecture
-  post-grant token/index variants, terminal-journal and cleanup objects, and
-  complete post-grant evidence sets plus their separately digest-bound install-
-  evidence manifests with multi-component ASCII paths; and
-- the publication envelope, app-payload archive, and outer delivery archive.
+- every exact Security.framework key/registry/coordinator dictionary and
+  bounded result projection, including the one-lookup active attributes/data/
+  persistent-reference tuple and exact-reference deletion; reference lengths
+  1 and 4,096 bytes succeed while zero, 4,097, wrong CF type, absent, or
+  conflicting projections deny;
+- every fixed coordinator schedule, all 21 phases and their state variants,
+  two independently authenticated helpers, same-UID alternate bootstrap,
+  unclosed quarantine before/after permit and before close, normal owner
+  quiescence before durable close, and the A-to-B persistent-reference ABA
+  replacement that leaves B unchanged;
+- ordinary owner normal-close and exact already-closed cleanup, ambiguous
+  outcomes without automatic resend, read-only remote reconciliation without
+  quarantined journal writes, and fixed JSON-v1 status/error shapes;
+- code/entitlement, CMS, certificate-chain/policy, notary and staple wrappers,
+  exact tool capture, retained output digests and certificate multiset framing;
+- both stage-only setup contexts, all canonical pre-enrollment inventories
+  and retained registry snapshots, sanitized export manifests, bounded
+  supervisor inventories/destruction evidence, root-signed disposal
+  attestations, and the acyclic index -> export -> disposal -> set ->
+  successor-signature chain;
+- provisional authorizations/contexts, both smoke token/index variants,
+  terminal non-replay objects, smoke evidence sets, activation grants/final
+  contexts, both post-grant token/index variants, complete evidence sets and
+  install manifests, publication envelopes and exact archives; and
+- all 88 profile-expiry vectors: exactly 22 boundaries times four clock
+  positions, plus the separate expired-status/already-closed-cleanup exception.
 
 Both implementations must parse, validate, re-encode, hash, and verify every
 positive vector identically. The fixture set evaluates every row of the
@@ -2811,8 +2835,8 @@ independently covers:
   actual designated requirement, certificate chain/policy,
   `SecStaticCodeCheckValidity` result, profile raw/CMS sequence, notarization,
   or staple evidence;
-- descriptor/profile expiry mismatch and the exact 100-vector Cartesian product
-  of all 25 named profile-expiry boundaries with just-before, equality, after,
+- descriptor/profile expiry mismatch and the exact 88-vector Cartesian product
+  of all 22 named profile-expiry boundaries with just-before, equality, after,
   and expiry-between-checks variants—including peer authentication—and exact
   no-side-effect assertions;
 - raw-entitlement-present/dictionary-absent, dictionary-present/raw-absent,
@@ -2876,29 +2900,33 @@ independently covers:
 - an empty or modified compiled command contract; assertion/transcript result
   omission, duplication, reorder, wrong expected/actual digest, false success,
   aggregate-only result, and result-manifest/observation substitution;
-- alternate or caller-created Unix IPC, wrong peer path/audit token,
-  non-preopened `AF_UNIX`, `AF_INET`/`AF_INET6` under a deny policy, IPv6 or
-  hostname loopback during smoke, datagram/raw socket, and undeclared socket
-  family/type;
+- alternate or caller-selected ordinary Unix endpoint, missing
+  `LOCAL_PEERTOKEN` or exact identity check, runner-preconnected descriptor
+  misattributed to a CLI/helper, or unauthenticated control channel; disjoint
+  fixture traffic crossing into ordinary authority; `AF_INET`/`AF_INET6`
+  under a deny policy, hostname/IPv6 loopback, datagram/raw socket, or
+  undeclared socket family/type;
 - Gate-token use on the production path, missing Gate 1A prerequisite for Gate
   1B, null/non-null Gate 1B evidence errors, capability widening, and
   `issue.update` / `comment.add` substitution;
-- missing, reordered, or additional Gate 1B coordinator cases/steps,
-  schedule fixture, barrier release/arrival, or concurrency-trace event;
-  sleep/timing-based orchestration; apply/registry or enrollment overlap; two
-  launchd helper instances/listeners; direct helper-server spawn; authority
-  Keychain access outside the single serialized executor; acquisition before
-  its guard or between active equality-read and delete; competitor Keychain
-  work before guard release; active ABA replacement; two active leases; permit before `in_flight`; send without or after a permit;
-  second permit/send; registry-first stale receipt; stale session/audit-token/
-  journal fence; durable-outcome downgrade; repeated ambiguous close add or
-  active delete; active deletion before durable close; restart resume; and any
-  post-permit automatic retry;
+- missing, reordered, or additional coordinator cases, schedule fixtures,
+  barriers, events, actors or helper identities; sleep-based ordering; treating
+  one label, launchd parent, bootstrap namespace, or local executor guard as
+  a cross-process singleton/fencing proof; refusing to test two valid helpers;
+- normal close before irrevocable owner quiescence, any non-owner close add,
+  unclosed recovery CAS/delete/keygen/sign/permit/send/commit, or UI/expiry/
+  restart/reboot/PID loss treated as permission to clear an unclosed lease;
+- attributes-only active deletion, separately captured reference and value,
+  invalid/oversized CFData reference, unknown result fallback, deletion of B
+  after capturing A, or mutation on a stale-reference not-found result;
+- two active leases, permit before durable `in_flight`, stale session/receipt,
+  second permit/send, registry mutation overlapping active apply, automatic
+  ambiguous retry, or quarantined remote reconciliation changing local state;
 - authority status/recover without explicit profile or required invocation
   `meta`; any plan/lease/force selector, positional input, `--yes`, `--dry-run`,
   `--fields`, raw output, stdin/environment override, or changed accepted-flag
-  semantics; authority corruption mapped anywhere but exit 1; and any future
-  authority exit outside 10 through 13;
+  semantics; corruption or `AUTHORITY_STATE_QUARANTINED` mapped anywhere
+  but exit 1; or renumbering existing authority exits 10 through 13;
 - migration of any valid v1 state other than `prepared`, especially
   `failed_before_mutation`; mutation/deletion of quarantined source bytes;
   missing quarantine marker attempt; or treating current fail-closed code as
@@ -2908,7 +2936,7 @@ independently covers:
   final context, smoke-plan or post-grant-plan substitution, smoke receipt
   copied into a production context, post-grant receipt using a provisional or
   synthetic context, wrong post-grant token/grant/context/runner/architecture,
-  missing terminal CAS or cleanup evidence, receipt replay after terminal
+  missing terminal CAS or export/disposal evidence, receipt replay after terminal
   consumption, and pre-dispatch/late-dispatch false positives;
 - missing/non-first Gate 1B setup case or a Gate 1B plan with null, release-
   stage, or changed setup policy; Gate 1B setup under anything other than the
@@ -2931,42 +2959,16 @@ independently covers:
   rotate/revoke/recover transition or current state substituted for baseline;
   or a second setup, rotation, recovery, revocation, receipt signature,
   permit, or network action under setup authority;
-- non-null Gate 1B cleanup policy or cleanup evidence field; a Gate 1B cleanup
-  context, cleanup intent, attributed per-item delete, or `stage_cleanup` IPC
-  operation; treating supervisor destruction/revert as signed Gate evidence;
-  accepting output from a failed Gate 1B run; or a later E1/E2 run that does
-  not independently prove its own empty start;
-- missing, expired, unsigned, cross-stage, cross-architecture, cross-capability,
-  cross-runner, or cross-session cleanup authority; cleanup-context/token/
-  descriptor/setup-snapshot disagreement; a setup or cleanup context used to
-  sign a receipt or registry record, acquire a coordinator active record,
-  create a permit, send, or cross sessions; missing or mutable retained cleanup
-  intent/progress; reconstruction from current mutable state; incomplete,
-  reordered, duplicated, or extra expected records, key tags, delete
-  dictionaries, or delete operations; active coordinator singleton during
-  cleanup; a registry tuple other than the retained active generation;
-  deletion without the exact UI-fail pre-read and byte comparison; unknown,
-  unattributed, malformed, or byte-mismatched state; deletion outside the
-  completed prefix; a physical delete without its durable append-only
-  stage/token/context/operation-bound marker and acknowledgement; any marker
-  whose attempt is not exactly 1; duplicate/rolled-back marker state;
-  missing/partial/non-cross-bound marker and `delete_pending` progress pair;
-  temp-mode/no-follow/canonical-write/file-fsync/no-replace-publication/
-  directory-fsync/reopen/hash failure; ACK before both entries and its retained
-  canonical ACK-ledger entry are durable; rollback to a prior progress prefix;
-  wrong/missing genesis, ACK kind/nullability, predecessor, sequence, revision
-  filename, entry or aggregate cap; duplicate/forked/gapped/truncated history,
-  terminal successor, extra or partial namespace object, cross-session replay,
-  wrong final ledger digest/count, or choosing a head before complete namespace
-  validation; namespace-ancestor fsync failure or concurrent runner writes;
-  delete after any pre-ACK publication crash/failure;
-  operation result under the wrong digest domain or outside the exhaustive
-  pre-read/delete/post-read/pending-marker field-shape table;
-  delete after an unresolved marker; unresolved-marker absence not terminally
-  reconciled, exact presence not quarantined for manual repair, or unknown/
-  mismatch followed by deletion; restart with different intent/marker/progress
-  bytes; or stage deletion attempted by an ordinary production or non-stage
-  process;
+- any `stage_cleanup` IPC, cleanup intent/progress/ACK/restart authority,
+  per-item stage deletion, signed final-empty inventory claim, or candidate
+  request treated as a host-destruction instruction;
+- missing/invalid/cross-host/cross-stage/cross-session disposal attestations,
+  missing supervisor inventory or destruction proof, incomplete writable
+  resource removal, host reuse, or activation/publication signed before
+  externally verified destruction;
+- export with mutable journal/plan/receipt/session state, key values,
+  credentials or live test-authority tokens; cyclic index/export/attestation
+  references; missing/extra/linked/case-colliding files or any cap violation;
 - missing/changed `xcrun --find` output, executable hash, version argv, version
   exit/output digest, active-developer-directory resolution, or wrapper tool-
   capture digest; undocumented `notarytool` JSON shape substitution; and
@@ -2980,13 +2982,9 @@ independently covers:
   backslash, or overlong paths; unlisted files; a shipped or post-install-
   fetched post-grant token; and treating a retained token digest as an install-
   time authority object; and
-- cleanup before authority-negative observations, any object restaged after
-  the final cleanup probe, a final inventory that does not prove all five
-  setup inventory domains empty, a final probe that omits such restaged state,
-  failure without bounded cleanup, cleanup token/context expiry or
-  unverifiability during partial cleanup, a nonempty or mismatched attributed
-  remainder, cleanup failure without whole disposable user/VM quarantine and
-  destruction, or reuse of any invalidated failure output; and
+- export sealing before authority-negative/terminal-replay observations,
+  restaged mutable objects afterward, successor authorization on an uncertain
+  destruction result, or reuse of any invalidated failure output; and
 - app-only archive creation or replacement after descriptor canonicalization
   or E1 issuance, quarantined grant reuse, publication before every native
   architecture passes post-grant verification, and a publication envelope
@@ -3020,39 +3018,18 @@ invalidates prior E1/E2 evidence.
   with the real sidecar pair, final production context, and schema-3 receipts,
   then irrevocably terminalizes those disposable receipts. Test-only command
   surfaces cannot substitute for either path.
-- Every Gate 1B E1 and E2 run begins with exactly one setup-only
-  exact-artifact enrollment from a canonical empty five-domain inventory, with
-  no Gate 1A or prior-pass mutable state. Its token-bound context is only an
-  authorization input to the normal enrollment ceremony. The retained
-  revision-1/generation-1 snapshot is immutable baseline provenance in every
-  later observation and both index layers; later ordinary-authority registry
-  transitions record their own current state without replacing that baseline.
-  Gate 1B has no attributed cleanup authority; whole-host destroy/revert is an
-  out-of-band supervisor lifecycle duty, not signed pass evidence, and the next
-  run independently proves empty start. E1 state is never inherited by E2.
-- Every activation-smoke and post-grant capability plan begins with exactly one
-  setup-only exact-artifact enrollment from a canonical empty five-domain
-  inventory. Its retained revision-1/generation-1 registry snapshot binds
-  every later observation and both index layers. Final cleanup proves the same
-  five domains empty; any failure invalidates all session output and either
-  proves bounded cleanup or destroys the quarantined disposable user/VM.
-- Their final deletion is available only to the distinct root-token-bound
-  `stage_cleanup` IPC authority. Before its first delete, the trusted runner
-  retains the complete attributed cleanup intent and empty pre-inventory,
-  setup transcript/snapshot, helper-created key list, expected-record bytes,
-  exact dictionaries, and delete order outside disposable state. Recovery
-  reuses only those bytes. Every physical delete is preceded by one durable,
-  acknowledged, append-only `delete_attempt_started` marker with fixed attempt
-  1. The marker and cross-bound `delete_pending` progress are each published
-  from same-directory exclusive `0600` no-follow temps through canonical
-  file-fsync, collision-safe no-replace publication, directory-fsync, and
-  no-follow exact reopen before the retained ACK may be sent. An intact
-  unresolved pair can reconcile exact absence; exact presence or unknown state
-  quarantines. A detectably missing/partial pair also quarantines. Neither path
-  rolls back or permits another delete. Every step otherwise
-  remains exact-read/byte-compare/delete under the serialized executor. Unknown
-  state is never deleted, and an expired or unverifiable partial cleanup can
-  only invalidate and destroy/quarantine the disposable environment.
+- Every Gate 1B, smoke, and post-grant run begins with exactly one setup-only
+  exact-artifact enrollment from a canonical empty inventory. Its retained
+  revision-1/generation-1 snapshot is immutable baseline provenance, not
+  current-state authority. E1 state is never inherited by E2. Setup authority
+  cannot rotate, recover, revoke, sign receipts, acquire a permit, or send.
+- No stage exposes helper/CLI per-item cleanup. Sanitized immutable evidence
+  is exported, then the trusted external supervisor destroys the complete
+  disposable host and its writable snapshots/disks. The root signs a bounded
+  disposal attestation only after independent lifecycle verification; complete
+  evidence sets bind it before a successor E2/provisional/grant/publication
+  signature. No signed empty-inventory or runner-self-destruction claim exists.
+  Failed or uncertain runs remain quarantined and hosts are never reused.
 - Assertion suffixes are case-final. Operation observations carry empty
   assertion IDs; only a separate final runner evaluation may aggregate and
   pass them after all ordered operation/transcript results exist. Without that
@@ -3069,13 +3046,15 @@ invalidates prior E1/E2 evidence.
   protocol bytes. The approval registry records that same digest as
   `artifact_descriptor_sha256`; any mismatch or artifact change invalidates the
   ceremony or receipt.
-- One launchd-managed helper server and its single serialized authority
-  executor mediate every coordinator operation. The executor guard spans each
-  active acquisition and the complete exact-read/delete cleanup interval;
-  Keychain `active` remains the durable cross-client/restart lock. A competing
-  acquisition cannot replace active between equality read and delete, and a
-  helper restart cannot expose ordinary work before guarded recovery
-  classification.
+- LaunchAgent packaging and local executor guards are not a global singleton
+  proof. The fixed Keychain active unique add is the cross-process mutex.
+  Unclosed state remains quarantine even if a process died, a helper restarted,
+  the host rebooted, a TTL expired, or UI approved. Only the uninterrupted
+  owner may first drop every queued authority capability and then add normal
+  close. Any helper may subsequently delete only the exact persistent
+  reference captured with validated active/close evidence; a replacement active
+  is untouched. No recovery actor synthesizes close or mutates a quarantined
+  journal. Bounded remote reconciliation reports only and never replays.
 - Gate evidence, a provisional authorization, and smoke evidence cannot
   authorize ordinary production. Only a matching, separately domain-separated
   activation grant plus its provisional authorization can do so.
@@ -3085,7 +3064,7 @@ invalidates prior E1/E2 evidence.
   replace it while preserving the descriptor digest.
 - A valid activation grant is necessary but not sufficient for publication.
   Every native architecture must pass the grant-bound post-grant plan, reach a
-  terminal non-replayable journal state, and complete bounded cleanup; the
+  terminal non-replayable journal state, and complete external host disposal; the
   root-signed publication envelope must bind that exact plan and complete set.
   Failure quarantines the entire candidate and cannot be repaired by rerunning
   only the missing case or by reusing the grant.
@@ -3097,7 +3076,7 @@ invalidates prior E1/E2 evidence.
   binaries, complete semantic signing evidence, notarization evidence,
   per-architecture clean-host E1/E2 passes, provisional authorization,
   per-architecture smoke pass, activation grant, per-architecture post-grant
-  verification and cleanup, publication envelope, and immutable release must
+  verification and disposal attestation, publication envelope, and immutable release must
   all exist and validate.
 
 ## Evidence

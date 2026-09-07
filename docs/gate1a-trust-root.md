@@ -1,9 +1,18 @@
 # ADR: Gate 1A trust, storage, and package topology
 
-- Status: Accepted for implementation, production identity not enrolled
+- Status: Partially accepted safety decision; native Gate topology not implementation-ready
 - Date: 2026-09-03
 - Gate 1A result: **NOT PASSED**
 - Production approval adapter: `approval.Unsupported`
+
+Open P1: destructive Gate 1B phases cannot share the current one-enrollment
+host/session after an unclosed lease is quarantined. The required conformance
+catalog is not an executable closed Gate plan. A separately reviewed subrun
+authorization, target/reset binding, and parent evidence-aggregation protocol
+must precede Gate 1B token issuance, command-contract freeze, E1/E2 evidence
+acceptance, issue-create provisional/activation authority, and production
+publication. The safety decisions below do not waive that blocker or constitute
+a passed native Gate.
 
 ## Context
 
@@ -39,6 +48,8 @@ YouTrackAgent.app/
     Info.plist
     MacOS/
       youtrack-agent-cli
+    Library/LaunchAgents/
+      io.github.abigotado.youtrack-agent.approval.plist
     Library/Helpers/
       YouTrackAgentApproval.app/
         Contents/Info.plist
@@ -66,6 +77,46 @@ installed bundle. The CLI path exposed to users is always the executable inside
 the installed application bundle. A future Homebrew Cask may install the app
 and link that contained executable into Homebrew's binary directory; it may not
 rebuild, replace, re-sign, or extract the helper.
+
+The sealed LaunchAgent declaration has the fixed label
+`io.github.abigotado.youtrack-agent.approval` and `BundleProgram` equal to
+`Contents/Library/Helpers/YouTrackAgentApproval.app/Contents/MacOS/YouTrackAgentApproval`,
+relative to the outer application bundle. The operator explicitly registers it
+with `SMAppService.agent(plistName:)`, subject to macOS approval. Neither the
+Cask nor a post-install hook registers or launches the service. The helper
+itself binds the fixed per-user AF_UNIX endpoint defined below; launchd
+launches the helper, not a runner-supplied socket. The CLI
+connects itself, so `LOCAL_PEERTOKEN` identifies the actual protocol peer;
+passing a runner-preconnected descriptor is prohibited.
+
+The parent launch constraint `is-init-proc=true` and fixed job label constrain
+the intended lifecycle, not global singleton authority. Ordinary same-UID
+`launchctl` operations and alternate bootstrap contexts remain in scope. A
+second exact signed helper must be safe: only the unique fixed Keychain
+`active` add provides cross-process exclusion, never a launchd label or a
+process-local executor guard.
+
+The normative ordinary listener path is exactly
+`/private/tmp/ytac-approval-<euid>/approval.sock`. Both peers derive `<euid>`
+from the operating system's effective UID and encode it as canonical unsigned
+decimal (no leading zero except `0`); it is never read from argv, environment,
+runner input, or a profile. The full ASCII pathname plus its terminating NUL
+must fit the platform's `sockaddr_un.sun_path` array before any socket call;
+there is no truncation or alternate-path fallback.
+
+The immediate parent must be a real directory owned by that effective UID
+with mode exactly `0700`. Each peer opens it without following symlinks and
+validates its type, owner, and mode from the opened directory descriptor. The
+helper verifies the bound entry as a socket under that opened directory, and
+the CLI verifies the socket entry under its validated opened directory before
+connecting. A replaced parent, symlink, wrong owner/mode/type, or failed
+identity check fails closed. Bind collision also fails closed: neither startup
+nor connection may unlink an existing entry or delete another listener.
+These checks constrain filesystem use, not authority. A same-UID attacker can
+replace the directory or socket and deny service; every actual connection
+still requires mutual connection-bound audit-token and exact-code validation
+before protocol bytes. Neither pathname ownership nor a successful bind proves
+peer identity or global singleton status.
 
 The Apple Developer Team ID and positive decimal bundle build number are
 required immutable release inputs named `TEAM_ID` and `RELEASE_BUILD`. The
@@ -166,7 +217,8 @@ because no committed transition names it. After exact transition
 reconciliation, orphaned and retired private keys remain non-authoritative and
 are never reused. This design grants no production maintenance authority to
 delete them. The orphan-delete query contract applies only to the disjoint
-Gate fixture and the separately authorized attributed release-stage cleanup.
+Gate fixture. Live release-stage cleanup is deferred; the trusted external
+supervisor destroys the entire disposable host instead.
 Retained public verification keys live in the ledger and do not require old
 private keys. Orphaned and retired private keys still count toward the 64-key
 bound. Hitting that bound fails closed; any operator cleanup requires a future,
@@ -211,9 +263,13 @@ and the operator explicitly starts the enrollment ceremony.
 The ceremony is:
 
 1. The CLI validates the connected helper against the pinned helper
-   requirement and snapshots the empty registry revision.
+   requirement and constructs the canonical enrollment intent without reading
+   the registry.
 2. The helper validates the CLI against the pinned CLI requirement before
-   reading the bounded enrollment request.
+   reading the bounded enrollment request. It acquires the fixed coordinator
+   `active` item before any ledger read, including an enrollment that will be
+   rejected because the registry already exists. Only under that lease may it
+   verify and snapshot the empty registry.
 3. Trusted helper UI displays the release identity, Team ID, generation, SPKI
    fingerprint, and the fact that a new trust root is being created.
 4. Fresh user presence authorizes generation or use of the helper-only Secure
@@ -232,7 +288,10 @@ The ceremony is:
    revision 1 with `SecItemAdd` under account
    `revision/00000000000000000001`; `errSecDuplicateItem` is a conflict.
 8. The CLI reads the committed record through the helper's bounded read-only
-   operation and compares its exact bytes before reporting success.
+   operation and compares its exact bytes. The uninterrupted owner then
+   irrevocably drops every signing/commit capability and queued callback before
+   recording durable normal close and releasing its exact active item. Only
+   then may it report success.
 
 Failure or uncertain durability leaves enrollment incomplete. Normal approval
 continues to fail closed; it never retries enrollment implicitly.
@@ -293,11 +352,26 @@ work; the eventual candidate is validated later under that lease. It
 holds it through the registry commit or apply's exact
 `confirmed -> in_flight -> one permit -> one send/outcome -> durable close`
 sequence; only then may it remove the active item. The active, permit, closed,
-restart, fencing, and result-projection codecs are normative in the registry
+quarantine, and result-projection codecs are normative in the registry
 protocol. CLI filesystem locks never substitute for this cross-process
-boundary. Crash recovery authenticates a new exact-code actor/helper session;
-old tokens are historical, and read-first close/active cleanup is fenced and
-idempotent. The helper enumerates only the fixed service and private access group with
+boundary. Only the original uninterrupted authenticated owner can record
+normal close, after irrevocably dropping every sign, permit, send, and commit
+capability, including queued callbacks. Any non-owner observing an active item
+without its valid durable close returns `AUTHORITY_STATE_QUARANTINED` (exit 1):
+no journal CAS, synthesized close, deletion, signing, key generation, permit,
+send, or registry commit is allowed. Crash, restart, reboot, expiry, PID loss,
+or trusted UI does not release it. Remote reconciliation may read and report
+only, never advance its journal. First-release availability is intentionally
+lost until a separately reviewed recovery protocol exists.
+
+For an already normally closed lease, an exact lookup returns the attributes,
+canonical data, and nonempty CFData persistent reference bounded to 4,096
+bytes. Cleanup validates the complete active/permit/closed and terminal-state
+bindings, then deletes only that reference using `kSecMatchItemList`, never an
+attributes-only predicate. If A was removed and B acquired after the lookup,
+deleting A's stale reference cannot delete B; A's absence is a stale no-op.
+Malformed or conflicting evidence quarantines. The helper enumerates registry
+revisions only in the fixed registry service and private access group with
 match-limit-all, caps the result at 256 revisions, sorts and validates every
 canonical account and record, and requires one gap-free hash chain beginning at
 revision 1. Missing, duplicate, malformed, forked, out-of-range, or trailing
@@ -313,6 +387,9 @@ byte-compares it before reporting success. After an error or crash-ambiguous
 add, reconciliation reads once: the exact intended bytes are success, absence
 is a failed uncommitted ceremony, and different bytes are a conflict. It never
 repeats an add automatically and never mutates or deletes a ledger revision.
+These are observations of the add result, not permission for a replacement
+actor to close or release an unclosed lease, or to report the whole ceremony
+completed while it remains quarantined.
 Reaching the 256-record bound fails closed pending a separately reviewed ledger
 migration; compaction is not implicit.
 
@@ -369,28 +446,34 @@ status/apply cancels the plan rather than falling back to retained authority.
 The controlled Gate 1B apply path enforces the same current-registry checks but
 requires its exact unexpired `gate_receipt_context_v1` and matching E1/E2 runner
 session instead of any provisional/grant pair. Gate 1A remains network-free.
-The single per-user launchd-managed helper admits all authority work through
-one non-reentrant serialized executor. Its guard spans active acquisition,
-the complete leased operation, durable close, and exact-read/delete cleanup;
-the fixed Keychain active record remains the cross-client and cross-restart
-lock. The helper retains that guard and coordinator, revalidates the unexpired embedded profile
+Each helper uses a non-reentrant serialized executor only for its own process.
+The fixed Keychain active record is the cross-process lock, including against
+another exact signed helper in a different user bootstrap context. The owner
+retains its local guard and coordinator, revalidates the unexpired embedded
+profile
 and every authority value, observes the durable `confirmed -> in_flight` CAS,
 then creates exactly one request-bound permit. That permit is the sole send
 linearization point. A registry transition that acquires first closes before
 apply revalidation and cancels the stale receipt; an apply that acquires first
-excludes registry commits until its durable closed record exists. Crash before
-permit is provably `failed_before_mutation`; crash at or after permit is
-ambiguous and never retried. Profile expiry before acquisition closes
-`confirmed -> expired`; expiry after acquisition with no permit burns the
-receipt and closes `failed_before_mutation` with zero dispatch. After the durable `confirmed -> in_flight`
+excludes registry commits until it has irreversibly quiesced all send/sign/
+commit capabilities and persisted its valid normal closed record. A crash
+before close leaves the lease quarantined: permit absence can prove no
+mutation was authorized, but does not authorize another actor to terminalize
+the journal or release the lease. A crash at or after permit is ambiguous and
+never retried. Profile expiry before acquisition closes
+`confirmed -> expired`; expiry after acquisition with no permit lets only the
+uninterrupted owner burn the receipt and close `failed_before_mutation` with
+zero dispatch after quiescence. A replacement actor must quarantine instead.
+After the durable `confirmed -> in_flight`
 transition, reconciliation verifies
 the persisted historical key and authorization context but does not require
 either to remain active. Rotation/revocation races before confirmation,
 between confirmation and apply, at the in-flight/permit boundary, during send,
-and across helper restart are closed Gate 1B cases. A dedicated ABA case queues
-a competing acquisition between cleanup's byte-equality read and delete and
-proves it performs no Keychain call or replacement until the executor guard is
-released. Gate 1B must pass them
+and across helper restart are closed Gate 1B cases. A dedicated ABA case uses
+independent exact signed helper processes: A is removed and B acquired between
+the cleanup lookup and deletion, and deletion by A's persistent reference must
+leave B unchanged. A paused unclosed owner is never recovered by the competing
+helper. Gate 1B must pass them
 before the executor candidate is qualified for any use beyond that controlled
 Gate run.
 
@@ -409,12 +492,13 @@ production use. A final network-disabled black-box activation smoke runs under
 fresh per-architecture deny-only tokens. Each capability plan begins with one
 token/context-limited exact-artifact enrollment from a retained canonical
 empty inventory, binds the resulting revision-1/generation-1 registry snapshot
-to every later observation and both evidence-index layers, and ends by proving
-the disposable registry/coordinator/key/journal/session inventory empty. Only
-its complete passing evidence
+to every later observation and both evidence-index layers, and ends by
+retaining terminal and export evidence. The trusted external supervisor then
+destroys the entire disposable host. Only its complete passing evidence and
+root-bound disposal attestation
 set permits the offline root to sign the production activation grant. The
 exact artifact then loads that grant and provisional authorization and repeats
-the same setup-first, cleanup-last discipline plus the ordinary capability path
+the same setup-first, export-and-host-disposal discipline plus the ordinary capability path
 on every architecture under separate deny-only post-grant runner tokens. Every
 case passes only through a final runner evaluation after all operation and
 transcript results exist. Only the publication envelope may bind that later
@@ -425,19 +509,16 @@ in
 [Gate artifact authorization](gate1a-artifact-authorization.md). No post-Gate
 rebuild or wiring change inherits this evidence.
 
-Cleanup is not inferred from setup or production authority. The exact
-root-signed smoke/post-grant token derives a distinct session-bound cleanup
-context accepted only by `stage_cleanup`. Before its first delete, the trusted
-runner retains an immutable intent outside disposable state containing the
-empty pre-inventory, setup transcript/snapshot, helper-created key list,
-complete attributed record/key bytes, exact Security.framework dictionaries,
-and delete order. The sole launchd helper holds its serialized executor across
-exact-read/byte-compare/delete, durably marks and acknowledges the fixed sole
-attempt before invocation, and never re-deletes an unresolved marker. It
-requires coordinator `active` absent, removes only the retained session's
-registry generation, permit/closed records, and keys, and quarantines any
-unknown or mismatched state without deleting it. Partial cleanup after token or
-evidence expiry can never pass; the disposable user/VM is destroyed.
+Live `stage_cleanup`, cleanup intent/progress, and ACK-ledger deletion authority
+are deferred from the first release. Setup, receipt, and production contexts
+grant no deletion privilege. The runner exports only the closed allowlisted
+evidence, never mutable Keychain, journal, session, credential, or private-key
+state. A trusted supervisor outside the disposable host destroys that entire
+host on success or failure and supplies the artifact protocol's root-bound
+disposal attestation. Smoke disposal must precede activation-grant signing;
+post-grant disposal must precede publication-envelope signing. No missing
+attestation, runner self-report, empty-inventory claim, partial cleanup, or
+reused host may pass either transition.
 
 The existing pre-Gate receipt schema v2 does not carry registry revision and is
 therefore not activation-eligible. Before durable confirmation, the shared Go
@@ -473,10 +554,10 @@ The sole exception is launch/peer authentication into an explicitly
 recovery-only helper session for bounded startup/status classification. If no
 unresolved active record exists, it returns `authority_status=clear` with the
 expired profile field and closes.
-Trusted recovery continues only for one unresolved active record matching the
-same exact descriptor and retained evidence. Under its serialized executor
-fence that session may expose only authority status, trusted-UI recovery,
-terminal journal CAS, closed reconciliation, and byte-equal guarded active cleanup. It cannot
+Recovery-only classification continues only for the same exact descriptor and
+retained evidence. An unclosed active record remains quarantined with no
+mutations. A valid already-closed record permits only exact persistent-reference
+active cleanup; the session may not synthesize close or perform journal CAS. It cannot
 enter ordinary confirmation/registry/apply authority, sign, acquire, permit,
 construct transport, or send; it closes when classification/cleanup finishes.
 
@@ -557,7 +638,8 @@ artifact execution.
 
 The separate Gate runner identity is diagnostic orchestration only and is
 never accepted as the production helper's protocol peer. A Gate run uses a
-disposable macOS user or VM and destroys its fixture Keychain state afterward.
+disposable whole host or VM, destroyed by the external supervisor after evidence
+export; deleting a user or selected fixture Keychain entries is insufficient.
 
 Gate 1A provisional authorization names only `confirm_only` but enables no
 ordinary command by itself. Its content-addressed smoke workflow drives the
@@ -575,7 +657,7 @@ helper-owned coordinator's apply-versus-rotate/revoke/recovery linearization, ev
 before/after-permit crash boundary, invalid-enrollment contention before any
 ledger read, crash after durable outcome but before close, ambiguous close add,
 crash after close but before active deletion, ambiguous active deletion,
-restart fencing and durable close, and bounded ambiguous-outcome
+unclosed-owner quarantine and persistent-reference ABA safety, and bounded ambiguous-outcome
 reconciliation. Its content-addressed two-party schedules and traces use exact
 barrier events rather than wall-clock sleeps.
 After its two complete Gate evidence sets, the root signs only a provisional
@@ -594,9 +676,10 @@ passes a second per-architecture ordinary-command verification with final-
 context receipts and the same safe pre-socket mutation denial. The grant is
 cryptographically usable during this bounded step, so the disposable Gate host
 and release operator are trusted to quarantine the grant and candidate after
-any failure. Each failure runs bounded cleanup; failure to prove the five
-inventory domains empty destroys the quarantined disposable user/VM and all
-session output remains invalid. A passing candidate is published byte-for-byte with no post-Gate
+any failure. Every run ends in externally attested destruction of the whole
+disposable host; a failed run's output never becomes passing evidence. No
+live deletion protocol or empty-inventory proof substitutes for disposal.
+A passing candidate is published byte-for-byte with no post-Gate
 activation edit.
 
 Public Homebrew distribution is last. The accepted shape is a Cask or private
@@ -625,8 +708,15 @@ identity.
   authority transitions with distinct domains and journal effects.
 - The native bundle is macOS-only. Unsupported platforms and unsigned local
   source builds retain the fail-closed adapter.
+- An unclosed owner crash can block all further guarded writes indefinitely;
+  restart, reboot, and fresh user presence are deliberately not recovery
+  authority. Read-only operation remains available.
 
 ## Evidence sources
+
+- Apple: [`SMAppService`](https://developer.apple.com/documentation/servicemanagement/smappservice), [`agent(plistName:)`](https://developer.apple.com/documentation/servicemanagement/smappservice/agent(plistname:)), and [Updating helper executables from earlier versions of macOS](https://developer.apple.com/documentation/servicemanagement/updating-helper-executables-from-earlier-versions-of-macos)
+- Apple: [Defining launch environment and library constraints](https://developer.apple.com/documentation/security/defining-launch-environment-and-library-constraints)
+- Apple: [`SecItemDelete`](https://developer.apple.com/documentation/security/secitemdelete(_:)) and [`kSecMatchItemList`](https://developer.apple.com/documentation/security/ksecmatchitemlist)
 
 - Apple: [Sharing access to keychain items among a collection of apps](https://developer.apple.com/documentation/security/sharing-access-to-keychain-items-among-a-collection-of-apps)
 - Apple: [`errSecDuplicateItem` and Keychain composite primary keys](https://developer.apple.com/documentation/security/errsecduplicateitem)

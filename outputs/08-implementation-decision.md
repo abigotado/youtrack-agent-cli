@@ -6,6 +6,14 @@
 - Target binary: `youtrack-agent-cli`
 - Target Agent Skill: `youtrack-agent`
 
+Native Gate 1B topology is not accepted for implementation: its destructive
+catalog requires a separately reviewed subrun-authorization and evidence-
+aggregation ADR. A quarantined host cannot reset into another phase under the
+same one-enrollment token/session. This blocks Gate 1B token/digest freeze,
+E1/E2 acceptance, issue-create provisional/activation authority, and production
+publication; only the safety restrictions and existing fail-closed slice are
+accepted here.
+
 ## Reuse baseline
 
 Use the clean `confluence-cli` `main` revision `fea3152` as the canonical source for the provider-neutral harness, JSON v1 envelope, panic recovery, bounded output, direct Security.framework Keychain adapter, atomic registries, lockfiles, embedded skill installer, generated command/contract documentation, and CI. Distribution remains explicitly disabled until Gate 1A passes with the frozen trust/package topology and an audited signed and notarized macOS package; the inherited portable archive and Homebrew paths are not safe defaults for this credential-bearing CLI. Homebrew dependency metadata and validation may be prepared before that gate, but an installable Formula/Cask and every tap publication path remain forbidden.
@@ -68,36 +76,33 @@ containing archive without a recursive hash. It does not authorize a second
 write-capable build.
 
 Both activation-smoke capability plans and both post-grant plans are now
-setup-first and cleanup-last. A stage token plus derived setup-only context may
+setup-first and export-last. A stage token plus derived setup-only context may
 perform exactly one revision-1 exact-artifact enrollment after canonical empty
 registry/coordinator/key/journal/session inventories pass. The retained
 generation/SPKI/fingerprint/descriptor/session snapshot binds every later
 observation, per-architecture index, and complete evidence set. Operation
 observations carry empty assertion IDs; only the separate case-final runner
 evaluation may emit the ordered aggregate after all transcripts exist. Every
-failure runs bounded cleanup, and an unproved cleanup destroys the quarantined
-disposable user/VM while invalidating all session output.
+failure invalidates the run; the trusted external supervisor destroys the
+whole disposable host. Successful exported evidence likewise requires whole-
+host destruction before a successor release signature.
 
 Gate 1B independently enrolls its fresh E1/E2 host in the first compiled case.
 Its retained baseline snapshot records enrollment provenance through later
 observations and evidence sets; planned registry transitions retain their own
 successor evidence. Gate 1B does not acquire release-stage cleanup authority.
 
-Cleanup itself is a distinct root-token-bound `stage_cleanup` IPC authority,
-not a consequence of the setup context or ordinary maintenance. Its immutable
-pre-delete intent binds the empty pre-inventory, setup transcript/snapshot,
-helper-created key order, complete attributed record/key bytes, exact
-Security.framework dictionaries, and operation order. Under the serialized
-executor the helper requires coordinator active absent, exact-reads and
-byte-compares each item, and durably acknowledges a fixed-attempt marker before
-its sole delete only after the marker and cross-bound `delete_pending` progress
-are exclusively published, file/directory-fsynced, and exactly reopened.
-Genesis and every progress ACK are retained in one bounded hash-linked ledger.
-Recovery validates its full namespace, references, and unique contiguous chain;
-missing, extra, partial, or forked history quarantines without shortening it.
-Restart with an unresolved marker terminalizes exact absence
-or quarantines presence/unknown state without another delete. Unknown or expired partial state is quarantined
-and the disposable environment is destroyed; it is never broadly deleted.
+Live `stage_cleanup`, item-deletion authority, ACK-ledger recovery, and signed
+empty-inventory cleanup proofs are deferred. The compiled stage policy is
+`external_whole_host_disposal_v1`: export only sanitized evidence, destroy the
+entire disposable host through the trusted external supervisor, then retain a
+root-signed disposal attestation bound to the descriptor, token digest,
+architecture, runner/session, evidence index, and export manifest. The evidence
+set references that later attestation; the earlier index does not, avoiding a
+hash cycle. Activation-grant signing follows smoke disposal; publication-
+envelope signing follows post-grant disposal. Uncertainty permits neither
+successor signature nor host reuse. This is an explicit release-operator trust
+boundary, not evidence produced by the candidate helper about its own cleanup.
 
 The same gate must test the first Cask install path against the application-
 bound Keychain ACL. Install hooks must not silently reauthorize credentials;
@@ -157,17 +162,17 @@ The combined `approval.DecodeAndValidateIPCResponse` decoder is the sole respons
 
 All durable mutation operations use one journal transaction API with revision-based compare-and-swap. When multiple locks are needed, the global order is profile, policy, then one plan/receipt journal lock. Subsets preserve that order. No remote request or approval UI runs while the journal file lock is held.
 
-Native authority requires canonical journal record version 2, including exact authority evidence plus raw canonical active/permit/normal-close or recovery-close bytes. The normal terminal CAS persists exact normal closed bytes with the outcome; post-fence recovery may instead persist actor/session-bound recovery closed bytes. A strict atomic migration admits only a valid v1 `prepared` record with zero attempts, no receipt, no outcome, and no evidence—the only safe state actually producible by the shipped fail-closed path. Every other valid v1 state, explicitly including `canceled`, `expired`, and `failed_before_mutation`, is retained unchanged and quarantined with `JOURNAL_V1_AUTHORITY_STATE_QUARANTINED`; a valid v1 `failed_before_mutation` has a receipt, one attempt, and an outcome and is never treated as local zero-attempt state. The current `approval.Unsupported` boundary means no v1 authority state can be legitimate current authority.
+Native authority requires canonical journal record version 2 with exact authority evidence and raw canonical active/permit/normal-close bytes. Only the uninterrupted owner may persist the normal terminal outcome and close bytes after irrevocably quiescing its send/sign/commit capabilities, including queued callbacks. A replacement process cannot synthesize a close or mutate this journal. A strict atomic migration admits only a valid v1 `prepared` record with zero attempts, no receipt, no outcome, and no evidence—the only safe state actually producible by the shipped fail-closed path. Every other valid v1 state, explicitly including `canceled`, `expired`, and `failed_before_mutation`, is retained unchanged and quarantined with `JOURNAL_V1_AUTHORITY_STATE_QUARANTINED`; a valid v1 `failed_before_mutation` has a receipt, one attempt, and an outcome and is never treated as local zero-attempt state. The current `approval.Unsupported` boundary means no v1 authority state can be legitimate current authority.
 
 `prepare` acquires profile, policy, and journal locks, commits the authoritative canonical plan as `prepared`, then exports a 0600 copy. Export failure does not erase or duplicate the journal record.
 
 `confirm` has two phases. It first snapshots the prepared plan under profile/policy/journal locks and releases all locks. The native helper displays that one immutable snapshot, hashes those exact bytes into the receipt, and signs the deterministic unsigned receipt together with the current registry revision, active key identity, and applicable mode-bound authorization-context digest. The service reacquires the locks in the same order, revalidates unchanged identity, policy, plan hash, state, journal revision, registry revision, active key, descriptor and the complete applicable authority branch and derived context. It then atomically stores the receipt, exact canonical authority objects/context and all digests, and moves to `confirmed`. Concurrent confirmation loses the compare-and-swap and cannot mint a second usable receipt.
 
-`apply` holds the profile and policy locks while it validates the bound credential and remote preconditions. Historical verification with retained key or authority bytes is audit evidence only. Apply authority requires the signed receipt's registry revision and generation/SPKI/fingerprint to equal the current active registry entry and its context digest to equal the currently valid mode-bound authority set. Any intervening registry or activation transition cancels a confirmed plan. One launchd-managed helper server owns one serialized authority executor; before its first mutable authority read, apply enters that executor, takes its guard, and acquires the helper-owned fixed-active Keychain coordinator also required by every registry commit. It retains the guard and crash-durable Keychain lease across exact revalidation, the journal `confirmed -> in_flight` CAS, one exact-request permit, one send/outcome, durable close, and guarded exact-read/delete cleanup. Registry-first closes before later apply revalidation and cancels the stale receipt; apply-first excludes all registry commits through durable close. Crash before permit is `failed_before_mutation`. Crash or uncertainty at/after permit is ambiguous and never retried. Audit-token, helper-session, lease, journal-revision, registry, context, and expiry fences are repeated immediately before send.
+`apply` holds the profile and policy locks while it validates the bound credential and remote preconditions. Historical verification with retained key or authority bytes is audit evidence only. Apply authority requires the signed receipt's registry revision and generation/SPKI/fingerprint to equal the current active registry entry and its context digest to equal the currently valid mode-bound authority set. Any intervening registry or activation transition cancels a confirmed plan. Before any mutable authority read, apply contends on the helper-private fixed-active Keychain account also required by every registry commit. Its unique add is the cross-process mutex; SMAppService registration and a local executor guard do not exclude another same-user helper or bootstrap namespace. The uninterrupted owner retains its lease through exact revalidation, `confirmed -> in_flight`, one exact-request permit, one send/outcome, irreversible capability quiescence, and durable normal close. Registry-first cancels stale confirmation; apply-first excludes registry commits through close. A proven owner abort before permit may close `failed_before_mutation`; a crash without durable close instead quarantines the lease. Uncertainty at/after permit is ambiguous and never retried. Audit-token, helper-session, lease, journal-revision, registry, context, and expiry fences are repeated immediately before send.
 
-`reconcile` snapshots an eligible state, revision, receipt, SPKI, and exact historical descriptor, applicable authority branch, context, and complete registry-chain bytes, fully verifies their pinned-root signatures, hashes, capability, and receipt binding without requiring the context to remain active, performs bounded reads without the journal lock, then compare-and-swaps the evidence and next state. Repeated reconciliation is read-only and idempotent. Terminal states return their existing record without additional network activity unless the operator explicitly requests a fresh evidence collection.
+`reconcile` verifies retained historical receipt, descriptor, applicable authority branch, context, registry chain, hashes, and capability without making them current authority. While any active lease lacks a valid durable close, reconciliation performs bounded remote reads and reports evidence only: no journal/evidence CAS, terminal transition, signing, or replay. A separately eligible already-closed record may use the normal evidence CAS contract. Terminal states return their existing record without additional network activity unless the operator explicitly requests fresh evidence collection.
 
-Coordinator recovery authenticates a new exact-code CLI and fresh helper session against the stable descriptor and retained evidence; the crashed audit token/session are historical only. After trusted UI it enters a recovery-only fence under the new helper's serialized authority-executor guard that can classify/CAS, persist an actor/session-bound close, and read-first remove only byte-equal active state. The guard remains held across equality read, delete, and ambiguity reconciliation, so a queued acquisition performs no Keychain operation and cannot replace active in that ABA interval. Identical closed is complete, absent allows one identical add, and different fails; active absent is complete, byte-equal allows one delete, and a different well-formed newer lease is a stale no-op. Even after profile expiry only exact launchd recovery-only launch/peer auth is admitted, and this path is cleanup-only: status, trusted-UI fencing, journal CAS, close reconciliation, and guarded byte-equal active cleanup; it cannot enter ordinary auth, sign, acquire, permit, send, or commit.
+Coordinator recovery authenticates exact peers but cannot fence a still-live predecessor. An active lease without a valid durable normal close returns `AUTHORITY_STATE_QUARANTINED` (existing exit 1) with no local mutation, including after restart, reboot, expiry, or fresh user presence. Automated recovery/reset of such a lease is deferred and can leave guarded writes unavailable indefinitely. Cleanup of an already-closed lease validates full active/permit/closed linkage and reads attributes, bytes, and a bounded persistent reference in the same exact query. It deletes only that reference through `kSecMatchItemList`, never the reusable account name. If another helper removes A and acquires B, stale A deletion is a harmless no-op; no journal CAS or close synthesis occurs. Expiry admits only this limited authenticated inspection/closed cleanup, never new authority.
 
 ## Complete state table
 
@@ -179,14 +184,21 @@ branch. Confirmation and apply require live authority. Historical validation
 reconstructs the retained branch; Gate reconciliation remains confined to its
 authenticated runner/session and cannot create a new permit or send.
 
+Every owner transition below requires the original uninterrupted owning
+connection. If it is lost before a valid durable normal close, quarantine takes
+precedence: preserve all journal bytes and allow only bounded remote reads and
+reporting. Neither expiry nor an apparently absent permit proves the old
+process has stopped. Reconciliation/operator-resolution CAS rows apply only to
+already-closed eligible records, never to quarantined authority.
+
 | From | Event | To | Recovery semantics |
 |---|---|---|---|
 | none | valid offline prepare committed | `prepared` | Export can be repeated from the journal; no network or credential was used. |
 | `prepared` | trusted helper receipt and active authority set committed | `confirmed` | Exactly one receipt/key generation plus the exact canonical descriptor, complete applicable authority branch, derived context, registry chain, and all digests are retained. |
 | `prepared` | operator cancellation or expiry | `canceled` / `expired` | Terminal; create a new plan. |
 | `confirmed` | coordinator acquired; receipt and unchanged active authority set consumed before permit | `in_flight` | Durable non-replay point; no send authority exists until the one exact-request permit is added. |
-| `confirmed` | helper/CLI crashes after coordinator acquisition but before the CAS | `failed_before_mutation` | Recovery proves no permit, burns the receipt, durably closes/fences the lease, and never sends. |
-| `in_flight` | crash or definitive failure before permit | `failed_before_mutation` | Terminal after a durable coordinator close; zero mutation dispatch and no retry. |
+| `confirmed` | helper/CLI crashes after coordinator acquisition but before the CAS | unchanged, quarantined | No recovery CAS, close, deletion, or retry; report only. |
+| `in_flight` | uninterrupted owner proves definitive failure before permit | `failed_before_mutation` | Quiesce capabilities, persist terminal outcome, durably close; zero dispatch. A crash before that close instead quarantines. |
 | `in_flight` | exact permit added | remains `in_flight` | Sole send-authority linearization; every later uncertainty is ambiguous and non-replayable. |
 | `confirmed` | operator cancellation before coordinator acquisition | `canceled` | Terminal; no mutation attempt. |
 | `confirmed` | trusted time reaches descriptor `helper_profile_expires_at` before coordinator acquisition | `expired` | Absolute cutoff; Gate/install evidence and cached helper sessions do not extend it. |
@@ -196,11 +208,11 @@ authenticated runner/session and cannot create a new permit or send.
 | any state with durable outcome | applicable runner token expires | unchanged durable outcome | Expiry never downgrades recorded success/failure or a consumed smoke receipt to ambiguity. |
 | `confirmed` | approval registry revision or active generation changed | `canceled` | Retained keys may verify history but never authorize apply. |
 | `confirmed` | descriptor, applicable authority token/grant, or context changed | `canceled` | Historical bytes remain audit evidence but never authorize apply. |
-| `confirmed` / `in_flight` | trusted time reaches descriptor `helper_profile_expires_at` after coordinator acquisition while no permit exists | `failed_before_mutation` | Recovery burns the receipt, durably closes the lease, sends zero mutation bytes, and requires a newly authorized artifact before a new plan. |
+| `confirmed` / `in_flight` | trusted time reaches descriptor `helper_profile_expires_at` after coordinator acquisition while no permit exists | `failed_before_mutation` | Only the uninterrupted owner can quiesce, burn, and durably close with zero dispatch. A replacement process quarantines instead. New plans require a newly authorized artifact. |
 | `in_flight` | definitive rejection proving no mutation | `failed_before_mutation` | Terminal; a new plan is required. |
 | `in_flight` | verified success recorded | `applied` | Non-replayable; proceed to bounded verification. |
 | `in_flight` | timeout, reset, unexpected/invalid response, or uncertain send | `ambiguous` | Never retry; reconcile. |
-| `in_flight` | process crash or local journal failure after permit | remains `in_flight` / `ambiguous` | Restart never resumes send; it durably closes/fences the lease and requires reconciliation. |
+| `in_flight` | process crash or local journal failure after permit without valid durable close | unchanged, quarantined | Restart never sends, closes, deletes, or CASes; bounded reconciliation reports only. |
 | `applied` | exact bounded verification matches | `reconciled` | Terminal known-applied. |
 | `applied` | verification cannot establish unique state | `operator_resolution_required` | No automatic retry. |
 | `ambiguous` | bounded evidence uniquely proves application | `reconciled` | Terminal known-applied. |
@@ -208,7 +220,7 @@ authenticated runner/session and cannot create a new permit or send.
 | `ambiguous` | zero/non-unique/unsupported evidence | `operator_resolution_required` | No automatic retry. |
 | `operator_resolution_required` | explicit local operator resolution with evidence digest | `resolved_applied` / `resolved_not_applied` | Terminal audit record; this action never contacts YouTrack. |
 
-A verified remote success followed by stdout failure or journal-finalization failure emits `WRITE_APPLIED_LOCAL_FAILURE` with do-not-retry guidance. The durable record may remain `in_flight`; restart still treats it as non-replayable, adds/validates the ambiguous closed lease without resending, and requires reconciliation. Gate 1B's closed contract includes apply-first and registry-first rotate/revoke/recovery orderings, invalid-enrollment contention before ledger read, crash before permit, crash after permit before send, crash after send before outcome, crash after durable outcome before close, close-add ambiguity, crash after close before active deletion, active-delete ambiguity, restart fencing, durable close-before-active-delete, and a dedicated ABA schedule that queues a competing acquisition between active equality-read and delete and proves zero competing Keychain calls until executor-guard release. Exact Security.framework dictionary/result-projection vectors, content-addressed binary barrier schedules, and exact event traces prove true two-party ordering without sleeps.
+A verified remote success followed by stdout or journal-finalization failure emits `WRITE_APPLIED_LOCAL_FAILURE` with do-not-retry guidance. Without a valid durable close, restart preserves the journal bytes and quarantines authority; it never adds a close on behalf of the original owner. Bounded remote reconciliation reports findings without CAS. Gate 1B covers registry/apply ordering, invalid enrollment before ledger read, all pre/post-permit and outcome/close crash boundaries, concurrent exact-code helpers and alternate bootstrap namespaces, owner capability quiescence before close, and active A replaced by B before stale A persistent-reference deletion. Exact Security.framework dictionary/projection vectors and deterministic binary barrier/event traces are required; process-local guard serialization is not a cross-process proof.
 
 The future authority contract retains JSON v1 while deliberately adding commands `mutation authority status` and `mutation authority recover` plus distinct exits 10..13 for wait, trusted recovery, artifact replacement, and reconfirmation; corruption and operator escalation use existing exit 1. Both require an explicit profile, include invocation identity in required success `meta`, reject plan/lease/force selectors, `--yes`, `--dry-run`, `--fields`, and raw output, and recovery requires trusted UI and never contacts YouTrack. The new authority surface never emits exit 9, while remote-uncertain reconciliation may retain it. These additions are not implemented in the current disabled slice; the later implementation must extend `.agents/rules/cli-contract.md`, `internal/errx`, generators, generated command/contract references, the tracked Cursor mirror through the rule sync, and embedded skill routing together, then pass sync/compiler gates.
 
@@ -235,8 +247,8 @@ The future authority contract retains JSON v1 while deliberately adding commands
 9. Implement the typed one-shot `issue.create` engine and reconciliation behind
    the disabled executor boundary together with the helper-owned coordinator,
    exact Security.framework dictionary/projection codecs, permit/closed
-   fencing, strict helper-profile expiry checks, and crash recovery that never
-   resumes a send.
+   owner quiescence, strict helper-profile expiry checks, and unclosed-crash
+   quarantine without any recovery mutation or replay.
 10. Build an unpublished exact candidate whose ordinary production factory
     wires only `issue.create`, repeat the two-pass Gate 1A sequence against its
     new descriptor, then run two-pass live Gate 1B on a disposable YouTrack

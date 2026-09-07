@@ -133,6 +133,24 @@ resolves that token with `SecCodeCopyGuestWithAttributes` and checks a pinned
 designated requirement. PID and filesystem path are diagnostics, never
 authority. Replacement, exec, PID reuse, peer-token failure, timeout, crash,
 EOF, malformed frames, and protocol disagreement fail before approval.
+The sealed outer bundle contains
+`Contents/Library/LaunchAgents/io.github.abigotado.youtrack-agent.approval.plist`.
+Explicit operator registration uses `SMAppService.agent(plistName:)`, subject
+to macOS approval, with its `BundleProgram` pointing relative to the outer
+bundle at the nested helper executable. The helper binds the exact ordinary
+path `/private/tmp/ytac-approval-<euid>/approval.sock` under the
+[trust-root endpoint contract](gate1a-trust-root.md#signed-bundle-and-identifiers):
+OS-derived canonical effective UID, checked `sun_path` capacity including NUL,
+nofollow-opened UID-owned mode-`0700` real parent, and a verified socket entry
+under that directory. Bind collision fails closed without unlinking an
+existing listener. Pathname checks are not authority and do not exclude
+same-UID replacement or denial of service. The CLI connects itself, and both
+peers validate actual connection-bound audit tokens and exact code before any
+protocol bytes. Neither a runner-selected socket nor
+a runner-preconnected descriptor is accepted. Disjoint fault-fixture listeners
+remain fixture-only. The fixed job label and launchd-parent constraint are
+lifecycle checks, not proof that another exact signed helper cannot run under
+the same UID in another bootstrap context.
 
 This boundary is grounded in Apple's published `LOCAL_PEERTOKEN` definition in
 the [XNU `sys/un.h` header](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/un.h),
@@ -222,31 +240,36 @@ write/enrollment surfaces remain mandatory.
 
 The helper also owns the only write-capable transport permit. Every process
 that could apply a mutation or commit a registry revision must acquire the one
-fixed Keychain-backed coordinator `active` account through the sole per-user
-launchd-managed helper server. One non-reentrant serialized authority executor
-owns every coordinator call; its guard spans active acquisition through close
-and exact read/delete cleanup, and after restart it spans recovery
-classification through cleanup. The Keychain active record remains the
-cross-client/restart lock. The
+fixed Keychain-backed coordinator `active` account. Each helper's non-reentrant
+serialized executor excludes only work inside its own process; the unique
+Keychain add alone provides cross-process exclusion. The
 registry peer supplies a canonical intent digest before any ledger/proposal
 work; the candidate is validated only after acquisition. The
 same authenticated connection is fenced by audit token, runner/session where
 applicable, lease ID, coordinator session, descriptor, final context, registry
 revision, plan, and journal revision. Apply may receive one exact-request
 permit only after durable `confirmed -> in_flight`; the helper retains the
-coordinator across the one send/outcome and durable close. Registry ceremonies
+coordinator across the one send/outcome. Only that uninterrupted authenticated
+owner can write normal close, after irrevocably quiescing every sign, permit,
+send, and commit capability, including queued callbacks. Registry ceremonies
 use the same coordinator and cannot interleave. Restart never resumes a
-permit: pre-permit state closes `failed_before_mutation`, while any post-permit
-uncertainty closes ambiguous with no retry. The exact dictionaries, projections,
+permit or manufactures a closed record. A non-owner finding active without a
+valid durable close returns `AUTHORITY_STATE_QUARANTINED` (exit 1), without
+journal CAS, close add, deletion, signing, key generation, permit, send, or
+registry commit. This holds after reboot, expiry, PID loss, or trusted UI.
+Historical remote reconciliation is bounded read/report only, without CAS.
+An already-closed lease can be cleaned only by its exact lookup's bounded,
+nonempty CFData persistent reference (at most 4,096 bytes), passed in
+`kSecMatchItemList`; there is no attributes-only delete fallback. The exact dictionaries, projections,
 records, linearization points, and recovery rules live in the registry
 protocol and are part of the Gate 1B conformance surface. That closed surface
 includes invalid enrollment before ledger read, durable-outcome-before-close,
 close-add ambiguity, post-close/pre-delete crash, active-delete ambiguity, and
-an ABA schedule that queues acquisition between equality read and delete and
-proves zero competing Keychain calls until the executor guard is released,
+an ABA schedule where independent helpers remove A and acquire B between
+lookup and deletion, proving that deleting A's stale reference cannot remove B,
 all driven by exact binary barrier schedules and event traces. Future failures
 use the additive JSON v1 commands and distinct future exits 10..13 frozen
-there; corruption remains existing exit 1 and no native status creates retry
+there; corruption and unclosed-owner quarantine remain existing exit 1 and no native status creates retry
 authority.
 
 Activation-smoke and post-grant sessions are not allowed to assume a registry
@@ -255,30 +278,25 @@ context that permits only one exact-artifact revision-1 enrollment after exact
 bounded absence probes for the production registry and coordinator services,
 signing-key namespace, journal root, and mutable runner state. The retained
 generation/SPKI/fingerprint/descriptor/session snapshot binds every later
-observation and evidence index. Final cleanup uses UI-fail/no-context queries
-and the bounded filesystem probe to prove all five domains empty. It runs only
-through the distinct root-token- and snapshot-bound `stage_cleanup` IPC after
-the exact attributed records, helper-created tags, Security.framework
-dictionaries, and delete order have been retained outside disposable state.
-The helper holds the serialized executor, requires coordinator `active`
-absent, exact-reads and byte-compares each item before its one delete, and
-first requires a durable acknowledged `delete_attempt_started` marker. An
-unresolved marker never permits another delete: absence reconciles terminally,
-while presence or unknown state quarantines for manual repair.
-Unknown/mismatched state is never deleted; expiry or uncertainty destroys the
-quarantined disposable user/VM and invalidates the run. Setup and cleanup
-contexts cannot sign, permit, send, or cross sessions.
+observation and evidence index. Final evaluation retains terminal/zero-send
+and export evidence; a trusted external supervisor then destroys the entire
+disposable host on success or failure. Only the closed allowlisted evidence
+leaves the host, not mutable Keychain, journal, session, credential, or
+private-key state. The root-bound disposal attestation specified by the
+artifact protocol must precede activation-grant signing after smoke and
+publication-envelope signing after post-grant verification. A runner
+self-report, empty-inventory claim, partial cleanup, or reused host cannot
+satisfy that condition. Live `stage_cleanup`, cleanup intent/progress, and
+ACK-ledger deletion authority are deferred from the first release. Setup
+context cannot sign approval receipts, permit, send, or cross sessions.
 Gate 1B also performs its own first token-bound enrollment on every fresh
 E1/E2 host. Its snapshot is baseline provenance, while later planned registry
 transitions must validate their current ledger state. It retains no authority
-to use release-stage cleanup. Stage cleanup ACKs have an explicit bounded,
-hash-linked ledger; recovery validates all entries and referenced objects
-before selecting a head, rejecting any partial or forked history.
-Recovery is a separate trusted-UI handshake: a new exact-code CLI and helper
-session validate the descriptor and retained evidence, while old audit-token/
-session values are historical only. Its fence can classify/CAS, close, and
-read-first clean a byte-equal active record, but cannot sign, acquire, permit,
-send, or commit.
+to use release-stage cleanup. Recovery-only sessions validate exact code and
+retained evidence but cannot adopt the old owner. They classify unclosed state
+as quarantined, or delete only a validated already-closed active item's exact
+persistent reference. They cannot journal-CAS, synthesize close, sign, acquire,
+permit, send, or commit.
 
 The helper validates its CMS profile and requires trusted current time to be
 strictly before the descriptor-bound `helper_profile_expires_at` at ordinary launch,
@@ -287,8 +305,8 @@ signature, registry commit, permit issuance, and the last pre-send fence. No
 existing connection, cached validation, Gate evidence, or already confirmed
 receipt survives that cutoff. Only the exact launchd-managed recovery-only
 launch and peer authentication may proceed after expiry, and only for status,
-trusted-UI fencing, terminal journal CAS, close reconciliation, and
-executor-guarded byte-equal active cleanup; it cannot enter ordinary auth,
+unclosed-state quarantine, and persistent-reference cleanup of a validated
+already-closed lease; it cannot journal-CAS, synthesize close, enter ordinary auth,
 sign, acquire, commit, permit, construct transport, or send.
 
 Ordinary approval never enrolls. Enrollment has a distinct challenge and

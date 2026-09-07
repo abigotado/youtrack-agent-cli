@@ -5,10 +5,16 @@
 - Scope completed by this report: protocol-contract spike only
 - Production approval adapter: `approval.Unsupported`
 
-The accepted [trust-root and package-topology ADR](../docs/gate1a-trust-root.md)
+The partially accepted [trust-root and package-topology ADR](../docs/gate1a-trust-root.md)
 freezes the identifiers, Team ID input, Keychain namespace, enrollment,
 rotation/recovery, signed layout, and evidence order. It is a design result,
 not Gate evidence.
+
+Open P1: destructive Gate 1B phases require isolated authorized subruns and a
+parent evidence aggregator. Resetting a quarantined host invalidates its sole
+enrollment/session, so the present phase catalog cannot be executed or used for
+Gate token issuance, E1/E2 acceptance, activation, or publication. Resolving
+that topology requires a separate reviewed ADR; the native Gate remains blocked.
 
 The normative [registry/ceremony codec](../docs/gate1a-registry-protocol.md)
 and [exact-artifact authorization](../docs/gate1a-artifact-authorization.md)
@@ -150,18 +156,21 @@ and the explicit future exit 10..13 contract, with corruption on existing exit
 embedded-skill references. The implementation change also updates
 `.agents/rules/cli-contract.md`, regenerates its tracked Cursor mirror, and
 passes rule-sync/provider-compiler checks.
-That candidate must implement one launchd-managed helper, its serialized
-authority executor, and the fixed-active Keychain coordinator shared by all
-registry commits and apply: the guard spans acquisition through close/read-
-delete cleanup, the Keychain lease survives restarts, durable
-`confirmed -> in_flight`, one exact-request permit, one send/outcome, durable
-closed record, restart fencing, and no retry after permit. Gate 1B's closed
+That candidate must implement the fixed-active Keychain coordinator shared by
+all registry commits and apply across concurrently valid same-user helpers.
+LaunchAgent lifecycle and a process-local guard do not prove global singleton
+authority. The lease survives restarts; the owner follows durable
+`confirmed -> in_flight`, one exact-request permit, one send/outcome,
+irreversible capability quiescence, then durable normal close. Unclosed leases
+stay quarantined even after reboot; remote reconciliation only reads/reports
+without journal CAS. Gate 1B's closed
 plan must exercise both apply-first and registry-first rotation/revocation/recovery,
 concurrent invalid enrollment before ledger read, crash before permit, crash
 after permit before send, crash after send before outcome, crash after durable
 outcome before close, close-add ambiguity, crash after close before active
-delete, active-delete ambiguity, an acquisition queued between equality read
-and delete with zero competing Keychain work until guard release, and exact Security.framework dictionary and
+delete, active-delete ambiguity, replacement active B surviving stale deletion
+of A's persistent reference, two valid helpers/alternate bootstrap namespaces,
+queued callbacks unable to send after normal close, and exact Security.framework dictionary and
 bounded-projection vectors. Those concurrency cases use the signed plan's exact
 two-party binary barrier schedule and content-addressed event trace, never
 sleeps or scheduler timing. The closed 26-case Gate 1B set starts with its own
@@ -179,8 +188,8 @@ permits the production activation grant. A second exact-artifact verification
 then exercises the real grant-bound context and schema-v3 receipts on every
 architecture under deny-only runner restrictions before publication.
 The same descriptor must bind CMS-validated `helper_profile_expires_at`;
-the closed 100-vector matrix proves just-before/equality/after/between-checks at
-all 25 Gate, publication, install, runtime, peer-authentication, coordinator,
+the closed 88-vector matrix proves just-before/equality/after/between-checks at
+all 22 Gate, publication, install, runtime, peer-authentication, coordinator,
 registry-sign/commit, permit, and final pre-send boundaries. Equality and later
 fail without grace or evidence carry-forward.
 
@@ -209,29 +218,15 @@ the post-grant plans contain exactly 6 each. Every plan starts with a stage-
 token/setup-context-limited exact-artifact enrollment from a canonical empty
 registry/coordinator/key/journal/session inventory, binds the retained
 revision-1/generation-1 snapshot to every later observation/index/set, and
-ends with a proved-empty cleanup. Operation observations have empty assertion
+ends with terminal/replay-denial evidence and sanitized export. Operation observations have empty assertion
 IDs; only a case-final runner evaluation emitted after all transcript results
-can pass the case. Failure cleanup is bounded, and an unproved cleanup destroys
-the quarantined disposable user/VM while invalidating all session output.
-
-The cleanup step is now frozen as a separate root-token-bound `stage_cleanup`
-IPC authority. Before its first delete the runner retains the exact cleanup
-context, setup evidence/snapshot, helper-generated key list, attributed
-registry/coordinator/key bytes, Security.framework dictionaries, and ordered
-operations outside disposable state. The sole helper executor requires active
-coordinator absence and performs exact-read/byte-compare/delete with read-first
-restart classification. A durable acknowledged fixed-attempt
-`delete_attempt_started` marker precedes each sole invocation; unresolved exact
-absence terminalizes, while presence/unknown quarantines without re-delete.
-ACK is permitted only after both marker and cross-bound `delete_pending`
-progress pass same-directory exclusive-`0600` canonical write/file fsync,
-collision-safe publication, directory fsync, and no-follow reopen/hash checks;
-any detectable partial pair or pre-ACK fault quarantines and permits no delete.
-Operation results use their dedicated digest domain and the exhaustive
-pre-read/direct-result/ambiguous-result/pending-marker field-shape table.
-Unknown, mismatched, expired, or unverifiable partial
-cleanup cannot pass and triggers quarantine/destruction without further
-deletion.
+can pass the case. The external trusted supervisor destroys the whole disposable
+host after export, on both success and failure. Root-bound disposal evidence
+must precede the activation-grant signature after smoke and the publication-
+envelope signature after post-grant verification. Missing or uncertain disposal
+blocks every successor signature and host reuse. Live `stage_cleanup`,
+deletion ACK-ledger recovery, and helper-produced empty-inventory cleanup
+proofs are explicitly deferred; no native cleanup implementation is claimed.
 
 Only the first signed Cask build may follow these gates. A second
 write-capable release remains blocked until its separate rollover decision and

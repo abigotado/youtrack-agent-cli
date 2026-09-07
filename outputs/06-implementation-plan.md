@@ -4,9 +4,14 @@ Status: In progress; existing phases 2-4 reach the fail-closed Gate 1A
 boundary, while the native coordinator, profile-expiry enforcement, Gates, and
 writes described below are not implemented
 
-## Accepted remaining order
+## Remaining order, blocked before native Gate freeze
 
-The trust and activation dependencies are now fixed:
+The safety dependency order below is conditional. Open P1: quarantining crash
+phases cannot continue within the current one-enrollment host/session. First
+design and review isolated root-authorized subruns, target/reset binding, and
+parent evidence aggregation. Until then the Gate 1B phase table is a required
+behavioral catalog, not an executable closed contract; do not freeze command
+digests, issue Gate 1B tokens, accept E1/E2 evidence, activate, or publish.
 
 1. Freeze the signed bundle, Team ID parameter, peer requirements,
    data-protection Keychain namespace, enrollment/rotation/recovery, and package
@@ -33,22 +38,24 @@ The trust and activation dependencies are now fixed:
    and clean-reset E2 Gate 1A evidence sets on every declared architecture,
    including the closed first-install/reinstall/rollback/replacement/uninstall
    set, Keychain-migration cancellation/interruption/partial-failure set, and
-   all 100 profile-expiry boundary vectors;
+   all 88 profile-expiry boundary vectors;
    only then issue the confirm-only provisional authorization, pass its
    network-disabled ordinary-command smoke set. Begin each smoke/post-grant
    capability plan with the token/context-limited exact-artifact revision-1
    enrollment from a canonical empty five-domain inventory, bind its retained
-   registry snapshot to every later observation/index/set, end with a proved-
-   empty cleanup, and accept assertions only in a case-final runner evaluation
-   after all operation/transcript results. Then issue the production
+   registry snapshot to every later observation/index/set, retain terminal and
+   replay-denial evidence, and accept assertions only in a case-final runner
+   evaluation after all operation/transcript results. Export sanitized evidence,
+   have the external supervisor destroy the whole disposable host, and verify
+   its root-bound disposal attestation. Only then issue the production
    activation grant. Run the grant-bound ordinary-command verification on every
    architecture under its deny-only runner token; failed evidence quarantines
    the unpublished grant and candidate.
 5. Implement canonical fingerprints, typed `issue.create`, bounded
-   reconciliation, and the sole launchd-managed helper's serialized
-   apply-authority executor plus fixed-active cross-client Keychain coordinator
-   while the current repository apply remains disabled. The executor guard
-   spans every acquisition and exact read/delete cleanup interval. Freeze the
+   reconciliation, and the fixed-active cross-process Keychain coordinator
+   while the current repository apply remains disabled. SMAppService manages
+   the sealed embedded LaunchAgent lifecycle, not global singleton authority;
+   the local guard only serializes one process. Freeze the
    exact Keychain dictionaries/projections and active/permit/closed records;
    add canonical journal v2 with strict atomic prepared-only v1 migration and
    quarantine; add only `mutation authority status` and trusted-UI
@@ -58,7 +65,10 @@ The trust and activation dependencies are now fixed:
    `.cursor/rules` mirror through `.agents/scripts/sync-rules.py`, and pass the
    rule-sync and machine-local provider-compiler checks;
    require `confirmed -> in_flight` before the sole request-bound permit and
-   durable close before releasing registry serialization.
+   irreversible owner capability quiescence before durable normal close.
+   Non-owners quarantine every unclosed lease without journal CAS, even after
+   restart/reboot/expiry. Only an already-closed item may be deleted by its exact
+   persistent reference; stale deletion must leave a replacement item intact.
 6. Produce an unpublished exact candidate with ordinary `issue.create` apply
    wired, rerun the two-pass Gate 1A sequence for its new descriptor, then run
    the closed 26-case two-pass live Gate 1B on a disposable YouTrack 2026.2
@@ -71,26 +81,20 @@ The trust and activation dependencies are now fixed:
    ledger read, crash before permit, crash after permit before send, crash after
    send before outcome, crash after durable outcome before close, close-add
    ambiguity, crash after close before active deletion, active-delete ambiguity,
-   acquisition attempted between active equality read and delete with zero
-   competing Keychain work before executor-guard release, restart
-   fencing/durable close, exact binary barrier/trace assertions, exact
+   independent cleanup of active A followed by acquisition of B before stale
+   persistent-reference deletion of A, two valid helpers in separate bootstrap
+   namespaces, unclosed restart/reboot quarantine, queued-send versus normal
+   close, exact binary barrier/trace assertions, exact
    authority status/recover envelopes/exits, and v1-to-v2 migration/quarantine.
    Issue only the `issue.create` provisional authorization
    after E2, run the exact per-architecture network-isolated dispatch-boundary
-   smoke under the same setup-first/snapshot-bound/cleanup-last case contract,
+   smoke under the same setup-first/snapshot-bound/export-last case contract,
    and issue the production activation grant only after that complete
-   evidence set passes. Run the grant-bound per-architecture ordinary-command
-   verification and quarantine any failure. Implement final deletion only as
-   the distinct signed `stage_cleanup` IPC: retain its complete attributed
-   intent/progress outside disposable state before the first delete, serialize
-   exact-read/byte-compare/delete in the sole helper executor, and require the
-   durable acknowledged fixed-attempt marker before invocation. Recovery of an
-   unresolved marker may only terminalize exact absence or quarantine; it must
-   never re-delete. Publish both marker and cross-bound `delete_pending`
-   progress from same-directory exclusive `0600` no-follow temps with canonical
-   write/file fsync, collision-safe no-replace publication, directory fsync,
-   and exact no-follow reopen before ACK. Destroy/quarantine rather than touch
-   unknown state.
+   evidence set and external whole-host disposal pass. Run the grant-bound
+   per-architecture ordinary-command verification and quarantine any failure.
+   Export sanitized evidence, destroy each whole disposable host externally,
+   and retain root-bound disposal evidence before publication-envelope signing.
+   Do not implement live stage deletion or ACK-recovery authority in this MVP.
 7. Sign the root publication envelope over the exact post-grant plan and
    complete evidence set, then reuse the retained app-only payload to build one
    outer delivery archive containing the app, authority objects, envelope,
@@ -212,7 +216,9 @@ Exit criteria:
 8. Implement the helper-owned coordinator shared by apply and every registry
    commit: fixed active-account acquisition, exact-request permit after
    `in_flight`, same-connection fences, durable closed record, narrow active
-   cleanup, and restart recovery that never resumes a send.
+   persistent-reference cleanup only for already-closed leases, and read-only
+   quarantine of any unclosed lease after restart. Quarantined reconciliation
+   reads/reports remote evidence without journal CAS or replay.
 9. Bind the CMS-validated helper profile expiry into the descriptor and enforce
    the strict cutoff at Gate/publication/install/runtime and twice around
    permit/send.
@@ -329,8 +335,8 @@ Do not copy built-in mutation scripts and call them “guarded” without these 
 | Receipt | Tamper, expiry, replay, wrong profile/account/project/payload/schema/precondition, display-to-sign swap |
 | Mutation | Pre-send failure, server rejection, timeout before/after commit, process crash |
 | Reconciliation | Unique success, zero match, multiple match, unspecified comment order, unrelated concurrent update |
-| Local authority | Single launchd helper; serialized guard; acquisition-between-read/delete ABA denial; exact status/recover JSON + invocation meta/flags/exits; prepared-only v1 migration and all-other-state quarantine |
-| Release stages | Exact setup-first 5/6/6/6 case lists; distinct token-bound `stage_cleanup`; immutable attributed intent/progress; exact read/compare; no-follow temp + file/directory fsync + exclusive publish + reopen-verified marker/pending-progress pair before ACK and sole delete; partial-pair/pre-ACK fault quarantine with zero delete; unresolved-marker absence terminalization and present/unknown quarantine with zero re-delete; exhaustive operation-result shapes/domain; final empty inventory and case-final assertions |
+| Local authority | Concurrent valid helpers/alternate bootstrap namespaces; fixed-active unique add; owner quiescence before close; unclosed restart/reboot quarantine; stale persistent-reference deletion of A leaves B intact; exact status/recover JSON + invocation meta/flags/exits; prepared-only v1 migration |
+| Release stages | Exact setup-first capability plans; snapshot-bound terminal/replay-denial evidence; case-final assertions; sanitized export followed by external whole-host destruction; root-bound disposal attestation before successor signature; no live stage deletion or empty-inventory cleanup claim |
 | Secrets | Config/argv/log/error/crash-output scan |
 | Portability | Same skill scenarios in Codex and Claude Code |
 

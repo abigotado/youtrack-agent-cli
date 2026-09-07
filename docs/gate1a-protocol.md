@@ -85,8 +85,14 @@ journal revision, and
 connected CLI audit token are copied into the active/permit chain. The durable
 `confirmed -> in_flight` CAS precedes the sole permit; the permit precedes the
 sole send; the helper excludes every registry commit until a durable closed
-record exists. Crash before permit is `failed_before_mutation`. Any uncertainty
-at or after permit is ambiguous, non-replayable, and read-only reconcile only.
+record exists and the original uninterrupted authenticated owner has
+irrevocably quiesced every sign, permit, send, and commit capability, including
+queued callbacks. A crash without valid durable close quarantines the lease:
+permit absence proves zero authorized mutation, not permission for a new actor
+to CAS its journal, manufacture close, or delete active. Any uncertainty
+at or after permit is ambiguous, non-replayable, and read/report-only reconcile
+without journal CAS. Restart, reboot, expiry, PID loss, and trusted UI do not
+release unclosed state.
 Neither a receipt signature nor an `in_flight` state alone authorizes network
 I/O. The helper also requires trusted current time strictly before the
 descriptor's `helper_profile_expires_at` at confirmation, coordinator
@@ -95,7 +101,9 @@ acquisition, permit issuance, and immediately before send.
 Expiry of the applicable Gate, smoke, or post-grant runner token has one closed
 state rule: before coordinator acquisition a confirmed plan becomes `expired`;
 after acquisition with proven permit absence its receipt is burned and the
-existing lease closes as `failed_before_mutation` with zero dispatch. At or
+existing uninterrupted owner may close as `failed_before_mutation` with zero
+dispatch only after irrevocable capability quiescence. A replacement actor
+must quarantine instead. At or
 after permit, an unresolved outcome is `ambiguous` and no new send is allowed.
 Existing durable outcomes, including `activation_smoke_consumed`, are preserved,
 never downgraded by expiry. The authenticated session may only finish the
@@ -105,8 +113,8 @@ Vectors cover token equality/after at each boundary, both sides of permit,
 durable-success preservation, and consumed-smoke preservation.
 The registry protocol's future command/exit contract preserves the JSON v1
 envelope but deliberately adds exits 10..13 for wait, trusted recovery,
-artifact replacement, and reconfirmation; corruption/operator escalation uses
-existing exit 1. The future
+artifact replacement, and reconfirmation; corruption/operator escalation and
+`AUTHORITY_STATE_QUARANTINED` use existing exit 1. The future
 authority surface never emits exit 9; remote-uncertain reconciliation may
 retain it. The four additive exits do not exist in the current disabled
 production slice and never authorize retry.
@@ -150,13 +158,13 @@ or helper discovery mechanism. Those security-sensitive contracts require a
 separate reviewed decision; no implementation may infer one from these data
 fixtures.
 
-Likewise, neither the release-stage setup context nor its distinct cleanup
-context is a receipt-signing context. The later `stage_cleanup` IPC authority
-is defined only by the registry and artifact-authorization protocols and is
-accepted solely with its exact root-signed smoke/post-grant token, retained
-setup snapshot, and immutable attributed cleanup intent. It cannot sign this
-receipt (or schema v3), acquire a permit, send, or cross sessions; no field in
-this receipt grants deletion authority.
+Likewise, the release-stage setup context is not an approval receipt-signing
+context. Live `stage_cleanup`, cleanup intent/progress, and ACK-ledger deletion
+authority are deferred from the first release; no receipt field grants such
+authority. Smoke/post-grant terminal and export evidence is followed by
+externally attested destruction of the entire disposable host before the
+successor root signature. The root-bound disposal attestation is historical
+release evidence, never runtime approval or deletion authority.
 
 ## Identifiers and time
 

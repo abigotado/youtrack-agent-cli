@@ -77,26 +77,25 @@ The recommended common component is a dedicated `youtrack-agent-cli`, not direct
 - pinned HTTPS boundaries for YouTrack and OAuth, allowing a cross-origin external Hub only when explicitly configured, with an explicit self-hosted CA policy when needed;
 - deterministic, network-free plan generation;
 - a short-lived confirmation receipt bound to the complete normalized intent and precondition, minted through a channel the agent cannot approve for itself;
-- one launchd-managed helper with a serialized authority executor and a
-  helper-owned fixed-active cross-client authority coordinator shared with
+- a helper-owned fixed-active cross-process authority coordinator shared with
   every approval-registry commit: durable `in_flight`, one exact-request permit, one
   send/outcome, durable close, and no restart/retry after permit, proven by
   exact two-party barrier schedules through enrollment and close/delete faults;
-  registry acquisition binds a pre-read canonical intent, while recovery uses
-  a new exact-code actor/session and read-first idempotent fencing cleanup; the
-  executor guard prevents acquisition between byte-equality read and delete;
+  registry acquisition binds a pre-read canonical intent. LaunchAgent lifecycle
+  and process-local executor guards are not cross-process security boundaries.
+  Only the uninterrupted owner closes after irrevocable capability quiescence;
+  an unclosed lease quarantines all later authority even after restart/reboot.
+  Already-closed cleanup uses the exact persistent reference and cannot delete
+  a replacement active item;
 - setup-first activation-smoke and post-grant plans whose stage token/context
   authorizes only one exact-artifact revision-1 enrollment from a proved empty
   disposable inventory, whose retained registry snapshot binds every later
-  observation/index/set, and whose final cleanup proves all setup domains empty;
-- a distinct root-token-bound `stage_cleanup` authority whose immutable
-  pre-delete intent binds that setup evidence, helper-created key order,
-  complete attributed record/key bytes, exact dictionaries, and operation
-  order; the serialized helper exact-reads/byte-compares, durably acknowledges
-  a fixed-attempt marker plus cross-bound `delete_pending` progress only after
-  exclusive no-follow publication, file/directory fsync, and exact reopen,
-  before the sole delete, and terminalizes absence or
-  quarantines an unresolved marker without re-deletion;
+  observation/index/set, and whose final observations prove terminal state and
+  replay denial;
+- external trusted-supervisor destruction of each disposable host after
+  evidence export and before the successor activation-grant/publication
+  signature, bound by disposal evidence. Live `stage_cleanup`, ACK-recovery,
+  and helper-produced empty-inventory cleanup proofs are deferred;
 - case-final assertion evaluation: operation observations carry no assertion
   IDs and only the runner's ordered post-transcript final observation can pass
   a case;

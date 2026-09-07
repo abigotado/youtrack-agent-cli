@@ -23,9 +23,11 @@ workflow commands, attachments, and raw REST paths.
 6. Report `reconciled`, `failed_before_mutation`, or
    `operator_resolution_required`. A timeout, reset, truncated response, proxy
    error after send, or crash/uncertainty at or after permit is ambiguous and
-   must never be retried automatically. A provable failure after `in_flight`
-   but before permit is `failed_before_mutation`; it burns the receipt and
-   requires a new plan rather than replay.
+   must never be retried automatically. Only an uninterrupted owner with a
+   valid durable close can prove `failed_before_mutation` and permit a new
+   plan. An unclosed lease after a crash is quarantined: do not delete it,
+   re-confirm, or treat restart/reboot as recovery. While quarantined, bounded
+   remote reconciliation reports evidence without changing the journal.
 
 The REST executor cannot make project membership validation and issue mutation
 atomic; disclose that TOCTOU risk. A strict project-bound profile requires the

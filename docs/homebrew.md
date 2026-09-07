@@ -18,7 +18,8 @@ evidence, and removing Gatekeeper quarantine is never an acceptable workaround.
 The [Gate 1A trust-root ADR](gate1a-trust-root.md) now fixes the complete macOS
 delivery shape before helper implementation:
 
-- one signed and notarized `YouTrackAgent.app` with its nested helper;
+- one signed and notarized `YouTrackAgent.app` with its nested helper and
+  sealed `Contents/Library/LaunchAgents/io.github.abigotado.youtrack-agent.approval.plist`;
 - a Cask or private tap that installs the finished bundle and links its
   contained CLI, never a source Formula that rebuilds the helper;
 - the detached exact-artifact descriptor, provisional authorization,
@@ -35,6 +36,17 @@ delivery shape before helper implementation:
   signed app.
 
 No installer or post-install hook may silently migrate Keychain authorization.
+The sealed LaunchAgent has fixed label
+`io.github.abigotado.youtrack-agent.approval` and `BundleProgram` equal to
+`Contents/Library/Helpers/YouTrackAgentApproval.app/Contents/MacOS/YouTrackAgentApproval`,
+relative to the outer bundle. Registration with
+`SMAppService.agent(plistName:)` requires an explicit operator action and is
+subject to macOS approval; Cask installation does not register or launch it.
+The helper binds the fixed per-user ordinary AF_UNIX endpoint, and each CLI
+connects itself for connection-bound `LOCAL_PEERTOKEN` validation. The job
+label and launchd-parent constraint do not establish a global singleton:
+ordinary same-UID launchctl and alternate bootstrap contexts remain in scope,
+and unique Keychain `active` acquisition supplies cross-process exclusion.
 The operator must run the explicit `auth migrate-keychain --profile NAME --yes`
 flow, which rebinds the existing item without printing or returning its secret.
 The closed Gate 1A case set in
@@ -69,12 +81,16 @@ containing archive; the reviewed Cask pins the archive bytes, while the root
 signature binds every security-relevant contained object without a recursive
 hash cycle. The closed tree includes, per architecture, the setup-only
 enrollment context, empty pre-enrollment inventory, retained revision-1
-registry snapshot, case-final evaluations, and final empty-inventory cleanup
-proof, including the immutable attributed cleanup-intent/progress and
-helper/runner evidence digests. The prepublication helper accepts deletion only
-through the exact root-token-bound `stage_cleanup` IPC and reconciles each
-byte-equal item under its serialized executor, with one durable acknowledged
-marker before the sole delete and no re-delete for an unresolved marker. Session-bound stage
+registry snapshot, case-final evaluations, and external whole-host disposal
+attestations. The trusted external supervisor destroys each disposable host
+after the closed evidence export; smoke disposal precedes activation-grant
+signing, and post-grant disposal precedes publication-envelope signing. The
+root-bound attestations bind the exact stage/session, evidence index, export
+manifest, and supervisor-observed host, without granting runtime authority.
+Mutable Keychain, journal, session, credential, and private-key state is never
+exported or reused. Live `stage_cleanup`, intent/progress, ACK-ledger deletion
+authority, and empty-inventory cleanup proofs are deferred from this release.
+Session-bound stage
 tokens remain historical digests only and are not shipped, so installed or
 ordinary production processes receive no such deletion authority.
 
@@ -90,11 +106,13 @@ time to be strictly earlier. The same strict cutoff is repeated at helper
 launch, confirmation, coordinator acquisition, permit issuance, and immediately
 before send; a Cask installed before expiry does not remain write-capable after
 it. After expiry, only the exact launchd-managed helper's recovery-only launch
-and peer authentication may expose bounded status, trusted-UI fencing, journal
-CAS, close reconciliation, and serialized byte-equal active cleanup; ordinary
-authority remains denied. Installation also validates that the fixed helper
-identifier is registered as one per-user launchd server and that no direct or
-second listener mode is present. Homebrew update or reinstall cannot refresh that field without producing a
+and peer authentication may expose bounded status and exact persistent-reference
+cleanup of an already validly closed lease. Unclosed state remains quarantined
+with no journal CAS, synthesized close, or deletion, even after reboot or fresh
+user presence; ordinary authority remains denied. Installation verifies the
+sealed LaunchAgent declaration and intended lifecycle but never assumes that
+launchd prevents another exact signed helper under the same UID. Homebrew
+update or reinstall cannot refresh that field without producing a
 new signed artifact that starts again at E1.
 Homebrew's checksum detects a changed download; the offline-root signature and
 runtime Security.framework checks remain the authenticity and execution

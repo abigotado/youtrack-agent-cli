@@ -63,11 +63,12 @@ paths reject the Gate context type.
    persists the matching complete `authority_evidence` branch and its exact
    canonical bytes/digests with the receipt before this transition. Branches
    are mutually exclusive and cannot supply missing fields for one another.
-   Before reading mutable authority it enters the sole launchd-managed
-   helper's serialized authority executor, takes its guard, and acquires the
-   helper-owned fixed-active Keychain coordinator also used by every
-   enrollment/rotation/revocation/recovery commit. The guard remains held
-   through close and exact-read/delete cleanup. While holding that guard and
+   Before reading mutable authority it enters its helper process's serialized
+   executor and acquires the fixed-active Keychain coordinator also used by
+   every enrollment/rotation/revocation/key-recovery commit. The executor guard
+   orders only local callbacks. The fixed `SecItemAdd` primary key excludes
+   independent same-UID helpers, including alternate bootstrap contexts;
+   launchd registration is not a security singleton. While holding the
    coordinator, the helper revalidates the complete
    registry, the applicable context, and trusted current time strictly before the
    descriptor's `helper_profile_expires_at`. Only after the durable
@@ -77,30 +78,43 @@ paths reject the Gate context type.
    and closed-record creation is the fencing/close linearization point.
    Retained public keys and historical authorization contexts verify audit and
    reconciliation evidence only. Any intervening registry or activation
-   transition cancels confirmation rather than authorizing apply. A crash
-   before permit is `failed_before_mutation`; a crash or uncertainty at
-   or after permit is ambiguous and never retried. Expiry observed before
+   transition cancels confirmation rather than authorizing apply. Every crash
+   without a valid durable close quarantines the lease, including before
+   permit and after a durable journal outcome. A permit makes uncertain remote
+   outcome ambiguous and never retryable. Expiry observed before
    coordinator acquisition transitions `confirmed -> expired`; expiry after
    acquisition while no permit exists burns the receipt and closes
    `failed_before_mutation` with zero dispatch. The final pre-send fence
    repeats the profile-expiry, active-item, permit, connection, audit-token,
    session, journal-revision, registry, and context checks. An eligible plan
    sends at most one mutating request and performs bounded verification.
-   Gate 1B proves this with exact two-party barrier schedules covering
+   Before normal close is added, the original uninterrupted owning connection
+   irreversibly quiesces every send/sign/permit/commit capability, including
+   queued callbacks and outstanding operations. Only this owner may persist
+   the terminal journal outcome and exact normal close. No restarted or
+   reconnected helper synthesizes close or CASes that journal. Gate 1B proves
+   this with exact two-party barrier schedules covering
    rotate/revoke/recovery, invalid enrollment, every pre/post-permit crash,
    durable-outcome-before-close, close-add ambiguity, post-close crash, and
-   active-delete ambiguity plus an explicit acquisition-between-equality-read-
-   and-delete ABA attempt that remains queued with zero Keychain calls until
-   guard release. The future authority command contract assigns distinct exits
-   10..13 to wait, trusted recovery, artifact replacement, and reconfirmation;
-   corruption/operator escalation uses existing exit 1 and the new authority surface never emits
+   active-delete ambiguity and an independent-process ABA schedule. Cleanup
+   validates already durable active/permit/closed/outcome linkage, then deletes
+   only the bounded opaque persistent reference obtained in the same exact
+   read as A's attributes/value. If A is deleted and B acquired meanwhile,
+   stale A deletion cannot remove B. No attributes-only fallback is permitted.
+   The future authority command contract assigns distinct exits 10..13 to
+   wait for a local live owner, trusted already-closed cleanup, artifact
+   replacement, and reconfirmation after an uninterrupted closed pre-permit
+   abort. Quarantine and corruption use existing exit 1; the new authority surface never emits
    exit 9, while remote-uncertain reconciliation may retain it.
    None is retry permission.
 5. `mutation reconcile` is read-only. Once a plan is `in_flight`, it validates
    the persisted historical receipt, exact authority sidecars, root signatures,
    descriptor/grant hash chain, context, and capability but does not require
    that authority to remain active. It may establish a unique applied result;
-   otherwise it records `operator_resolution_required`. In the controlled Gate
+   otherwise it reports `operator_resolution_required`. While the coordinator
+   is quarantined, even a unique remote match is a transient report only:
+   no journal CAS, close add, active deletion, signing, permit, or replay is
+   allowed. In the controlled Gate
    1B path, the equivalent validation uses the retained signed Gate token,
    canonical Gate context, and complete registry chain under the still-
    authenticated matching Gate runner session. Token expiry after the recorded
@@ -111,8 +125,12 @@ When execution is enabled, normal terminal states are `reconciled`, `failed_befo
 `operator_resolution_required`. A timeout, reset, malformed/truncated response,
 proxy failure after send, or any failure at or after permit issuance is
 ambiguous and never authorizes replay. Merely reaching `in_flight` is not that
-boundary: a provable crash/failure after its CAS but before permit is
-`failed_before_mutation` and requires a new confirmation.
+boundary: the uninterrupted owner may durably close a proven pre-permit
+failure as `failed_before_mutation`, then require a new confirmation. A crash
+without durable close cannot take that transition. Restart, reboot, expiry,
+PID loss, and user presence cannot free an unclosed lease; it remains
+`AUTHORITY_STATE_QUARANTINED` pending a separately reviewed recovery/reset
+protocol. Read-only commands remain available.
 
 ## Future journal record v2 and migration
 
@@ -139,20 +157,20 @@ retained SPKI cannot satisfy this branch.
 `coordinator_evidence` is null before acquisition or one compact canonical
 object with fields `schema_version` integer `1`, `lease_id`,
 `active_bytes_base64url`, `active_sha256`, `permit_bytes_base64url`,
-`permit_sha256`, `normal_closed_bytes_base64url`, `normal_closed_sha256`,
-`recovery_closed_bytes_base64url`, `recovery_closed_sha256`,
-`recovery_actor_unique`, `recovery_actor_audit_token_sha256`,
-`recovery_helper_session_id`, and `last_fenced_at`, in that order. Byte fields
+`permit_sha256`, `normal_closed_bytes_base64url`, `normal_closed_sha256`, and
+`last_fenced_at`, in that order. Byte fields
 are unpadded base64url of exact secret-free canonical coordinator objects.
 Permit fields are both null before permit; normal-closed fields are both null
-until the normal terminal CAS; recovery-closed fields and all recovery actor/
-session fields are all null or all non-null and may become non-null only after
-the recovery-only fence. The normal terminal CAS writes outcome and exact
-normal closed bytes in the same fsync/rename transaction. If recovery later
-proves that normal close absent, a second post-fence CAS may append recovery
-closed bytes that preserve the outcome and bind the recovery actor/session;
-both pairs then remain as history, but only the recovery digest may be added.
-Close recovery never reconstructs different bytes from decoded fields.
+until the normal terminal CAS. `last_fenced_at` is null before the original
+owner has irreversibly quiesced all capabilities; it is then the UTC whole-
+second timestamp of that completed quiescence, never a restart or new actor's
+claim of ownership. The normal terminal CAS writes that timestamp, outcome,
+and exact normal closed bytes in one fsync/rename transaction. The owner alone
+may add those bytes to Keychain once. A journal's closed candidate without an
+actual matching durable Keychain close cannot authorize cleanup. There are no
+recovery-close or recovery-actor fields and no recovery journal CAS. A later
+cleanup only validates existing durable normal closure and deletes that exact
+active item's persistent reference; the journal is unchanged.
 
 Migration reads a v1 record under its existing per-plan lock with no-follow,
 size, owner, mode, canonical decode, and revision checks. Only `prepared` with

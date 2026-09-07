@@ -4,6 +4,11 @@ Status: **CLI direction approved; fail-closed first slice implemented locally**
 Evidence cutoff: **2026-09-01**
 Target baseline: **YouTrack 2026.2**, Codex, and Claude Code
 
+Native Gate readiness: **BLOCKED**. Quarantine safety is accepted, but the
+destructive Gate 1B catalog is not an executable closed plan. Fresh subrun
+authorization, target/reset binding, and parent evidence aggregation need a
+separate reviewed ADR before Gate token issuance or release authority.
+
 ## Recommended decision
 
 Adopt a split architecture:
@@ -14,12 +19,12 @@ Adopt a split architecture:
 4. Make execution pluggable: a REST executor is acceptable only with an explicit TOCTOU residual-risk decision; a reviewed custom MCP app is required when project allowlisting must be enforced atomically in the same YouTrack transaction as the mutation.
 
 The future local apply boundary is now fixed independently of that executor
-choice: one launchd-managed helper and serialized authority executor own one
-fixed-active Keychain coordinator that serializes every registry commit
+choice: a unique fixed-active Keychain add, not launchd singleton assumptions,
+serializes every registry commit across same-user helper processes
 with `confirmed -> in_flight -> one exact-request permit -> one send/outcome ->
 durable close`, and the descriptor-bound helper-profile expiry is checked
 strictly through the final pre-send fence. The closed Gate contract adds exact
-closed 23-case Gate 1A including install/migration fault cases, a 100-vector
+closed 23-case Gate 1A including install/migration fault cases, an 88-vector
 expiry matrix, and a closed 26-case Gate 1B with its own token-bound enrollment
 on each fresh E1/E2 host and deterministic schedules through
 enrollment, close, active-delete ambiguity, and a
@@ -29,17 +34,17 @@ so confirmation is testable before provisional authorization. These receipts
 are rejected by every non-Gate authority path.
 Activation-smoke/post-grant plans are setup-first (5/6 and 6/6 cases by
 capability), bind a retained empty-inventory enrollment snapshot through all
-later evidence, finish with an empty-inventory cleanup proof, and accept case
+later evidence, retain terminal/replay-denial evidence, and accept case
 assertions only in a final runner observation after every transcript result.
-Cleanup is a separate signed `stage_cleanup` IPC authority: its immutable
-intent binds all session-attributed record/key bytes, exact dictionaries, and
-delete order before the first delete; the serialized helper reconciles each
-exact read, durably acknowledges a fixed-attempt marker before the sole delete,
-only after its cross-bound pending-progress pair is exclusively published,
-file/directory-fsynced, and exactly reopened; it never re-deletes an unresolved
-marker—absence terminalizes and other state quarantines.
-Every progress acknowledgement belongs to one bounded hash-linked ledger;
-recovery rejects incomplete, forked, or extra history before selecting its head.
+Live release-stage deletion and ACK-ledger recovery are deferred. A trusted
+external supervisor destroys each whole disposable host after evidence export;
+root-bound disposal evidence must precede the activation-grant or publication-
+envelope signature. No helper claims to prove the inventory empty afterwards.
+Only the uninterrupted lease owner may durably close after irrevocably
+quiescing every send/sign/commit capability. Non-owners quarantine an unclosed
+lease indefinitely, including after restart/reboot; reconciliation is bounded
+remote reading and reporting with no journal CAS. Cleanup of an already-closed
+lease deletes its exact persistent reference, never the reusable account name.
 Future
 authority commands retain JSON v1 but deliberately add distinct exits 10..13,
 map corruption to existing exit 1, and never emit exit 9; remote-uncertain

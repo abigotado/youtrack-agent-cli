@@ -96,28 +96,26 @@ retains that baseline snapshot as provenance in its complete evidence set.
 Each activation-smoke and post-grant capability plan starts with a setup-only
 exact-artifact enrollment from a canonical empty disposable inventory, binds
 the retained revision-1 registry snapshot through every later observation and
-evidence index, and finishes by proving the inventory empty again. Assertions
+evidence index, and ends by retaining terminal and replay-denial evidence. Assertions
 are accepted only in a case-final runner observation emitted after every
-operation transcript is retained; failed cleanup destroys the quarantined
-disposable user/VM and invalidates all session output.
-That final deletion is a separate root-token-bound `stage_cleanup` IPC
-authority, not ambient registry maintenance: before deleting anything it
-retains the exact setup snapshot, attributed record/key bytes, dictionaries,
-and operation order outside disposable state, then reconciles every delete by
-exact read and byte comparison under the serialized helper executor. One
-durable acknowledged `delete_attempt_started` marker precedes its sole physical
-delete; an unresolved marker can only prove absence or quarantine. Unknown
-state is quarantined, never deleted.
-Cleanup acknowledgements form a bounded hash-linked ledger, including genesis
-and every progress revision. Recovery validates the entire ledger and its
-referenced objects before selecting a head; a partial or forked history cannot
-authorize deletion.
-The future write path is additionally gated by one launchd-managed helper, its
-serialized authority executor, and a helper-owned fixed-active Keychain
-coordinator: registry commits cannot overlap an apply, acquisition cannot race
-byte-equal cleanup, and apply must durably
+operation transcript is retained. A trusted external supervisor destroys the
+entire disposable host after evidence export and before the next activation
+grant or publication-envelope signature. A root-bound disposal attestation
+gates that signature; missing or uncertain disposal blocks release. Live
+`stage_cleanup`, deletion ACK recovery, and empty-inventory cleanup proofs are
+deferred, not delegated to the agent or native helper.
+The future write path uses a helper-private fixed-active Keychain coordinator
+as its cross-process mutex. LaunchAgent registration manages lifecycle, not
+singleton security; another same-user helper remains in the threat model.
+Registry commits cannot overlap an apply, and apply must durably
 enter `in_flight`, obtain one exact-request permit, send at most once, and
-durably close before the coordinator is released. The descriptor-bound helper
+irreversibly quiesce every send/sign/commit capability before durably closing.
+Only a valid already-closed lease may be cleaned up, using its exact Keychain
+persistent reference so a stale cleanup cannot delete a replacement lease.
+An unclosed lease stays quarantined even after restart, reboot, expiry, or
+user confirmation. This deliberately sacrifices availability after a crash;
+bounded remote reconciliation reports findings without changing its journal.
+The descriptor-bound helper
 profile expiry is a strict Gate, publication, installation, and pre-send
 cutoff. The closed evidence contract includes exact install/reinstall and
 Keychain-migration failure cases plus deterministic two-party coordinator
@@ -127,6 +125,11 @@ corruption remains existing exit 1;
 the only recovery commands will be `mutation authority status` and trusted-UI
 `mutation authority recover`, neither with a plan ID or force-clear option.
 None of this is enabled in the current build.
+
+Native Gate 1B execution also has an open design blocker: destructive phases
+need separately authorized clean subruns and an evidence-aggregation protocol.
+The current case catalog is not an executable closed Gate contract and cannot
+authorize E1/E2 acceptance, activation, or publication.
 
 ## Agent Skill
 

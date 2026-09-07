@@ -101,8 +101,11 @@ Both require explicit `--profile`. They accept only text/JSON output (including
 the retained `--json` alias), timeout, and verbose inherited flags; they reject
 `--yes`, `--dry-run`, `--fields`, raw output, plan/lease/force selectors,
 positional/stdin input, and environment overrides. Authority status is
-bounded/read-only; recovery requires trusted UI, applies only to the sole
-unresolved active record, and has no YouTrack network capability. Their exact
+bounded/read-only; recovery requires trusted UI and may delete only an exact
+already-closed active item by its persistent reference. It has no YouTrack
+network capability. An unclosed item is quarantined with exit 1 and no local
+mutation; restart, reboot, expiry, or UI cannot clear it. Remote reconciliation
+while quarantined only reads and reports, without journal CAS. Their exact
 JSON v1 data plus required invocation `meta`, errors, distinct future exits
 10..13, and corruption mapping to existing exit 1 are frozen in the registry
 protocol and are not implemented by the current command tree.
@@ -131,7 +134,7 @@ Launches a trusted approval UI that loads canonical plan bytes once and displays
 
 ### `apply`
 
-Validates receipt signature/TTL/nonce, plan ID, payload/schema hashes, resolves the exact current target/project/account, checks the expected-state fingerprint, and requires the signed registry revision plus generation/SPKI/fingerprint to equal the current active registry entry. It validates exactly one applicable authority branch: production/post-grant requires the matching provisional authorization and activation grant; Gate 1B requires its unexpired E1/E2 token, Gate receipt context, authenticated runner/session, and full registry chain; activation smoke requires its closed provisional/smoke branch. The applicable canonical authorization-context digest must equal the receipt through the atomic `confirmed -> in_flight` transition. The journal retains the exact descriptor and complete applicable authority branch, context, registry chain, and digests with the receipt before dispatch. Retained keys and historical authority objects are audit/reconciliation-only; any pre-dispatch registry or activation transition cancels the confirmation. Apply enters the sole launchd-managed helper's serialized authority executor and acquires its fixed-active Keychain coordinator shared with every registry commit, requires trusted time strictly before descriptor `helper_profile_expires_at`, persists `in_flight`, receives one permit bound to the exact request, sends once, records the outcome, durably closes, and performs guarded exact-read/delete cleanup before releasing the executor guard. Registry-first cancels the stale receipt; apply-first excludes registry commits until close. Crash before permit is `failed_before_mutation`; any uncertainty at or after permit is ambiguous and never retried. Gate 1B uses exact binary barrier/event traces for rotate/revoke/recovery and invalid-enrollment contention plus crash/ambiguity at outcome, close, active-delete, and the acquisition-between-read/delete ABA boundary. The future JSON v1 authority contract adds distinct exits 10..13 for wait, trusted recovery, artifact replacement, and reconfirmation, maps corruption to existing exit 1, and never emits exit 9; remote-uncertain reconciliation may retain it.
+Validates receipt signature/TTL/nonce, plan/payload/schema hashes, exact account/project/target, expected state, current registry revision/key, descriptor, and the exact mode-bound authorization context. Before mutable authority reads, apply contends with every registry commit on the unique fixed-active Keychain account. LaunchAgent lifecycle and process-local guards do not exclude concurrent same-user helpers. The uninterrupted owner durably enters `in_flight`, obtains one exact-request permit, sends once, records the outcome, irrevocably quiesces all send/sign/commit capabilities, and adds the durable normal close. Only an already-closed active item may be cleaned up by its exact persistent reference; a stale A reference cannot delete replacement B. A crash without valid durable close quarantines authority indefinitely, including after restart/reboot/expiry/UI, and bounded remote reconciliation reports only without journal CAS. Proven owner abort-before-permit may close `failed_before_mutation`; uncertainty at/after permit is never replayed. Gate 1B must prove multi-helper/alternate-bootstrap contention, queued-send quiescence, unclosed quarantine, and persistent-reference ABA safety. The future JSON v1 authority contract retains proposed exits 10..13; corruption and `AUTHORITY_STATE_QUARANTINED` use existing exit 1. These are unimplemented requirements.
 
 ### `reconcile`
 
@@ -217,10 +220,9 @@ Reliable create/comment reconciliation benefits from a stable marker. Recommende
 - Preflight GETs and postflight GETs are allowed; “one-shot” means exactly one mutating request.
 - A definitive HTTP validation/auth/policy failure before server acceptance is `failed_before_mutation`.
 - A success response containing the created/updated entity is followed by exact verification.
-- Timeout, connection reset, invalid/truncated response, or proxy 5xx after send is `ambiguous`. A process crash with proven permit absence is `failed_before_mutation`, including after `in_flight`; crash or uncertainty at or after permit is `ambiguous`.
+- Timeout, connection reset, invalid/truncated response, or proxy 5xx after send is `ambiguous`. A crash without a valid durable close quarantines the unchanged journal, regardless of apparent permit absence. Only an uninterrupted owner can prove and close `failed_before_mutation`; no uncertainty authorizes replay.
 - The CLI never resends the mutation for the same receipt.
-- A unique reconciliation match changes state to `reconciled`.
-- Zero or multiple plausible matches after an ambiguous result is `operator_resolution_required`; it is not automatically considered failure.
+- For an eligible already-closed record, a unique reconciliation match changes state to `reconciled`; zero/multiple plausible matches require operator resolution. While quarantined, both results are reports only and never change the journal or release authority.
 
 ## Versioned machine response
 
