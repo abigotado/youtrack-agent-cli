@@ -140,5 +140,5 @@ func isCanonicalProjectKey(value string) bool {
 }
 
 func isCanonicalKeyGeneration(value string) bool {
-	return protocolvalue.IsKeyGeneration(value, MaxKeyGenerationBytes)
+	return keyGenerationRevision(value) != 0
 }

@@ -2038,7 +2038,7 @@ enumeration must all independently prove emptiness; not-found is accepted only
 where the exact Security.framework contract declares it.
 
 The single setup enrollment must commit revision integer `1` and generation
-string `YTAG-00000000000000001` and durably
+string `YTAG-00000000000000000001` and durably
 close and remove its coordinator active record before its `snapshot` operation
 emits a compact canonical post-enrollment registry snapshot capped at 16,384
 bytes. Its fields are, in order, `schema_version` integer `1`, `evidence_type`
@@ -2046,7 +2046,7 @@ exactly `stage_post_enrollment_registry_snapshot`, `stage_type`,
 `descriptor_sha256`, `stage_token_sha256`, `setup_context_sha256`,
 `pre_enrollment_inventory_sha256`, `architecture`, `gate_runner_unique`,
 `gate_session_id`, `registry_service`, `registry_revision` integer `1`,
-`registry_record_sha256`, `generation` string `YTAG-00000000000000001`, `signing_key_tag`,
+`registry_record_sha256`, `generation` string `YTAG-00000000000000000001`, `signing_key_tag`,
 `signing_key_spki_der_b64u`, `signing_key_fingerprint_sha256`,
 `setup_transcript_manifest_sha256`, `generated_key_tags`,
 `coordinator_closed_sha256`, and `created_at`. `generated_key_tags` is the
@@ -2093,7 +2093,7 @@ The selected `ipc` transcript content is one closed canonical object capped at
 10. `gate_session_id`
 11. `registry_revision`, integer `1`
 12. `registry_record_sha256`
-13. `generation`, string `YTAG-00000000000000001`
+13. `generation`, string `YTAG-00000000000000000001`
 14. `signing_key_tag`
 15. `signing_key_spki_der_b64u`
 16. `signing_key_fingerprint_sha256`
@@ -2965,7 +2965,7 @@ independently covers:
   the one initial exact-artifact enrollment; nonempty
   pre-enrollment registry service, coordinator service, signing-key namespace,
   journal root, or mutable runner-session inventory; enrollment other than
-  revision integer `1`/generation string `YTAG-00000000000000001`; setup snapshot with wrong revision, generation,
+  revision integer `1`/generation string `YTAG-00000000000000000001`; setup snapshot with wrong revision, generation,
   SPKI, fingerprint, descriptor, architecture, runner, or session; any later
   observation/index/evidence-set entry with a missing or different snapshot;
   a Gate 1B typed leaf/parent with missing, conflicting, or cross-unit
@@ -3037,7 +3037,7 @@ invalidates prior E1/E2 evidence.
   exactly one setup-only exact-artifact enrollment from its own canonical
   empty inventory. Gate 1B host/target allocation precedes its token and uses
   the new inventory protocol; other stages retain their existing order. The retained
-  revision-1/generation-`YTAG-00000000000000001` snapshot is immutable baseline provenance, not
+  revision-1/generation-`YTAG-00000000000000000001` snapshot is immutable baseline provenance, not
   current-state authority. E1 state is never inherited by E2. Setup authority
   cannot rotate, recover, revoke, sign receipts, acquire a permit, or send.
 - No stage exposes helper/CLI per-item cleanup. Sanitized immutable evidence

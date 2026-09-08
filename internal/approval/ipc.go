@@ -120,7 +120,7 @@ type ExpectedSigningKey struct {
 // NewExpectedSigningKey validates and defensively owns the complete enrolled
 // key identity used as authority for response verification.
 func NewExpectedSigningKey(generation string, spkiDER []byte, fingerprint string) (*ExpectedSigningKey, error) {
-	if !protocolvalue.IsKeyGeneration(generation, MaxKeyGenerationBytes) {
+	if !isCanonicalKeyGeneration(generation) {
 		return nil, signingKeyMismatch("the enrolled signing-key generation is invalid", nil)
 	}
 	x963, err := P256DERSPKIToX963(spkiDER)
@@ -277,13 +277,17 @@ func EncodeIPCFailure(failure IPCFailure) ([]byte, error) {
 
 // DecodeAndValidateIPCResponse is the sole response decoder. It binds both
 // response kinds to the challenge; success also binds the snapshot and the
-// enrolled key and verifies the signed receipt.
-func DecodeAndValidateIPCResponse(ctx context.Context, raw []byte, expectedChallenge [IPCChallengeSize]byte, snapshot *ApprovalSnapshot, expectedKey *ExpectedSigningKey, now time.Time) (*ValidatedIPCResponse, error) {
+// enrolled key and caller-supplied expected binding and verifies the signed
+// receipt. The expected binding itself is not proof of registry authority.
+func DecodeAndValidateIPCResponse(ctx context.Context, raw []byte, expectedChallenge [IPCChallengeSize]byte, snapshot *ApprovalSnapshot, expectedKey *ExpectedSigningKey, expectedBinding *ExpectedReceiptBinding, now time.Time) (*ValidatedIPCResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if snapshot == nil || len(snapshot.bytes) == 0 || expectedKey == nil || expectedKey.publicKey == nil {
+	if snapshot == nil || len(snapshot.bytes) == 0 || expectedKey == nil || expectedKey.publicKey == nil || !expectedBinding.valid() {
 		return nil, responseInvalid("approval response validation dependencies are missing", nil)
+	}
+	if keyGenerationRevision(expectedKey.generation) != expectedBinding.registryRevision {
+		return nil, signingKeyMismatch("the enrolled signing key does not match the expected registry revision", nil)
 	}
 	frame, err := decodeIPCFrame(raw)
 	if err != nil {
@@ -300,13 +304,13 @@ func DecodeAndValidateIPCResponse(ctx context.Context, raw []byte, expectedChall
 		}
 		return &ValidatedIPCResponse{failure: &HelperFailure{Code: code}}, nil
 	case IPCFrameSuccess:
-		return validateIPCSuccess(ctx, frame.Payload, expectedChallenge, snapshot, expectedKey, now)
+		return validateIPCSuccess(ctx, frame.Payload, expectedChallenge, snapshot, expectedKey, expectedBinding, now)
 	default:
 		return nil, responseInvalid("an approval response cannot contain a request frame", nil)
 	}
 }
 
-func validateIPCSuccess(ctx context.Context, payload []byte, challenge [IPCChallengeSize]byte, snapshot *ApprovalSnapshot, key *ExpectedSigningKey, now time.Time) (*ValidatedIPCResponse, error) {
+func validateIPCSuccess(ctx context.Context, payload []byte, challenge [IPCChallengeSize]byte, snapshot *ApprovalSnapshot, key *ExpectedSigningKey, binding *ExpectedReceiptBinding, now time.Time) (*ValidatedIPCResponse, error) {
 	spki := payload[IPCChallengeSize : IPCChallengeSize+ipcSPKIBytes]
 	if !bytes.Equal(spki, key.spkiDER) {
 		return nil, signingKeyMismatch("the response selected a different signing key", nil)
@@ -320,6 +324,9 @@ func validateIPCSuccess(ctx context.Context, payload []byte, challenge [IPCChall
 	}
 	if receipt.KeyGeneration != key.generation || receipt.KeyFingerprintSHA256 != key.fingerprint {
 		return nil, signingKeyMismatch("the receipt does not bind the enrolled signing key", nil)
+	}
+	if receipt.RegistryRevision != binding.registryRevision || receipt.AuthorizationContextSHA256 != binding.authorizationContextSHA256 {
+		return nil, responseInvalid("the approval receipt does not match the expected authorization context", nil)
 	}
 	plan := snapshot.plan
 	if receipt.PlanID != plan.PlanID || receipt.PlanSHA256 != protocolvalue.SHA256Hex(snapshot.bytes) || receipt.PlanSHA256 != plan.IntentSHA256 ||
@@ -354,7 +361,8 @@ func validateIPCSuccess(ctx context.Context, payload []byte, challenge [IPCChall
 func newApprovalSnapshotOwned(owned []byte) (*ApprovalSnapshot, error) {
 	plan, err := intent.ParseApprovalSnapshot(owned, MaxIPCPlanBytes)
 	if err != nil {
-		return nil, responseInvalid("the approval plan snapshot is invalid", err)
+		// Plan decoder diagnostics may contain attacker-controlled content.
+		return nil, responseInvalid("the approval plan snapshot is invalid", nil)
 	}
 	if err := ValidateApprovalDisplayBytes(owned); err != nil {
 		return nil, responseInvalid("the approval plan snapshot is invalid", err)

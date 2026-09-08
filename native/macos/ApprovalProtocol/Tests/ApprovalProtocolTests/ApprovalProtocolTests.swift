@@ -55,7 +55,7 @@ private func fixture(_ name: String) throws -> Data {
     for _ in 0..<6 {
         root.deleteLastPathComponent()
     }
-    var data = try Data(contentsOf: root.appendingPathComponent("testdata/gate1a/\(name)"))
+    var data = try Data(contentsOf: root.appendingPathComponent("testdata/\(receiptFixtureDirectory(name))/\(name)"))
     guard data.last == 0x0A else {
         throw ApprovalProtocolError.nonCanonicalEncoding
     }
@@ -179,13 +179,13 @@ private func sha256Hex(_ data: Data) -> String {
             ",\"challenge_sha256\":\"630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd\"",
             with: ""
         )),
-        ("missing field", replacing(valid, ",\"key_generation\":\"key-1\"", with: "")),
-        ("duplicate field", replacing(valid, #"{"schema_version":2"#, with: #"{"schema_version":2,"schema_version":2"#)),
+        ("missing field", replacing(valid, ",\"key_generation\":\"YTAG-00000000000000000001\"", with: "")),
+        ("duplicate field", replacing(valid, #"{"schema_version":3"#, with: #"{"schema_version":3,"schema_version":3"#)),
         ("unknown field", insertingBeforeClosingBrace(valid, ",\"unknown\":\"x\"")),
         ("reordered fields", replacing(
             valid,
-            #"{"schema_version":2,"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4""#,
-            with: #"{"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4","schema_version":2"#
+            #"{"schema_version":3,"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4""#,
+            with: #"{"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4","schema_version":3"#
         )),
         ("leading whitespace", Data([0x20]) + valid),
         ("internal whitespace", replacing(valid, #","receipt_id""#, with: #", "receipt_id""#)),
@@ -268,15 +268,11 @@ private func sha256Hex(_ data: Data) -> String {
 
 @Test func keyGenerationBoundariesMatchGo() throws {
     let valid = try fixture("signing.json")
-    let accepted = ["a", "A0._-z", "k" + String(repeating: "-", count: 63)]
-    let rejected = ["", "k" + String(repeating: "-", count: 64), "-key", "key:1", "kéy"]
+    let rejected = ["", "a", "A0._-z", "k" + String(repeating: "-", count: 64), "-key", "key:1", "kéy", "YTAG-00000000000000000000", "YTAG-00000000000000000002", "YTAG-99999999999999999999", "YTAG-0000000000000000001", "YTAG-000000000000000000001"]
 
-    for value in accepted {
-        let bytes = replacing(valid, #""key_generation":"key-1""#, with: #""key_generation":"\#(value)""#)
-        #expect(try UnsignedApprovalReceipt(signingBytes: bytes).keyGeneration == value)
-    }
+    #expect(try UnsignedApprovalReceipt(signingBytes: valid).keyGeneration == "YTAG-00000000000000000001")
     for value in rejected {
-        let bytes = replacing(valid, #""key_generation":"key-1""#, with: #""key_generation":"\#(value)""#)
+        let bytes = replacing(valid, #""key_generation":"YTAG-00000000000000000001""#, with: #""key_generation":"\#(value)""#)
         #expect(throws: ApprovalProtocolError.self) {
             _ = try UnsignedApprovalReceipt(signingBytes: bytes)
         }
@@ -442,14 +438,14 @@ private func sha256Hex(_ data: Data) -> String {
     let successFrame = try decodeHex(try fixtureString("ipc-success.hex"))
     let validationTime = try #require(ISO8601DateFormatter().date(from: "2026-09-02T15:35:00Z"))
     let expectedKey = try EnrolledSigningKey(
-        generation: "1",
+        generation: "YTAG-00000000000000000001",
         spkiDER: decodeHex(try fixtureString("public-key.spki.hex"))
     )
     let response = try ApprovalIPCCodec.decodeAndValidateResponse(
         successFrame,
         expectedChallenge: challenge,
         snapshot: snapshot,
-        expectedKey: expectedKey,
+        expectedKey: expectedKey, expectedBinding: try receiptBindingForTest(),
         now: validationTime
     )
     guard case let .success(success) = response else { Issue.record("expected success"); return }
@@ -459,7 +455,7 @@ private func sha256Hex(_ data: Data) -> String {
 
     let errorFrame = try decodeHex(try fixtureString("ipc-error.hex"))
     #expect(try ApprovalIPCCodec.decodeAndValidateResponse(
-        errorFrame, expectedChallenge: challenge, snapshot: snapshot, expectedKey: expectedKey, now: Date()
+        errorFrame, expectedChallenge: challenge, snapshot: snapshot, expectedKey: expectedKey, expectedBinding: try receiptBindingForTest(), now: Date()
     ) == .failure(.userCanceled))
 }
 
@@ -472,7 +468,7 @@ private func sha256Hex(_ data: Data) -> String {
     let challenge = try ApprovalIPCChallenge(bytes: Data(0..<32))
 
     let receipt = try ApprovalReceiptFactory.makeReceipt(
-        for: snapshot, challenge: challenge, signer: signer, random: random, clock: clock
+        for: snapshot, challenge: challenge, expectedBinding: try receiptBindingForTest(), signer: signer, random: random, clock: clock
     )
     #expect(signer.calls == 1)
     #expect(random.calls == 2)
@@ -488,7 +484,7 @@ private final class TestSigner: ApprovalSigner {
     private let key = P256.Signing.PrivateKey()
     private(set) var calls = 0
     lazy var enrolledKey: EnrolledSigningKey = try! EnrolledSigningKey(
-        generation: "test-1",
+        generation: "YTAG-00000000000000000001",
         spkiDER: P256PublicKeyCodec.spkiDER(fromX963: key.publicKey.x963Representation)
     )
 

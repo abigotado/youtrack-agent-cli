@@ -325,7 +325,7 @@ The setup context's `setup_authorization` is exactly
 `gate1b_first_exact_artifact_enrollment_only`. Its only entry is the unit's
 first setup `enroll` operation, after the empty-state check. The ordinary
 first-enrollment ceremony creates revision integer `1` and generation string
-`YTAG-00000000000000001`, durably closes and
+`YTAG-00000000000000000001`, durably closes and
 cleans its own lease, and retains the immutable baseline snapshot. Setup then
 ends irreversibly; it cannot sign receipts, send, rotate, recover, or enroll
 again. Every scenario uses ordinary registry operations under its unit's

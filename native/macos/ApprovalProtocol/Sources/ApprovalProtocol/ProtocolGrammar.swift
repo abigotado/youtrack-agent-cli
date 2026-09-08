@@ -49,11 +49,19 @@ enum ProtocolGrammar {
     }
 
     static func isKeyGeneration(_ value: String) -> Bool {
+        keyGenerationRevision(value) != nil
+    }
+
+    static func keyGenerationRevision(_ value: String) -> Int? {
         let bytes = Array(value.utf8)
-        guard (1...64).contains(bytes.count), isASCIIAlphanumeric(bytes[0]) else { return false }
-        return bytes.dropFirst().allSatisfy {
-            isASCIIAlphanumeric($0) || $0 == 0x2E || $0 == 0x5F || $0 == 0x2D
+        guard bytes.count == 25, bytes.prefix(5).elementsEqual("YTAG-".utf8) else { return nil }
+        var revision = 0
+        for byte in bytes.dropFirst(5) {
+            guard (0x30...0x39).contains(byte) else { return nil }
+            revision = revision * 10 + Int(byte - 0x30)
+            guard revision <= 256 else { return nil }
         }
+        return (1...256).contains(revision) ? revision : nil
     }
 
     static func isDigest(_ value: String) -> Bool {

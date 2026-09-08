@@ -375,8 +375,9 @@ generation before UI and revalidates them afterward.
   fields, helper-supplied text, or integer byte order.
 - The pure Go validator requires an explicit enrolled key generation, exact
   SPKI, and fingerprint; the response cannot select its own verification key.
-- The implemented v2 receipt is pre-Gate evidence only. The signed candidate
-  requires the protocol document's v3 registry-revision binding and rejects v2.
+- The implemented v3 receipt binds an explicit expected revision and context
+  and rejects v2. The expected claims are not authenticated authority; a signed
+  candidate still requires complete registry/context verification.
 - `approval.Unsupported` remains the only production adapter. Gate 1A stays
   **NOT PASSED** until signed/notarized native execution, Secure Enclave
   isolation, peer validation, UI review, and clean-host lifecycle evidence all

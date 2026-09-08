@@ -39,11 +39,15 @@ public enum ApprovalReceiptFactory {
     public static func makeReceipt(
         for snapshot: ValidatedPlanSnapshot,
         challenge: ApprovalIPCChallenge,
+        expectedBinding: ExpectedReceiptBinding,
         signer: any ApprovalSigner,
         random: any CryptographicRandomSource,
         clock: any ApprovalClock
     ) throws -> ApprovalReceipt {
         let identity = signer.enrolledKey
+        guard ProtocolGrammar.keyGenerationRevision(identity.generation) == expectedBinding.registryRevision else {
+            throw ApprovalProtocolError.invalidField("expected receipt binding")
+        }
         let receiptID = try identifier(prefix: "YTAR-", random: random)
         let nonce = try identifier(prefix: "YTAN-", random: random)
         let issued = floor(clock.now().timeIntervalSince1970)
@@ -55,6 +59,8 @@ public enum ApprovalReceiptFactory {
         let binding = snapshot.bindings
         let unsigned = try UnsignedApprovalReceipt(
             receiptID: receiptID, nonce: nonce, challengeSHA256: challenge.sha256,
+            registryRevision: expectedBinding.registryRevision,
+            authorizationContextSHA256: expectedBinding.authorizationContextSHA256,
             planID: binding.planID,
             planSHA256: binding.planSHA256, profileIdentitySHA256: binding.profileIdentitySHA256,
             accountID: binding.accountID, projectID: binding.projectID, projectKey: binding.projectKey,

@@ -177,9 +177,14 @@ func TestReceiptKeyGenerationBoundaries(t *testing.T) {
 		value   string
 		wantErr bool
 	}{
-		{name: "single byte", value: "a"},
-		{name: "all permitted punctuation", value: "A0._-z"},
-		{name: "exact maximum", value: "k" + strings.Repeat("-", MaxKeyGenerationBytes-1)},
+		{name: "revision one", value: "YTAG-00000000000000000001"},
+		{name: "legacy short", value: "a", wantErr: true},
+		{name: "legacy punctuation", value: "A0._-z", wantErr: true},
+		{name: "zero", value: "YTAG-00000000000000000000", wantErr: true},
+		{name: "greater than receipt revision", value: "YTAG-00000000000000000002", wantErr: true},
+		{name: "overflow", value: "YTAG-99999999999999999999", wantErr: true},
+		{name: "24 bytes nineteen digits", value: "YTAG-0000000000000000001", wantErr: true},
+		{name: "26 bytes twenty-one digits", value: "YTAG-000000000000000000001", wantErr: true},
 		{name: "empty", value: "", wantErr: true},
 		{name: "one over maximum", value: "k" + strings.Repeat("-", MaxKeyGenerationBytes), wantErr: true},
 		{name: "punctuation first", value: "-key", wantErr: true},
@@ -208,9 +213,9 @@ func TestParseReceiptBytesRejectsNonCanonicalJSON(t *testing.T) {
 		{name: "oversized before parsing", raw: bytes.Repeat([]byte{' '}, MaxReceiptBytes+1)},
 		{name: "non object", raw: []byte(`[]`)},
 		{name: "missing field", raw: bytes.Replace(valid, []byte(`,"signature":"MAYCAQECAQI"`), nil, 1)},
-		{name: "duplicate field", raw: bytes.Replace(valid, []byte(`{"schema_version":2`), []byte(`{"schema_version":2,"schema_version":2`), 1)},
+		{name: "duplicate field", raw: bytes.Replace(valid, []byte(`{"schema_version":3`), []byte(`{"schema_version":3,"schema_version":3`), 1)},
 		{name: "unknown field", raw: bytes.Replace(valid, []byte(`,"signature":`), []byte(`,"unknown":"x","signature":`), 1)},
-		{name: "reordered fields", raw: bytes.Replace(valid, []byte(`{"schema_version":2,"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4"`), []byte(`{"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4","schema_version":2`), 1)},
+		{name: "reordered fields", raw: bytes.Replace(valid, []byte(`{"schema_version":3,"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4"`), []byte(`{"receipt_id":"YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4","schema_version":3`), 1)},
 		{name: "leading whitespace", raw: append([]byte(" "), valid...)},
 		{name: "internal whitespace", raw: bytes.Replace(valid, []byte(`,"receipt_id"`), []byte(`, "receipt_id"`), 1)},
 		{name: "trailing whitespace", raw: append(append([]byte(nil), valid...), ' ')},
@@ -323,7 +328,12 @@ func gate1AReceipt(t *testing.T) Receipt {
 
 func gate1AFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "gate1a", name))
+	directory := "gate1a"
+	switch name {
+	case "signing.json", "receipt.json", "signing.sha256", "receipt.sha256", "ipc-success-receipt.json", "ipc-success.hex":
+		directory = "gate1a-v3"
+	}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", directory, name))
 	if err != nil {
 		t.Fatal(err)
 	}

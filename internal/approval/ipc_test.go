@@ -64,7 +64,7 @@ func TestIPCV2SharedFixtures(t *testing.T) {
 		t.Fatal("request encoding differs from the shared v2 fixture")
 	}
 	success := mustDecodeHex(t, gate1AFixture(t, "ipc-success.hex"))
-	response, err := DecodeAndValidateIPCResponse(context.Background(), success, challenge, snapshot, key, time.Date(2026, 9, 2, 15, 35, 56, 0, time.UTC))
+	response, err := DecodeAndValidateIPCResponse(context.Background(), success, challenge, snapshot, key, expectedReceiptBindingForTest(t), time.Date(2026, 9, 2, 15, 35, 56, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestIPCV2SharedFixtures(t *testing.T) {
 		t.Fatalf("success receipt differs from fixture: %v", err)
 	}
 	failureRaw := mustDecodeHex(t, gate1AFixture(t, "ipc-error.hex"))
-	failureResponse, err := DecodeAndValidateIPCResponse(context.Background(), failureRaw, challenge, snapshot, key, time.Now())
+	failureResponse, err := DecodeAndValidateIPCResponse(context.Background(), failureRaw, challenge, snapshot, key, expectedReceiptBindingForTest(t), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestDecodeAndValidateIPCResponseBindsChallengePlanAndEnrolledKey(t *testing
 	challenge := ipcChallengeForTest()
 	issued := time.Date(2026, 9, 2, 15, 34, 56, 0, time.UTC)
 	raw, key := signedResponseForTest(t, snapshot, challenge, issued, issued.Add(2*time.Minute), nil)
-	response, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, issued.Add(time.Minute))
+	response, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, expectedReceiptBindingForTest(t), issued.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,13 +113,13 @@ func TestDecodeAndValidateIPCResponseBindsChallengePlanAndEnrolledKey(t *testing
 		newChallenge := challenge
 		newChallenge[0] ^= 0xff
 		copy(spliced[IPCHeaderBytes:IPCHeaderBytes+IPCChallengeSize], newChallenge[:])
-		_, err := DecodeAndValidateIPCResponse(context.Background(), spliced, newChallenge, snapshot, key, issued.Add(time.Minute))
+		_, err := DecodeAndValidateIPCResponse(context.Background(), spliced, newChallenge, snapshot, key, expectedReceiptBindingForTest(t), issued.Add(time.Minute))
 		assertReason(t, err, "APPROVAL_CHALLENGE_MISMATCH")
 	})
 	t.Run("replayed response", func(t *testing.T) {
 		freshChallenge := challenge
 		freshChallenge[len(freshChallenge)-1] ^= 0xff
-		_, err := DecodeAndValidateIPCResponse(context.Background(), raw, freshChallenge, snapshot, key, issued.Add(time.Minute))
+		_, err := DecodeAndValidateIPCResponse(context.Background(), raw, freshChallenge, snapshot, key, expectedReceiptBindingForTest(t), issued.Add(time.Minute))
 		assertReason(t, err, "APPROVAL_CHALLENGE_MISMATCH")
 	})
 	t.Run("different plan snapshot", func(t *testing.T) {
@@ -127,25 +127,25 @@ func TestDecodeAndValidateIPCResponseBindsChallengePlanAndEnrolledKey(t *testing
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = DecodeAndValidateIPCResponse(context.Background(), raw, challenge, otherSnapshot, key, issued.Add(time.Minute))
+		_, err = DecodeAndValidateIPCResponse(context.Background(), raw, challenge, otherSnapshot, key, expectedReceiptBindingForTest(t), issued.Add(time.Minute))
 		assertReason(t, err, "APPROVAL_RESPONSE_INVALID")
 	})
 	t.Run("response-selected key", func(t *testing.T) {
 		otherRaw, _ := signedResponseForTest(t, snapshot, challenge, issued, issued.Add(2*time.Minute), nil)
-		_, err := DecodeAndValidateIPCResponse(context.Background(), otherRaw, challenge, snapshot, key, issued.Add(time.Minute))
+		_, err := DecodeAndValidateIPCResponse(context.Background(), otherRaw, challenge, snapshot, key, expectedReceiptBindingForTest(t), issued.Add(time.Minute))
 		assertReason(t, err, "APPROVAL_SIGNING_KEY_MISMATCH")
 	})
 	t.Run("wrong generation", func(t *testing.T) {
-		wrong, err := NewExpectedSigningKey("key-2", key.spkiDER, key.fingerprint)
+		wrong, err := NewExpectedSigningKey("YTAG-00000000000000000002", key.spkiDER, key.fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, wrong, issued.Add(time.Minute))
+		_, err = DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, wrong, expectedReceiptBindingForTest(t), issued.Add(time.Minute))
 		assertReason(t, err, "APPROVAL_SIGNING_KEY_MISMATCH")
 	})
 	t.Run("expired receipt", func(t *testing.T) {
 		expiredRaw, expiredKey := signedResponseForTest(t, snapshot, challenge, issued, issued.Add(time.Minute), nil)
-		_, err := DecodeAndValidateIPCResponse(context.Background(), expiredRaw, challenge, snapshot, expiredKey, issued.Add(time.Minute))
+		_, err := DecodeAndValidateIPCResponse(context.Background(), expiredRaw, challenge, snapshot, expiredKey, expectedReceiptBindingForTest(t), issued.Add(time.Minute))
 		assertReason(t, err, "APPROVAL_RESPONSE_INVALID")
 	})
 }
@@ -176,20 +176,20 @@ func TestDecodeAndValidateIPCResponseBindsEveryReceiptFieldAndSignature(t *testi
 		{name: "schema", mutate: func(r *Receipt) { r.SchemaSHA256 = repeatHex('f') }, reason: "APPROVAL_RESPONSE_INVALID"},
 		{name: "request", mutate: func(r *Receipt) { r.RequestSHA256 = repeatHex('f') }, reason: "APPROVAL_RESPONSE_INVALID"},
 		{name: "expected", mutate: func(r *Receipt) { r.ExpectedSHA256 = repeatHex('f') }, reason: "APPROVAL_RESPONSE_INVALID"},
-		{name: "key generation", mutate: func(r *Receipt) { r.KeyGeneration = "2" }, reason: "APPROVAL_SIGNING_KEY_MISMATCH"},
+		{name: "key generation", mutate: func(r *Receipt) { r.KeyGeneration = "YTAG-00000000000000000002"; r.RegistryRevision = 2 }, reason: "APPROVAL_SIGNING_KEY_MISMATCH"},
 		{name: "key fingerprint", mutate: func(r *Receipt) { r.KeyFingerprintSHA256 = repeatHex('f') }, reason: "APPROVAL_SIGNING_KEY_MISMATCH"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			raw, key := signedResponseWithMutationForTest(t, snapshot, challenge, issued, issued.Add(2*time.Minute), private, test.mutate, nil)
-			_, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, issued.Add(time.Minute))
+			_, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, expectedReceiptBindingForTest(t), issued.Add(time.Minute))
 			assertReason(t, err, test.reason)
 		})
 	}
 
 	t.Run("signature over different message", func(t *testing.T) {
 		raw, key := signedResponseWithMutationForTest(t, snapshot, challenge, issued, issued.Add(2*time.Minute), private, nil, []byte("different message"))
-		_, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, issued.Add(time.Minute))
+		_, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, expectedReceiptBindingForTest(t), issued.Add(time.Minute))
 		assertReason(t, err, "APPROVAL_SIGNATURE_INVALID")
 	})
 }
@@ -207,17 +207,17 @@ func TestDecodeAndValidateIPCResponseTTLAndClockSkewBoundaries(t *testing.T) {
 		"inside lifetime":   issued.Add(time.Minute),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, now); err != nil {
+			if _, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, expectedReceiptBindingForTest(t), now); err != nil {
 				t.Fatalf("exact protocol boundary rejected: %v", err)
 			}
 		})
 	}
 	t.Run("one second beyond future skew", func(t *testing.T) {
-		_, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, issued.Add(-defaultClockSkew-time.Second))
+		_, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, expectedReceiptBindingForTest(t), issued.Add(-defaultClockSkew-time.Second))
 		assertReason(t, err, "APPROVAL_RESPONSE_INVALID")
 	})
 	t.Run("expiry instant", func(t *testing.T) {
-		_, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, issued.Add(MaximumReceiptTTL))
+		_, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, expectedReceiptBindingForTest(t), issued.Add(MaximumReceiptTTL))
 		assertReason(t, err, "APPROVAL_RESPONSE_INVALID")
 	})
 }
@@ -242,7 +242,7 @@ func TestDecodeAndValidateIPCResponseFailureUnionAndTyping(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			response, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, time.Now())
+			response, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, expectedReceiptBindingForTest(t), time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -262,10 +262,10 @@ func TestDecodeAndValidateIPCResponseFailureUnionAndTyping(t *testing.T) {
 	raw, _ := EncodeIPCFailure(IPCFailure{Challenge: challenge, Code: IPCErrorUserCanceled})
 	wrong := challenge
 	wrong[0] ^= 1
-	_, err := DecodeAndValidateIPCResponse(context.Background(), raw, wrong, snapshot, key, time.Now())
+	_, err := DecodeAndValidateIPCResponse(context.Background(), raw, wrong, snapshot, key, expectedReceiptBindingForTest(t), time.Now())
 	assertReason(t, err, "APPROVAL_CHALLENGE_MISMATCH")
 	raw[len(raw)-1] = byte(IPCErrorInternalFailure + 1)
-	_, err = DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, time.Now())
+	_, err = DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, expectedReceiptBindingForTest(t), time.Now())
 	assertReason(t, err, "APPROVAL_RESPONSE_INVALID")
 }
 
@@ -273,7 +273,7 @@ func TestDecodeAndValidateIPCResponsePreservesContext(t *testing.T) {
 	snapshot, key := fixtureSnapshotAndKey(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := DecodeAndValidateIPCResponse(ctx, nil, ipcChallengeForTest(), snapshot, key, time.Now())
+	_, err := DecodeAndValidateIPCResponse(ctx, nil, ipcChallengeForTest(), snapshot, key, expectedReceiptBindingForTest(t), time.Now())
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}
@@ -282,14 +282,14 @@ func TestDecodeAndValidateIPCResponsePreservesContext(t *testing.T) {
 func TestExpectedSigningKeyValidatesAndDefensivelyCopies(t *testing.T) {
 	spki := mustDecodeHex(t, gate1AFixture(t, "public-key.spki.hex"))
 	fingerprint := string(gate1AFixture(t, "public-key.fingerprint-sha256"))
-	key, err := NewExpectedSigningKey("key-1", spki, fingerprint)
+	key, err := NewExpectedSigningKey("YTAG-00000000000000000001", spki, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
 	spki[0] ^= 1
 	returned := key.SPKIDER()
 	returned[0] ^= 1
-	if key.Generation() != "key-1" || key.FingerprintSHA256() != fingerprint || bytes.Equal(key.SPKIDER(), spki) {
+	if key.Generation() != "YTAG-00000000000000000001" || key.FingerprintSHA256() != fingerprint || bytes.Equal(key.SPKIDER(), spki) {
 		t.Fatal("expected signing key aliases caller bytes")
 	}
 	for _, generation := range []string{"", "-key", "key:1"} {
@@ -297,7 +297,7 @@ func TestExpectedSigningKeyValidatesAndDefensivelyCopies(t *testing.T) {
 			t.Fatalf("invalid generation %q accepted", generation)
 		}
 	}
-	if _, err := NewExpectedSigningKey("key-1", key.spkiDER, string(make([]byte, 64))); err == nil {
+	if _, err := NewExpectedSigningKey("YTAG-00000000000000000001", key.spkiDER, string(make([]byte, 64))); err == nil {
 		t.Fatal("wrong fingerprint accepted")
 	}
 }
@@ -356,10 +356,11 @@ func signedResponseWithMutationForTest(t *testing.T, snapshot *ApprovalSnapshot,
 	receipt := Receipt{
 		SchemaVersion: ReceiptSchemaVersion, ReceiptID: "YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4", Nonce: "YTAN-6DQNBQFQUCIIA4DAKBADAIAQAA",
 		ChallengeSHA256: protocolvalue.SHA256Hex(challenge[:]), PlanID: snapshot.plan.PlanID, PlanSHA256: snapshot.plan.IntentSHA256,
+		RegistryRevision: 1, AuthorizationContextSHA256: repeatHex('a'),
 		ProfileIdentitySHA256: snapshot.plan.Profile.IdentitySHA256, AccountID: snapshot.plan.Profile.Account.ID,
 		ProjectID: snapshot.plan.Policy.Project.ID, ProjectKey: snapshot.plan.Policy.Project.Key, SchemaSHA256: snapshot.plan.Policy.SchemaSHA256,
 		RequestSHA256: snapshot.plan.RequestSHA256, ExpectedSHA256: snapshot.plan.ExpectedSHA256, IssuedAt: issued, ExpiresAt: expires,
-		KeyGeneration: "1", KeyFingerprintSHA256: fingerprint,
+		KeyGeneration: "YTAG-00000000000000000001", KeyFingerprintSHA256: fingerprint,
 	}
 	if mutate != nil {
 		mutate(&receipt)
@@ -391,7 +392,7 @@ func signedResponseWithMutationForTest(t *testing.T, snapshot *ApprovalSnapshot,
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := NewExpectedSigningKey("1", spki, fingerprint)
+	key, err := NewExpectedSigningKey("YTAG-00000000000000000001", spki, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +410,7 @@ func fixtureSnapshotAndKey(t *testing.T) (*ApprovalSnapshot, *ExpectedSigningKey
 		t.Fatal(err)
 	}
 	spki := mustDecodeHex(t, gate1AFixture(t, "public-key.spki.hex"))
-	key, err := NewExpectedSigningKey("1", spki, string(gate1AFixture(t, "public-key.fingerprint-sha256")))
+	key, err := NewExpectedSigningKey("YTAG-00000000000000000001", spki, string(gate1AFixture(t, "public-key.fingerprint-sha256")))
 	if err != nil {
 		t.Fatal(err)
 	}
