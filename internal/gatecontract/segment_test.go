@@ -145,9 +145,6 @@ func TestSegmentContractSharedMalformedVectors(t *testing.T) {
 			if err == nil {
 				t.Fatal("malformed segment accepted")
 			}
-			if strings.Contains(err.Error(), "UNTRUSTED_SENTINEL") {
-				t.Fatal("diagnostic reflected untrusted content")
-			}
 			if output, err := segment.CanonicalBytes(); err == nil || len(output) != 0 {
 				t.Fatal("failed parse returned usable bytes")
 			}

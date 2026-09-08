@@ -164,7 +164,7 @@ func TestCLIDoesNotImportNetHTTP(t *testing.T) {
 func TestIsolatedGateContractRemainsPureAndDisconnected(t *testing.T) {
 	const gatePackage = module + "/internal/gatecontract"
 	allowed := map[string]map[string]bool{
-		gatePackage: imports("bytes", "encoding/json", "errors", "fmt", "io", "unicode/utf8", module+"/internal/protocolvalue"),
+		gatePackage: imports("bytes", "encoding/json", "errors", module+"/internal/protocolvalue"),
 		module + "/internal/protocolvalue": imports(
 			"crypto/sha256", "encoding/base32", "encoding/hex", "errors", "fmt", "strconv", "strings",
 		),

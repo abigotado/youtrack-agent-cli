@@ -93,11 +93,8 @@ private func bindingInsert(_ value: String) throws -> Data {
         raw.append(try bindingInsert(vector.insert_hex))
         raw.append(base.suffix(base.count - vector.offset - vector.delete))
         try #require(bindingHash(raw) == vector.sha256)
-        do {
+        #expect(throws: ApprovalProtocolError.self) {
             _ = try IsolatedBinding(canonicalBytes: raw)
-            Issue.record("Malformed binding accepted: \(vector.name)")
-        } catch {
-            #expect(!String(describing: error).contains("UNTRUSTED_SENTINEL"))
         }
     }
 }

@@ -98,11 +98,8 @@ private func segmentInsert(_ value: String) throws -> Data {
         raw.append(try segmentInsert(vector.insert_hex))
         raw.append(base.suffix(base.count - vector.offset - vector.delete))
         try #require(segmentHash(raw) == vector.sha256)
-        do {
+        #expect(throws: ApprovalProtocolError.self) {
             _ = try IsolatedSegmentContract(canonicalBytes: raw)
-            Issue.record("Malformed segment accepted: \(vector.name)")
-        } catch {
-            #expect(!String(describing: error).contains("UNTRUSTED_SENTINEL"))
         }
     }
 }

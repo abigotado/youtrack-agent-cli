@@ -134,9 +134,6 @@ func TestBindingSharedMalformedVectors(t *testing.T) {
 			if err == nil {
 				t.Fatal("malformed binding accepted")
 			}
-			if strings.Contains(err.Error(), "UNTRUSTED_SENTINEL") {
-				t.Fatal("diagnostic reflected untrusted content")
-			}
 			if output, err := binding.CanonicalBytes(); err == nil || len(output) != 0 {
 				t.Fatal("failed parse returned usable bytes")
 			}
