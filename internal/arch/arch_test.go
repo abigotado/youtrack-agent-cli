@@ -98,6 +98,7 @@ func TestInternalDependencyDAGIsExplicit(t *testing.T) {
 		module + "/internal/cli":           edges("application", "errx", "output"),
 		module + "/internal/endpoint":      edges("protocolvalue"),
 		module + "/internal/errx":          {},
+		module + "/internal/gatecontract":  edges("protocolvalue"),
 		module + "/internal/intent":        edges("endpoint", "protocolvalue"),
 		module + "/internal/journal":       edges("errx", "intent", "lockfile"),
 		module + "/internal/lockfile":      {},
@@ -156,6 +157,35 @@ func TestCLIDoesNotImportNetHTTP(t *testing.T) {
 	for _, imported := range packages[0].Imports {
 		if imported == "net/http" {
 			t.Fatal("internal/cli imports net/http")
+		}
+	}
+}
+
+func TestIsolatedGateContractRemainsPureAndDisconnected(t *testing.T) {
+	const gatePackage = module + "/internal/gatecontract"
+	allowed := map[string]map[string]bool{
+		gatePackage: imports("bytes", "encoding/json", "errors", module+"/internal/protocolvalue"),
+		module + "/internal/protocolvalue": imports(
+			"crypto/sha256", "encoding/base32", "encoding/hex", "errors", "fmt", "strconv", "strings",
+		),
+	}
+	for packagePath, permitted := range allowed {
+		for _, imported := range allGoImports(t, packagePath) {
+			if !permitted[imported] {
+				t.Errorf("isolated Gate value package %s imports unapproved package %s", packagePath, imported)
+			}
+		}
+	}
+	// Inspect source imports, including platform-specific files, not test imports.
+	// No current runtime consumer may treat a parsed syntax value as authority.
+	for _, value := range listedPackages(t, "./...") {
+		if value.ImportPath == gatePackage {
+			continue
+		}
+		for _, imported := range allGoImports(t, value.ImportPath) {
+			if imported == gatePackage {
+				t.Errorf("runtime package %s imports the isolated Gate prerequisite", value.ImportPath)
+			}
 		}
 	}
 }

@@ -11,6 +11,18 @@ have to exist before their own correctly scoped test tokens can be issued.
 `approval.Unsupported` remains the production adapter. Nothing here authorizes
 installation, signing, provisioning, a live test, or a production mutation.
 
+Implementation prerequisites: the Go `internal/gatecontract` and Swift
+`ApprovalProtocol.IsolatedBinding` / `IsolatedSegmentContract` codecs implement
+only the canonical local wire shapes of `gate1b_isolated_binding_v1` and
+`gate1b_isolated_segment_contract_v1`, with shared vectors under
+`testdata/gate1b-isolated-binding` and `testdata/gate1b-isolated-segment`.
+Parsing or hashing either value does not
+resolve its references or prove their types, authenticity, semantic agreement,
+freshness, or authority. Recursive closure verification, the materialized
+inventory/compiler, and native Gate execution remain unimplemented. The segment
+codec checks the local numeric domains below, not relationships between counts
+or equality to the actual compiled tree, referenced sets, or retained files.
+
 ## Scope and precedence
 
 Gate 1B runs independent, root-authorized **units**, not a resettable suite.
@@ -101,6 +113,35 @@ state require separate units; an atomic race may retain its two actors.
 | `gate1b_isolated_coverage_inventory_v1` | `descriptor_sha256`, `catalog_sha256`, `architectures`, `minimum_macos_product_build_version`, `unit_definitions`, `family_requirements` | 2 MiB |
 | `gate1b_isolated_unit_definition_v1` | `unit_ordinal`, `family_id`, `variant_id`, `segment_count`, `setup_contract_sha256`, `scenario_contract_sha256`, `segment_contracts`, `coverage_requirements` | 1 MiB |
 | `gate1b_isolated_segment_contract_v1` | `segment_ordinal`, `mode`, `command_contract_sha256`, `fixture_set_sha256`, `assertion_set_sha256`, `transcript_set_sha256`, `operation_count`, `observation_count`, `transcript_count`, `assertion_count`, `file_count`, `maximum_evidence_bytes` | 4,096 |
+
+For `gate1b_isolated_segment_contract_v1`, all six count/budget fields are
+canonical decimal JSON integers in these closed ranges:
+
+| Field | Minimum | Maximum |
+| --- | ---: | ---: |
+| `operation_count` | 1 | 128 |
+| `observation_count` | 1 | 256 |
+| `transcript_count` | 1 | 2,048 |
+| `assertion_count` | 1 | 256 |
+| `file_count` | 1 | 4,096 |
+| `maximum_evidence_bytes` | 1 | 268,435,456 |
+
+`transcript_count` and `assertion_count` count entries of the referenced segment
+transcript/assertion sets, not result-manifest objects or per-observation copies;
+the required one-to-one result-ID coverage is checked during closure
+verification. Operation counts exclude final evaluations; observation counts
+include operations and case-final evaluations, and segment 1 includes its setup.
+`file_count` is the exact number of distinct retained regular-file paths in the
+whole segment evidence closure, including its leaf index and the separately
+retained private historical-authority branch, but excluding later unit export,
+retirement, disposal, and parent objects. `maximum_evidence_bytes` bounds that
+same closure's aggregate bytes; it is a ceiling, not a claim that exactly that
+many bytes exist. This decision explicitly makes an empty operation sequence
+and a zero-byte evidence budget invalid for either mode. Integer syntax and
+these local ranges are codec checks. Equality to the compiled tree, count
+relationships, referenced-set cardinality, unique result coverage, file
+membership, and actual byte totals remain mandatory closure checks and cannot
+be established by this codec.
 
 The catalog's `families` array has exactly 26 entries in shared catalog order,
 each with fields `family_id`, `variants`. `variants` is empty only for the
