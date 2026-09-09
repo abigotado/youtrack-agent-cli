@@ -4,7 +4,7 @@ public struct ExpectedReceiptBinding: Equatable, Sendable {
     public let authorizationContextSHA256: String
 
     public init(registryRevision: Int, authorizationContextSHA256: String) throws {
-        guard (1...256).contains(registryRevision), ProtocolGrammar.isDigest(authorizationContextSHA256) else {
+        guard (1...ProtocolGrammar.maximumRegistryRevision).contains(registryRevision), ProtocolGrammar.isDigest(authorizationContextSHA256) else {
             throw ApprovalProtocolError.invalidField("expected receipt binding")
         }
         self.registryRevision = registryRevision

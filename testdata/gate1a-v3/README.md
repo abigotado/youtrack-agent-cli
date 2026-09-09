@@ -5,6 +5,15 @@ IPC-success positives. Unchanged plans, public keys, structural DER signature,
 display, request, and error fixtures remain in `../gate1a`. Historical v2 files
 there are unchanged and their receipts are explicitly rejected by v3 parsers.
 
+`revision-boundaries.json` is shared by both language suites. It pins literal
+revision/generation 256 acceptance and 257 rejection independently of each
+implementation's constants. It also rejects generation 257 at revision 256.
+Its signed forms use the structural DER signature, not approval authority.
+Tests additionally exercise generation 257 directly through key constructors,
+so receipt generation/revision equality cannot mask a generation-ceiling defect.
+Fixture readers select current, shared or historical paths explicitly, with no
+filename-based version routing or fallback.
+
 Run from the repository root:
 
 ```sh

@@ -35,12 +35,14 @@ func (binding *ExpectedReceiptBinding) valid() bool {
 	return binding != nil && validRegistryRevision(binding.registryRevision) && isSHA256(binding.authorizationContextSHA256)
 }
 
-func validRegistryRevision(revision int) bool { return revision >= 1 && revision <= 256 }
+func validRegistryRevision(revision int) bool {
+	return revision >= 1 && revision <= MaxRegistryRevision
+}
 
 // keyGenerationRevision accepts exactly YTAG- plus twenty decimal digits.
 // Its bounded accumulator rejects overflow without platform-sized parsing.
 func keyGenerationRevision(value string) int {
-	if len(value) != 25 || value[:5] != "YTAG-" {
+	if len(value) != MaxKeyGenerationBytes || value[:5] != "YTAG-" {
 		return 0
 	}
 	revision := 0
@@ -49,7 +51,7 @@ func keyGenerationRevision(value string) int {
 			return 0
 		}
 		revision = revision*10 + int(value[i]-'0')
-		if revision > 256 {
+		if revision > MaxRegistryRevision {
 			return 0
 		}
 	}

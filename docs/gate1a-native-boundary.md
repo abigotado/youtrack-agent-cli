@@ -103,6 +103,12 @@ The CLI creates a fresh opaque 32-byte CSPRNG challenge per request. Both
 success and error responses echo it, Go compares it in constant time, and a
 success receipt signs its lowercase SHA-256 as `challenge_sha256`.
 
+With valid caller dependencies, error frames are interpreted after strict frame,
+challenge, and closed-code validation. They carry no receipt or signing key;
+an otherwise-valid expected key/binding revision mismatch does not replace the
+helper's failure code. Key/revision cross-binding is checked only for success.
+A failure is never approval authority or permission to retry automatically.
+
 ### Cross-binding acceptance
 
 Go accepts a success only after all of these checks succeed:

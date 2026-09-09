@@ -286,9 +286,6 @@ func DecodeAndValidateIPCResponse(ctx context.Context, raw []byte, expectedChall
 	if snapshot == nil || len(snapshot.bytes) == 0 || expectedKey == nil || expectedKey.publicKey == nil || !expectedBinding.valid() {
 		return nil, responseInvalid("approval response validation dependencies are missing", nil)
 	}
-	if keyGenerationRevision(expectedKey.generation) != expectedBinding.registryRevision {
-		return nil, signingKeyMismatch("the enrolled signing key does not match the expected registry revision", nil)
-	}
 	frame, err := decodeIPCFrame(raw)
 	if err != nil {
 		return nil, err
@@ -304,6 +301,9 @@ func DecodeAndValidateIPCResponse(ctx context.Context, raw []byte, expectedChall
 		}
 		return &ValidatedIPCResponse{failure: &HelperFailure{Code: code}}, nil
 	case IPCFrameSuccess:
+		if keyGenerationRevision(expectedKey.generation) != expectedBinding.registryRevision {
+			return nil, signingKeyMismatch("the enrolled signing key does not match the expected registry revision", nil)
+		}
 		return validateIPCSuccess(ctx, frame.Payload, expectedChallenge, snapshot, expectedKey, expectedBinding, now)
 	default:
 		return nil, responseInvalid("an approval response cannot contain a request frame", nil)
@@ -325,6 +325,7 @@ func validateIPCSuccess(ctx context.Context, payload []byte, challenge [IPCChall
 	if receipt.KeyGeneration != key.generation || receipt.KeyFingerprintSHA256 != key.fingerprint {
 		return nil, signingKeyMismatch("the receipt does not bind the enrolled signing key", nil)
 	}
+	// Retain direct revision equality as defense in depth alongside the generation checks.
 	if receipt.RegistryRevision != binding.registryRevision || receipt.AuthorizationContextSHA256 != binding.authorizationContextSHA256 {
 		return nil, responseInvalid("the approval receipt does not match the expected authorization context", nil)
 	}

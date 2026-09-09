@@ -3,15 +3,67 @@ import Foundation
 import Testing
 @testable import ApprovalProtocol
 
-func receiptFixtureDirectory(_ name: String) -> String {
-    switch name {
-    case "signing.json", "receipt.json", "signing.sha256", "receipt.sha256", "ipc-success-receipt.json", "ipc-success.hex": "gate1a-v3"
-    default: "gate1a"
+func receiptBindingForTest() throws -> ExpectedReceiptBinding {
+    try ExpectedReceiptBinding(registryRevision: 1, authorizationContextSHA256: String(repeating: "a", count: 64))
+}
+
+@Test func sharedReceiptV3RevisionCorpus() throws {
+    struct Vector: Decodable { let name: String; let accepted: Bool; let signing: String; let receipt: String }
+    let vectors = try JSONDecoder().decode([Vector].self, from: v3Fixture("revision-boundaries.json"))
+    try #require(vectors.count == 3)
+    for vector in vectors {
+        if vector.accepted {
+            let unsigned = try UnsignedApprovalReceipt(signingBytes: Data(vector.signing.utf8))
+            let receipt = try ApprovalReceipt(receiptBytes: Data(vector.receipt.utf8))
+            #expect(receipt.unsigned == unsigned)
+            #expect(unsigned.encodedSigningBytes() == Data(vector.signing.utf8))
+            #expect(receipt.encodedReceiptBytes() == Data(vector.receipt.utf8))
+        } else {
+            #expect(throws: ApprovalProtocolError.self, "accepted \(vector.name)") { _ = try UnsignedApprovalReceipt(signingBytes: Data(vector.signing.utf8)) }
+            #expect(throws: ApprovalProtocolError.self, "accepted \(vector.name)") { _ = try ApprovalReceipt(receiptBytes: Data(vector.receipt.utf8)) }
+        }
+    }
+    #expect(throws: ApprovalProtocolError.self) {
+        _ = try EnrolledSigningKey(generation: "YTAG-00000000000000000257", spkiDER: v3Hex(sharedFixture("public-key.spki.hex")))
     }
 }
 
-func receiptBindingForTest() throws -> ExpectedReceiptBinding {
-    try ExpectedReceiptBinding(registryRevision: 1, authorizationContextSHA256: String(repeating: "a", count: 64))
+@Test func IPCFailureUnionDoesNotRequireMatchingSigningRevision() throws {
+    let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(v3Hex(sharedFixture("ipc-request.hex")))
+    let key = try EnrolledSigningKey(generation: "YTAG-00000000000000000001", spkiDER: v3Hex(sharedFixture("public-key.spki.hex")))
+    let binding = try ExpectedReceiptBinding(registryRevision: 2, authorizationContextSHA256: String(repeating: "a", count: 64))
+    for code in [ApprovalIPCErrorCode.userCanceled, .requestInvalid, .userPresenceUnavailable, .keyUnavailable, .signingFailed, .internalFailure] {
+        let frame = ApprovalIPCCodec.encodeFailure(challenge: challenge, code: code)
+        #expect(try ApprovalIPCCodec.decodeAndValidateResponse(frame, expectedChallenge: challenge, snapshot: snapshot, expectedKey: key, expectedBinding: binding, now: Date()) == .failure(code))
+        var changedChallenge = challenge.bytes(); changedChallenge[0] ^= 1
+        #expect(throws: ApprovalProtocolError.self) {
+            _ = try ApprovalIPCCodec.decodeAndValidateResponse(frame, expectedChallenge: ApprovalIPCChallenge(bytes: changedChallenge), snapshot: snapshot, expectedKey: key, expectedBinding: binding, now: Date())
+        }
+        var unknown = frame; unknown[unknown.count - 1] = 255
+        for malformed in [Data(frame.dropLast()), frame + Data([0]), unknown] {
+            #expect(throws: ApprovalProtocolError.self) {
+                _ = try ApprovalIPCCodec.decodeAndValidateResponse(malformed, expectedChallenge: challenge, snapshot: snapshot, expectedKey: key, expectedBinding: binding, now: Date())
+            }
+        }
+    }
+    #expect(throws: ApprovalProtocolError.invalidField("expected receipt binding")) {
+        _ = try ApprovalIPCCodec.decodeAndValidateResponse(v3Hex(v3Fixture("ipc-success.hex")), expectedChallenge: challenge, snapshot: snapshot, expectedKey: key, expectedBinding: binding, now: v3Date())
+    }
+}
+
+@Test func receiptV3RegistryErrorsIdentifyTheInvalidField() throws {
+    let valid = try v3Fixture("signing.json")
+    for (old, new, expected) in [
+        (#","registry_revision":1"#, "", ApprovalProtocolError.missingField("registry_revision")),
+        (#""registry_revision":1"#, #""registry_revision":"1""#, .invalidField("registry_revision")),
+        (#""registry_revision":1"#, #""registry_revision":0"#, .invalidField("registry_revision")),
+        (#""registry_revision":1"#, #""registry_revision":257"#, .invalidField("registry_revision")),
+        ("YTAG-00000000000000000001", "invalid", .invalidField("key_generation")),
+    ] {
+        let changed = v3Replacing(valid, old, new)
+        #expect(throws: expected) { _ = try UnsignedApprovalReceipt(signingBytes: changed) }
+        #expect(throws: expected) { _ = try ApprovalReceipt(receiptBytes: v3SignedBytes(changed)) }
+    }
 }
 
 @Test func receiptV3RevisionAndContextBoundaries() throws {
@@ -26,7 +78,7 @@ func receiptBindingForTest() throws -> ExpectedReceiptBinding {
         #expect(parsed.keyGeneration == generation)
         #expect(parsed.authorizationContextSHA256 == String(repeating: "a", count: 64))
         #expect(try ApprovalReceipt(receiptBytes: v3SignedBytes(Data(changed.utf8))).unsigned == parsed)
-        _ = try EnrolledSigningKey(generation: generation, spkiDER: v3Hex(v3Fixture("public-key.spki.hex")))
+        _ = try EnrolledSigningKey(generation: generation, spkiDER: v3Hex(sharedFixture("public-key.spki.hex")))
         let binding = try ExpectedReceiptBinding(registryRevision: revision, authorizationContextSHA256: parsed.authorizationContextSHA256)
         #expect(binding.registryRevision == revision)
         #expect(binding.authorizationContextSHA256 == parsed.authorizationContextSHA256)
@@ -63,14 +115,14 @@ func receiptBindingForTest() throws -> ExpectedReceiptBinding {
 }
 
 @Test func historicalV2ReceiptAndFrameAreRejected() throws {
-    #expect(throws: ApprovalProtocolError.self) { _ = try UnsignedApprovalReceipt(signingBytes: v3Fixture("signing.json", historical: true)) }
+    #expect(throws: ApprovalProtocolError.self) { _ = try UnsignedApprovalReceipt(signingBytes: historicalFixture("signing.json")) }
     for name in ["receipt.json", "ipc-success-receipt.json"] {
-        #expect(throws: ApprovalProtocolError.self) { _ = try ApprovalReceipt(receiptBytes: v3Fixture(name, historical: true)) }
+        #expect(throws: ApprovalProtocolError.self) { _ = try ApprovalReceipt(receiptBytes: historicalFixture(name)) }
     }
-    let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(v3Hex(v3Fixture("ipc-request.hex")))
-    let key = try EnrolledSigningKey(generation: "YTAG-00000000000000000001", spkiDER: v3Hex(v3Fixture("public-key.spki.hex")))
+    let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(v3Hex(sharedFixture("ipc-request.hex")))
+    let key = try EnrolledSigningKey(generation: "YTAG-00000000000000000001", spkiDER: v3Hex(sharedFixture("public-key.spki.hex")))
     #expect(throws: ApprovalProtocolError.self) {
-        _ = try ApprovalIPCCodec.decodeAndValidateResponse(v3Hex(v3Fixture("ipc-success.hex", historical: true)), expectedChallenge: challenge, snapshot: snapshot, expectedKey: key, expectedBinding: receiptBindingForTest(), now: v3Date())
+        _ = try ApprovalIPCCodec.decodeAndValidateResponse(v3Hex(historicalFixture("ipc-success.hex")), expectedChallenge: challenge, snapshot: snapshot, expectedKey: key, expectedBinding: receiptBindingForTest(), now: v3Date())
     }
 }
 
@@ -97,10 +149,10 @@ func receiptBindingForTest() throws -> ExpectedReceiptBinding {
 }
 
 @Test func receiptV3IPCChecksIndependentBindingAndSignedFields() throws {
-    let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(v3Hex(v3Fixture("ipc-request.hex")))
+    let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(v3Hex(sharedFixture("ipc-request.hex")))
     let now = try v3Date()
     let original = try v3Hex(v3Fixture("ipc-success.hex"))
-    let spki = try v3Hex(v3Fixture("public-key.spki.hex"))
+    let spki = try v3Hex(sharedFixture("public-key.spki.hex"))
     let key = try EnrolledSigningKey(generation: "YTAG-00000000000000000001", spkiDER: spki)
     let binding = try receiptBindingForTest()
     _ = try ApprovalIPCCodec.decodeAndValidateResponse(original, expectedChallenge: challenge, snapshot: snapshot, expectedKey: key, expectedBinding: binding, now: now)
@@ -139,7 +191,7 @@ func receiptBindingForTest() throws -> ExpectedReceiptBinding {
 }
 
 @Test func receiptV3FactoryRejectsRevisionMismatchBeforeSignerUse() throws {
-    let (_, snapshot) = try ApprovalIPCCodec.decodeRequest(v3Hex(v3Fixture("ipc-request.hex")))
+    let (_, snapshot) = try ApprovalIPCCodec.decodeRequest(v3Hex(sharedFixture("ipc-request.hex")))
     let challenge = try ApprovalIPCChallenge(bytes: Data(0..<32))
     let signer = V3Signer(revision: 2)
     #expect(throws: ApprovalProtocolError.self) {
@@ -188,10 +240,21 @@ private func v3Replacing(_ input: Data, _ old: String, _ new: String) -> Data {
     output.replaceSubrange(range, with: Data(new.utf8))
     return output
 }
-private func v3Fixture(_ name: String, historical: Bool = false) throws -> Data {
+func v3Fixture(_ name: String) throws -> Data {
+    try readApprovalFixture(name, directory: "gate1a-v3")
+}
+func v3FixtureString(_ name: String) throws -> String {
+    try #require(String(data: v3Fixture(name), encoding: .utf8))
+}
+private func sharedFixture(_ name: String) throws -> Data {
+    try readApprovalFixture(name, directory: "gate1a")
+}
+private func historicalFixture(_ name: String) throws -> Data {
+    try readApprovalFixture(name, directory: "gate1a")
+}
+private func readApprovalFixture(_ name: String, directory: String) throws -> Data {
     var root = URL(fileURLWithPath: #filePath)
     for _ in 0..<6 { root.deleteLastPathComponent() }
-    let directory = historical ? "gate1a" : receiptFixtureDirectory(name)
     var raw = try Data(contentsOf: root.appendingPathComponent("testdata/\(directory)/\(name)"))
     try #require(raw.last == 0x0A)
     raw.removeLast()

@@ -21,7 +21,7 @@ import (
 )
 
 func TestIPCRequestSnapshotOwnsBytesAndParsesOnce(t *testing.T) {
-	raw := append([]byte(nil), gate1AFixture(t, "plan-comment-add.json")...)
+	raw := append([]byte(nil), sharedGate1AFixture(t, "plan-comment-add.json")...)
 	want := append([]byte(nil), raw...)
 	snapshot, err := NewApprovalSnapshot(raw)
 	if err != nil {
@@ -60,10 +60,10 @@ func TestIPCV2SharedFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := mustDecodeHex(t, gate1AFixture(t, "ipc-request.hex")); !bytes.Equal(request, want) {
+	if want := mustDecodeHex(t, sharedGate1AFixture(t, "ipc-request.hex")); !bytes.Equal(request, want) {
 		t.Fatal("request encoding differs from the shared v2 fixture")
 	}
-	success := mustDecodeHex(t, gate1AFixture(t, "ipc-success.hex"))
+	success := mustDecodeHex(t, receiptV3Fixture(t, "ipc-success.hex"))
 	response, err := DecodeAndValidateIPCResponse(context.Background(), success, challenge, snapshot, key, expectedReceiptBindingForTest(t), time.Date(2026, 9, 2, 15, 35, 56, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
@@ -72,12 +72,12 @@ func TestIPCV2SharedFixtures(t *testing.T) {
 	if !ok {
 		t.Fatal("shared success fixture did not produce a verified receipt")
 	}
-	wantReceipt := gate1AFixture(t, "ipc-success-receipt.json")
+	wantReceipt := receiptV3Fixture(t, "ipc-success-receipt.json")
 	gotReceipt, err := ReceiptBytes(*receipt)
 	if err != nil || !bytes.Equal(gotReceipt, wantReceipt) {
 		t.Fatalf("success receipt differs from fixture: %v", err)
 	}
-	failureRaw := mustDecodeHex(t, gate1AFixture(t, "ipc-error.hex"))
+	failureRaw := mustDecodeHex(t, sharedGate1AFixture(t, "ipc-error.hex"))
 	failureResponse, err := DecodeAndValidateIPCResponse(context.Background(), failureRaw, challenge, snapshot, key, expectedReceiptBindingForTest(t), time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestIPCV2SharedFixtures(t *testing.T) {
 }
 
 func TestDecodeAndValidateIPCResponseBindsChallengePlanAndEnrolledKey(t *testing.T) {
-	snapshot, err := NewApprovalSnapshot(gate1AFixture(t, "plan-comment-add.json"))
+	snapshot, err := NewApprovalSnapshot(sharedGate1AFixture(t, "plan-comment-add.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestDecodeAndValidateIPCResponseBindsChallengePlanAndEnrolledKey(t *testing
 		assertReason(t, err, "APPROVAL_CHALLENGE_MISMATCH")
 	})
 	t.Run("different plan snapshot", func(t *testing.T) {
-		otherSnapshot, err := NewApprovalSnapshot(gate1AFixture(t, "plan-issue-update.json"))
+		otherSnapshot, err := NewApprovalSnapshot(sharedGate1AFixture(t, "plan-issue-update.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func TestDecodeAndValidateIPCResponseBindsChallengePlanAndEnrolledKey(t *testing
 }
 
 func TestDecodeAndValidateIPCResponseBindsEveryReceiptFieldAndSignature(t *testing.T) {
-	snapshot, err := NewApprovalSnapshot(gate1AFixture(t, "plan-comment-add.json"))
+	snapshot, err := NewApprovalSnapshot(sharedGate1AFixture(t, "plan-comment-add.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestDecodeAndValidateIPCResponseBindsEveryReceiptFieldAndSignature(t *testi
 }
 
 func TestDecodeAndValidateIPCResponseTTLAndClockSkewBoundaries(t *testing.T) {
-	snapshot, err := NewApprovalSnapshot(gate1AFixture(t, "plan-comment-add.json"))
+	snapshot, err := NewApprovalSnapshot(sharedGate1AFixture(t, "plan-comment-add.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,8 +280,8 @@ func TestDecodeAndValidateIPCResponsePreservesContext(t *testing.T) {
 }
 
 func TestExpectedSigningKeyValidatesAndDefensivelyCopies(t *testing.T) {
-	spki := mustDecodeHex(t, gate1AFixture(t, "public-key.spki.hex"))
-	fingerprint := string(gate1AFixture(t, "public-key.fingerprint-sha256"))
+	spki := mustDecodeHex(t, sharedGate1AFixture(t, "public-key.spki.hex"))
+	fingerprint := string(sharedGate1AFixture(t, "public-key.fingerprint-sha256"))
 	key, err := NewExpectedSigningKey("YTAG-00000000000000000001", spki, fingerprint)
 	if err != nil {
 		t.Fatal(err)
@@ -315,9 +315,9 @@ func TestIPCFrameBounds(t *testing.T) {
 		min  uint32
 		max  uint32
 	}{
-		{name: "request", kind: IPCFrameRequest, raw: mustDecodeHex(t, gate1AFixture(t, "ipc-request.hex")), min: minimumRequestPayload, max: maxIPCRequestPayload},
-		{name: "success", kind: IPCFrameSuccess, raw: mustDecodeHex(t, gate1AFixture(t, "ipc-success.hex")), min: minimumSuccessPayload, max: maxIPCSuccessPayload},
-		{name: "error", kind: IPCFrameError, raw: mustDecodeHex(t, gate1AFixture(t, "ipc-error.hex")), min: exactIPCErrorPayload, max: exactIPCErrorPayload},
+		{name: "request", kind: IPCFrameRequest, raw: mustDecodeHex(t, sharedGate1AFixture(t, "ipc-request.hex")), min: minimumRequestPayload, max: maxIPCRequestPayload},
+		{name: "success", kind: IPCFrameSuccess, raw: mustDecodeHex(t, receiptV3Fixture(t, "ipc-success.hex")), min: minimumSuccessPayload, max: maxIPCSuccessPayload},
+		{name: "error", kind: IPCFrameError, raw: mustDecodeHex(t, sharedGate1AFixture(t, "ipc-error.hex")), min: exactIPCErrorPayload, max: exactIPCErrorPayload},
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture.name, func(t *testing.T) {
@@ -405,12 +405,12 @@ func repeatHex(value byte) string {
 
 func fixtureSnapshotAndKey(t *testing.T) (*ApprovalSnapshot, *ExpectedSigningKey) {
 	t.Helper()
-	snapshot, err := NewApprovalSnapshot(gate1AFixture(t, "plan-comment-add.json"))
+	snapshot, err := NewApprovalSnapshot(sharedGate1AFixture(t, "plan-comment-add.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	spki := mustDecodeHex(t, gate1AFixture(t, "public-key.spki.hex"))
-	key, err := NewExpectedSigningKey("YTAG-00000000000000000001", spki, string(gate1AFixture(t, "public-key.fingerprint-sha256")))
+	spki := mustDecodeHex(t, sharedGate1AFixture(t, "public-key.spki.hex"))
+	key, err := NewExpectedSigningKey("YTAG-00000000000000000001", spki, string(sharedGate1AFixture(t, "public-key.fingerprint-sha256")))
 	if err != nil {
 		t.Fatal(err)
 	}

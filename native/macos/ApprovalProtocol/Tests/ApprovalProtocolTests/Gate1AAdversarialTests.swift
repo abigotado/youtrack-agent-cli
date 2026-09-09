@@ -4,7 +4,7 @@ import Testing
 @testable import ApprovalProtocol
 
 @Test func receiptPlanIDRejectsNonCanonicalFinalBase32Bits() throws {
-    let valid = try boundaryFixture("signing.json")
+    let valid = try v3Fixture("signing.json")
     let invalid = boundaryReplacing(
         valid,
         "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -60,7 +60,7 @@ import Testing
         #"{"issue_id":"APP-1","text":"hello\r\n\nAgent plan: \#(planID)","visibility":{"mode":"public"},"marker":"visible_footer"}"#.utf8
     )
     var plan = boundaryReplacing(
-        try boundaryFixture("plan-comment-add.json"),
+        try sharedFixture("plan-comment-add.json"),
         String(decoding: originalRequest, as: UTF8.self),
         with: String(decoding: changedRequest, as: UTF8.self)
     )
@@ -138,7 +138,7 @@ import Testing
         ("plan-comment-add.json", "Comment fixture", "Comment fixture!", "issue_create"),
     ]
     for (name, content, changedContent, secondUnion) in cases {
-        let valid = try boundaryFixture(name)
+        let valid = try sharedFixture(name)
         let snapshot = try ValidatedPlanSnapshot(canonicalBytes: valid)
         #expect(snapshot.exactBytes() == valid)
 
@@ -164,7 +164,7 @@ import Testing
 }
 
 @Test func validatedSnapshotDefensivelyCopiesInputAndReturnedData() throws {
-    var input = try boundaryFixture("plan-comment-add.json")
+    var input = try sharedFixture("plan-comment-add.json")
     let expected = input
     let snapshot = try ValidatedPlanSnapshot(canonicalBytes: input)
     input[0] ^= 1
@@ -186,7 +186,7 @@ import Testing
 }
 
 @Test func receiptFactoryRejectsSignerIdentityAndMessageSubstitution() throws {
-    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: sharedFixture("plan-comment-add.json"))
     let clock = BoundaryClock(value: try boundaryDate("2026-09-02T15:34:56Z"))
     let challenge = try boundaryChallenge()
 
@@ -204,7 +204,7 @@ import Testing
         #expect(signer.calls == 1)
     }
 
-    var inputSPKI = try boundaryDecodeHex(try boundaryFixtureString("public-key.spki.hex"))
+    var inputSPKI = try boundaryDecodeHex(try sharedFixtureString("public-key.spki.hex"))
     let expected = inputSPKI
     let identity = try EnrolledSigningKey(generation: "YTAG-00000000000000000001", spkiDER: inputSPKI)
     inputSPKI[0] ^= 1
@@ -212,7 +212,7 @@ import Testing
 }
 
 @Test func receiptFactoryAcceptsExactRandomBytesFromNonzeroStartSlices() throws {
-    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: sharedFixture("plan-comment-add.json"))
     let challenge = try boundaryChallenge()
     let receipt = try ApprovalReceiptFactory.makeReceipt(
         for: snapshot,
@@ -237,14 +237,14 @@ import Testing
 }
 
 @Test func IPCHeaderLengthsTruncationTrailingAndClosedErrorUnionFailClosed() throws {
-    let requestFrame = try boundaryDecodeHex(try boundaryFixtureString("ipc-request.hex"))
+    let requestFrame = try boundaryDecodeHex(try sharedFixtureString("ipc-request.hex"))
     let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(requestFrame)
     let now = try boundaryDate("2026-09-02T15:35:00Z")
     let expectedKey = try boundaryFixtureKey()
     let fixtures: [(String, UInt8, Data, UInt32, UInt32)] = [
         ("request", 1, requestFrame, 33, UInt32(32 + ValidatedPlanSnapshot.maximumBytes)),
-        ("success", 2, try boundaryDecodeHex(try boundaryFixtureString("ipc-success.hex")), 124, UInt32(32 + 91 + ApprovalReceipt.maximumReceiptBytes)),
-        ("error", 3, try boundaryDecodeHex(try boundaryFixtureString("ipc-error.hex")), 33, 33),
+        ("success", 2, try boundaryDecodeHex(try v3FixtureString("ipc-success.hex")), 124, UInt32(32 + 91 + ApprovalReceipt.maximumReceiptBytes)),
+        ("error", 3, try boundaryDecodeHex(try sharedFixtureString("ipc-error.hex")), 33, 33),
     ]
     for (name, kind, valid, minimum, maximum) in fixtures {
         for (caseName, malformed) in [
@@ -290,7 +290,7 @@ import Testing
 }
 
 @Test func IPCFramesAcceptNonzeroStartSlicesWithoutUnsafeIndexing() throws {
-    let request = try boundaryDecodeHex(try boundaryFixtureString("ipc-request.hex"))
+    let request = try boundaryDecodeHex(try sharedFixtureString("ipc-request.hex"))
     let storage = Data(repeating: 0xA5, count: 37) + request + Data([0x5A])
     let sliced = storage.dropFirst(37).dropLast()
     let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(sliced)
@@ -306,7 +306,7 @@ import Testing
 @Test func IPCChallengeComparesEveryFixedByteAndBindsBothResponseKinds() throws {
     let bytes = Data(0..<UInt8(ApprovalIPCChallenge.byteCount))
     let challenge = try ApprovalIPCChallenge(bytes: bytes)
-    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: sharedFixture("plan-comment-add.json"))
     let expectedKey = try boundaryFixtureKey()
     for index in [0, ApprovalIPCChallenge.byteCount / 2, ApprovalIPCChallenge.byteCount - 1] {
         var changed = bytes
@@ -339,7 +339,7 @@ import Testing
 }
 
 @Test func IPCSuccessBindsKeyMessagePlanAndTTLBoundariesCryptographically() throws {
-    let request = try boundaryDecodeHex(try boundaryFixtureString("ipc-request.hex"))
+    let request = try boundaryDecodeHex(try sharedFixtureString("ipc-request.hex"))
     let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(request)
     let signer = BoundarySigner(mode: .valid)
     let issued = try boundaryDate("2026-09-02T15:34:56Z")
@@ -438,9 +438,9 @@ import Testing
 }
 
 @Test func IPCSuccessRejectsNonFiniteAndOutOfProtocolRangeClocks() throws {
-    let request = try boundaryDecodeHex(try boundaryFixtureString("ipc-request.hex"))
+    let request = try boundaryDecodeHex(try sharedFixtureString("ipc-request.hex"))
     let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(request)
-    let success = try boundaryDecodeHex(try boundaryFixtureString("ipc-success.hex"))
+    let success = try boundaryDecodeHex(try v3FixtureString("ipc-success.hex"))
     let expectedKey = try boundaryFixtureKey()
     for seconds in [
         Double.nan,
@@ -463,7 +463,7 @@ import Testing
 }
 
 @Test func IPCV2RejectsChallengeReplayAndSelfSelectedKey() throws {
-    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: sharedFixture("plan-comment-add.json"))
     let expectedSigner = BoundarySigner(mode: .valid)
     let challengeA = try boundaryChallenge()
     var challengeBBytes = challengeA.bytes()
@@ -501,7 +501,7 @@ import Testing
 }
 
 @Test func IPCV2RejectsWrongEnrolledGenerationAndFingerprint() throws {
-    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: boundaryFixture("plan-comment-add.json"))
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: sharedFixture("plan-comment-add.json"))
     let signer = BoundarySigner(mode: .valid)
     let challenge = try boundaryChallenge()
     let issued = try boundaryDate("2026-09-02T15:34:56Z")
@@ -621,7 +621,7 @@ private func boundaryUnsigned(
 
 private func boundaryPlan(loginPrefix: String) throws -> Data {
     boundaryReplacing(
-        try boundaryFixture("plan-issue-create.json"),
+        try sharedFixture("plan-issue-create.json"),
         #""login":"alice""#,
         with: #""login":"\#(loginPrefix)alice""#
     )
@@ -632,7 +632,7 @@ private func boundaryCommentPlan(text: String) throws -> Data {
         #"{"issue_id":"APP-1","text":"Comment fixture","visibility":{"mode":"public"},"marker":"none"}"#.utf8
     )
     let changedRequest = boundaryReplacing(originalRequest, "Comment fixture", with: text)
-    var plan = boundaryReplacing(try boundaryFixture("plan-comment-add.json"), "Comment fixture", with: text)
+    var plan = boundaryReplacing(try sharedFixture("plan-comment-add.json"), "Comment fixture", with: text)
     plan = boundaryReplacing(
         plan,
         "87ecebe85e37fca8dd48b2cb607822c539e859ce19d5a8be2afe78171f73b37d",
@@ -646,7 +646,7 @@ private func boundaryCreatePlan(replacing old: String, with new: String) throws 
         #"{"summary":"Create fixture","description":"Untrusted \u003cb\u003etext\u003c/b\u003e","visibility":{"mode":"public"},"custom_fields":[{"field_id":"priority","field_type":"enum","value_id":"normal"}],"marker":"none"}"#.utf8
     )
     let changedRequest = boundaryReplacing(originalRequest, old, with: new)
-    var plan = boundaryReplacing(try boundaryFixture("plan-issue-create.json"), old, with: new)
+    var plan = boundaryReplacing(try sharedFixture("plan-issue-create.json"), old, with: new)
     plan = boundaryReplacing(
         plan,
         "bb6a78c3861939df7fd7f5a9e6112397c94d318f6e944a44a626d8194af42f18",
@@ -691,7 +691,7 @@ private func boundaryChallenge() throws -> ApprovalIPCChallenge {
 private func boundaryFixtureKey() throws -> EnrolledSigningKey {
     try EnrolledSigningKey(
         generation: "YTAG-00000000000000000001",
-        spkiDER: boundaryDecodeHex(try boundaryFixtureString("public-key.spki.hex"))
+        spkiDER: boundaryDecodeHex(try sharedFixtureString("public-key.spki.hex"))
     )
 }
 
@@ -699,17 +699,17 @@ private func boundaryDate(_ value: String) throws -> Date {
     try #require(ISO8601DateFormatter().date(from: value))
 }
 
-private func boundaryFixture(_ name: String) throws -> Data {
+private func sharedFixture(_ name: String) throws -> Data {
     var root = URL(fileURLWithPath: #filePath)
     for _ in 0..<6 { root.deleteLastPathComponent() }
-    var data = try Data(contentsOf: root.appendingPathComponent("testdata/\(receiptFixtureDirectory(name))/\(name)"))
+    var data = try Data(contentsOf: root.appendingPathComponent("testdata/gate1a/\(name)"))
     guard data.last == 0x0A else { throw ApprovalProtocolError.nonCanonicalEncoding }
     data.removeLast()
     return data
 }
 
-private func boundaryFixtureString(_ name: String) throws -> String {
-    guard let value = String(data: try boundaryFixture(name), encoding: .utf8) else {
+private func sharedFixtureString(_ name: String) throws -> String {
+    guard let value = String(data: try sharedFixture(name), encoding: .utf8) else {
         throw ApprovalProtocolError.nonCanonicalEncoding
     }
     return value

@@ -273,7 +273,12 @@ SHA-256 hex over those exact 91 DER bytes.
 
 ## Fixtures
 
-Language-neutral vectors live under `testdata/gate1a/`. Text fixture files end
+Current receipt-schema-v3 positives and literal revision-boundary vectors live
+under [`testdata/gate1a-v3/`](../testdata/gate1a-v3/README.md). Historical receipt-v2
+rejection fixtures and unchanged shared plans, keys, signatures, display, and
+IPC request/error frames live under [`testdata/gate1a/`](../testdata/gate1a/README.md).
+Test callers select the version explicitly; a missing current fixture never
+falls back to a historical one. Text fixture files end
 with one LF for source-control portability; the JSON values referenced by the
 protocol are the file contents without that final fixture LF. Hex files encode
 the named binary value in lowercase without separators, again followed by one

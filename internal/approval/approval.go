@@ -26,6 +26,8 @@ const (
 	MaxSigningBytes = 3 << 10
 	// MaxKeyGenerationBytes is the exact width of YTAG- plus twenty decimal digits.
 	MaxKeyGenerationBytes = 25
+	// MaxRegistryRevision is the largest supported receipt registry revision.
+	MaxRegistryRevision = 256
 	// MaximumReceiptTTL is the longest receipt lifetime accepted by schema v3.
 	MaximumReceiptTTL = 5 * time.Minute
 

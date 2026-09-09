@@ -166,6 +166,15 @@ protocol. Read-only commands remain available.
 
 ## Future journal record v2 and migration
 
+Journal v1 deliberately retains its legacy metadata contract: `ReceiptBinding`
+requires only a non-whitespace key-generation label and has neither a registry
+revision nor an authorization-context digest. That is not the schema-v3 approval
+grammar, and a valid v1 metadata record does not establish valid v3 authority.
+The production approver remains `approval.Unsupported`; confirmation does not
+persist a v3 receipt into that record. Do not bridge the schemas by copying
+metadata or treating the journal's validation as receipt verification. Full
+authority verification and the strict v2 record/migration below must land first.
+
 The current implementation writes journal record version 1. Native authority
 work must first introduce strict record version 2; no v1 record can enter the
 coordinator. A canonical v2 record contains these fields in order: `version`

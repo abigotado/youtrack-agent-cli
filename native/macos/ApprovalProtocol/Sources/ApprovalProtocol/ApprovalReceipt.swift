@@ -88,7 +88,10 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         receiptID = try takeString("receipt_id")
         nonce = try takeString("nonce")
         challengeSHA256 = try takeString("challenge_sha256")
-        guard case let .integer(revision)? = fields.removeValue(forKey: "registry_revision") else {
+        guard let revisionValue = fields.removeValue(forKey: "registry_revision") else {
+            throw ApprovalProtocolError.missingField("registry_revision")
+        }
+        guard case let .integer(revision) = revisionValue else {
             throw ApprovalProtocolError.invalidField("registry_revision")
         }
         registryRevision = revision
@@ -169,7 +172,10 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         guard ProtocolGrammar.isIdentifier(accountID) else { throw ApprovalProtocolError.invalidField("account_id") }
         guard ProtocolGrammar.isIdentifier(projectID) else { throw ApprovalProtocolError.invalidField("project_id") }
         guard ProtocolGrammar.isProjectKey(projectKey) else { throw ApprovalProtocolError.invalidField("project_key") }
-        guard (1...256).contains(registryRevision), ProtocolGrammar.keyGenerationRevision(keyGeneration) == registryRevision else {
+        guard (1...ProtocolGrammar.maximumRegistryRevision).contains(registryRevision) else {
+            throw ApprovalProtocolError.invalidField("registry_revision")
+        }
+        guard ProtocolGrammar.keyGenerationRevision(keyGeneration) == registryRevision else {
             throw ApprovalProtocolError.invalidField("key_generation")
         }
         guard let issuedSeconds = Self.wholeSecondUTCValue(issuedAt),

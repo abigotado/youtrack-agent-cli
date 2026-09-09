@@ -24,6 +24,91 @@ func expectedReceiptBindingForTest(t *testing.T) *ExpectedReceiptBinding {
 	return binding
 }
 
+func TestSharedReceiptV3RevisionCorpus(t *testing.T) {
+	var cases []struct {
+		Name     string `json:"name"`
+		Accepted bool   `json:"accepted"`
+		Signing  string `json:"signing"`
+		Receipt  string `json:"receipt"`
+	}
+	if err := json.Unmarshal(receiptV3Fixture(t, "revision-boundaries.json"), &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) != 3 {
+		t.Fatal("expected three revision boundary vectors")
+	}
+	for _, test := range cases {
+		t.Run(test.Name, func(t *testing.T) {
+			receipt, err := ParseReceiptBytes([]byte(test.Receipt))
+			if (err == nil) != test.Accepted {
+				t.Fatalf("receipt accepted=%v, want %v: %v", err == nil, test.Accepted, err)
+			}
+			if test.Accepted {
+				signing, err := SigningBytes(receipt)
+				if err != nil || string(signing) != test.Signing {
+					t.Fatalf("signing vector mismatch: %v", err)
+				}
+			} else {
+				// Go has no public unsigned parser; decode the literal signing
+				// fields into Receipt, then exercise its public signing validator.
+				var unsigned Receipt
+				if err := json.Unmarshal([]byte(test.Signing), &unsigned); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := SigningBytes(unsigned); err == nil {
+					t.Fatal("invalid unsigned vector accepted")
+				}
+			}
+		})
+	}
+	spki := mustDecodeHex(t, sharedGate1AFixture(t, "public-key.spki.hex"))
+	if _, err := NewExpectedSigningKey("YTAG-00000000000000000257", spki, string(sharedGate1AFixture(t, "public-key.fingerprint-sha256"))); err == nil {
+		t.Fatal("standalone generation 257 accepted")
+	}
+}
+
+func TestIPCFailureUnionDoesNotRequireMatchingSigningRevision(t *testing.T) {
+	snapshot, key := fixtureSnapshotAndKey(t)
+	binding, err := NewExpectedReceiptBinding(2, repeatHex('a'))
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge := ipcChallengeForTest()
+	for _, code := range []IPCErrorCode{IPCErrorUserCanceled, IPCErrorRequestInvalid, IPCErrorUserPresenceUnavailable, IPCErrorKeyUnavailable, IPCErrorSigningFailed, IPCErrorInternalFailure} {
+		t.Run(strconv.Itoa(int(code)), func(t *testing.T) {
+			raw, err := EncodeIPCFailure(IPCFailure{Challenge: challenge, Code: code})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, key, binding, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			failure, ok := response.HelperError()
+			if !ok || failure.Code != code {
+				t.Fatalf("wrong failure union: %#v", response)
+			}
+			if _, ok := response.VerifiedReceipt(); ok {
+				t.Fatal("failure exposed receipt")
+			}
+			wrongChallenge := challenge
+			wrongChallenge[0] ^= 1
+			_, err = DecodeAndValidateIPCResponse(context.Background(), raw, wrongChallenge, snapshot, key, binding, time.Now())
+			assertReason(t, err, "APPROVAL_CHALLENGE_MISMATCH")
+			unknown := append([]byte(nil), raw...)
+			unknown[len(unknown)-1] = 255
+			for _, malformed := range [][]byte{raw[:len(raw)-1], append(append([]byte(nil), raw...), 0), unknown} {
+				_, err := DecodeAndValidateIPCResponse(context.Background(), malformed, challenge, snapshot, key, binding, time.Now())
+				assertReason(t, err, "APPROVAL_RESPONSE_INVALID")
+			}
+		})
+	}
+	issued := time.Date(2026, 9, 2, 15, 34, 56, 0, time.UTC)
+	raw, signingKey := signedResponseForTest(t, snapshot, challenge, issued, issued.Add(2*time.Minute), nil)
+	_, err = DecodeAndValidateIPCResponse(context.Background(), raw, challenge, snapshot, signingKey, binding, issued.Add(time.Minute))
+	assertReason(t, err, "APPROVAL_SIGNING_KEY_MISMATCH")
+}
+
 func TestReceiptV3RevisionAndAuthorizationContextBoundaries(t *testing.T) {
 	for _, revision := range []int{1, 256} {
 		t.Run(strconv.Itoa(revision), func(t *testing.T) {
@@ -42,8 +127,8 @@ func TestReceiptV3RevisionAndAuthorizationContextBoundaries(t *testing.T) {
 			if err != nil || binding.RegistryRevision() != revision || binding.AuthorizationContextSHA256() != repeatHex('a') {
 				t.Fatalf("expected binding boundary rejected: %v", err)
 			}
-			spki := mustDecodeHex(t, gate1AFixture(t, "public-key.spki.hex"))
-			if _, err := NewExpectedSigningKey(receipt.KeyGeneration, spki, string(gate1AFixture(t, "public-key.fingerprint-sha256"))); err != nil {
+			spki := mustDecodeHex(t, sharedGate1AFixture(t, "public-key.spki.hex"))
+			if _, err := NewExpectedSigningKey(receipt.KeyGeneration, spki, string(sharedGate1AFixture(t, "public-key.fingerprint-sha256"))); err != nil {
 				t.Fatalf("expected signing key boundary rejected: %v", err)
 			}
 		})
@@ -58,7 +143,7 @@ func TestReceiptV3RevisionAndAuthorizationContextBoundaries(t *testing.T) {
 			t.Fatal("invalid context accepted")
 		}
 	}
-	valid := gate1AFixture(t, "receipt.json")
+	valid := receiptV3Fixture(t, "receipt.json")
 	for _, value := range []string{"0", "-1", "257", "999999999999999999999999999999", "1.0", "1e0", "null", `"1"`} {
 		t.Run("wire revision "+value, func(t *testing.T) {
 			raw := bytes.Replace(valid, []byte(`"registry_revision":1`), []byte(`"registry_revision":`+value), 1)
@@ -104,7 +189,7 @@ func TestHistoricalReceiptV2RemainsRejected(t *testing.T) {
 }
 
 func TestReceiptV3RedactsDecoderDiagnostics(t *testing.T) {
-	valid := gate1AFixture(t, "receipt.json")
+	valid := receiptV3Fixture(t, "receipt.json")
 	for _, marker := range []string{"987654321098765432109876543210987654321", "123456789012345678901234567890123456789"} {
 		raw := bytes.Replace(valid, []byte(`"registry_revision":1`), []byte(`"registry_revision":`+marker), 1)
 		var control struct {
@@ -142,7 +227,7 @@ func TestReceiptV3RedactsDecoderDiagnostics(t *testing.T) {
 }
 
 func TestIPCPlanSnapshotRedactsDecoderDiagnostics(t *testing.T) {
-	valid := gate1AFixture(t, "plan-comment-add.json")
+	valid := sharedGate1AFixture(t, "plan-comment-add.json")
 	for _, marker := range []string{"UNTRUSTED_SENTINEL_FIRST", "UNTRUSTED_SENTINEL_SECOND"} {
 		raw := bytes.Replace(valid, []byte(`{"schema_version":1`), []byte(`{"`+marker+`":0,"schema_version":1`), 1)
 		_, controlErr := intent.ParseApprovalSnapshot(raw, MaxIPCPlanBytes)

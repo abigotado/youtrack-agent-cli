@@ -86,9 +86,6 @@ public enum ApprovalIPCCodec {
         expectedBinding: ExpectedReceiptBinding,
         now: Date
     ) throws -> ApprovalIPCResponse {
-        guard ProtocolGrammar.keyGenerationRevision(expectedKey.generation) == expectedBinding.registryRevision else {
-            throw ApprovalProtocolError.invalidField("expected receipt binding")
-        }
         let header = try parseHeader(input)
         switch header.kind {
         case 2:
@@ -96,6 +93,9 @@ public enum ApprovalIPCCodec {
             guard payload.count >= 124 else { throw ApprovalProtocolError.invalidField("success frame") }
             let challenge = try ApprovalIPCChallenge(bytes: Data(payload.prefix(32)))
             guard challenge.constantTimeEquals(expectedChallenge) else { throw ApprovalProtocolError.invalidField("challenge") }
+            guard ProtocolGrammar.keyGenerationRevision(expectedKey.generation) == expectedBinding.registryRevision else {
+                throw ApprovalProtocolError.invalidField("expected receipt binding")
+            }
             let spki = Data(payload.dropFirst(32).prefix(91))
             guard spki == expectedKey.spkiDER else { throw ApprovalProtocolError.invalidPublicKey }
             let receipt = try ApprovalReceipt(receiptBytes: Data(payload.dropFirst(123)))
@@ -128,6 +128,7 @@ public enum ApprovalIPCCodec {
     ) throws {
         let receiptBinding = receipt.unsigned
         let plan = snapshot.bindings
+        // Direct revision equality remains defense in depth alongside generation checks.
         guard receiptBinding.planID == plan.planID,
               receiptBinding.registryRevision == expectedBinding.registryRevision,
               receiptBinding.authorizationContextSHA256 == expectedBinding.authorizationContextSHA256,

@@ -2,6 +2,7 @@ import struct CryptoKit.SHA256
 import struct Foundation.Data
 
 enum ProtocolGrammar {
+    static let maximumRegistryRevision = 256
     private static let base32Alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".utf8)
 
     static func isCanonicalBase32ID(_ value: String, prefix: String) -> Bool {
@@ -59,9 +60,9 @@ enum ProtocolGrammar {
         for byte in bytes.dropFirst(5) {
             guard (0x30...0x39).contains(byte) else { return nil }
             revision = revision * 10 + Int(byte - 0x30)
-            guard revision <= 256 else { return nil }
+            guard revision <= maximumRegistryRevision else { return nil }
         }
-        return (1...256).contains(revision) ? revision : nil
+        return (1...maximumRegistryRevision).contains(revision) ? revision : nil
     }
 
     static func isDigest(_ value: String) -> Bool {

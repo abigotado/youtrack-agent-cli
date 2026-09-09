@@ -111,6 +111,10 @@ func generate(check bool) error {
 	if err != nil {
 		return err
 	}
+	boundaries, err := revisionBoundaries(receipt)
+	if err != nil {
+		return err
+	}
 	outputs := []struct {
 		name string
 		raw  []byte
@@ -119,6 +123,7 @@ func generate(check bool) error {
 		{"signing.sha256", digest(signing)}, {"receipt.sha256", digest(signed)},
 		{"ipc-success-receipt.json", ipcSigned},
 		{"ipc-success.hex", []byte(hex.EncodeToString(frame))},
+		{"revision-boundaries.json", boundaries},
 	}
 	for _, output := range outputs {
 		path := filepath.Join("testdata", "gate1a-v3", output.name)
@@ -136,6 +141,36 @@ func generate(check bool) error {
 		}
 	}
 	return nil
+}
+
+func revisionBoundaries(receipt approval.Receipt) ([]byte, error) {
+	// Literal protocol boundaries intentionally do not follow implementation
+	// constants: a unilateral ceiling bump must fail the shared corpus.
+	receipt.RegistryRevision = 256
+	receipt.KeyGeneration = "YTAG-00000000000000000256"
+	signing, err := approval.SigningBytes(receipt)
+	if err != nil {
+		return nil, err
+	}
+	signed, err := approval.ReceiptBytes(receipt)
+	if err != nil {
+		return nil, err
+	}
+	corpus := []struct {
+		Name     string `json:"name"`
+		Accepted bool   `json:"accepted"`
+		Signing  string `json:"signing"`
+		Receipt  string `json:"receipt"`
+	}{
+		{"ceiling 256", true, string(signing), string(signed)},
+		{"revision and generation 257", false,
+			strings.ReplaceAll(strings.ReplaceAll(string(signing), `"registry_revision":256`, `"registry_revision":257`), "YTAG-00000000000000000256", "YTAG-00000000000000000257"),
+			strings.ReplaceAll(strings.ReplaceAll(string(signed), `"registry_revision":256`, `"registry_revision":257`), "YTAG-00000000000000000256", "YTAG-00000000000000000257")},
+		{"generation 257 at revision 256", false,
+			strings.ReplaceAll(string(signing), "YTAG-00000000000000000256", "YTAG-00000000000000000257"),
+			strings.ReplaceAll(string(signed), "YTAG-00000000000000000256", "YTAG-00000000000000000257")},
+	}
+	return json.MarshalIndent(corpus, "", "  ")
 }
 
 func digest(raw []byte) []byte {

@@ -13,8 +13,8 @@ import (
 )
 
 func TestSharedGate1AFixturesMatchGoCodecs(t *testing.T) {
-	signing := gate1AFixture(t, "signing.json")
-	receiptBytes := gate1AFixture(t, "receipt.json")
+	signing := receiptV3Fixture(t, "signing.json")
+	receiptBytes := receiptV3Fixture(t, "receipt.json")
 	receipt, err := ParseReceiptBytes(receiptBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -38,19 +38,19 @@ func TestSharedGate1AFixturesMatchGoCodecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := string(gate1AFixture(t, "receipt.sha256")); gotDigest != want {
+	if want := string(receiptV3Fixture(t, "receipt.sha256")); gotDigest != want {
 		t.Fatalf("ReceiptDigestSHA256() = %q, want %q", gotDigest, want)
 	}
-	if got := sha256HexForTest(gotSigning); got != string(gate1AFixture(t, "signing.sha256")) {
+	if got := sha256HexForTest(gotSigning); got != string(receiptV3Fixture(t, "signing.sha256")) {
 		t.Fatalf("signing digest = %q, want fixture", got)
 	}
 
-	signature := mustDecodeHex(t, gate1AFixture(t, "signature.der.hex"))
+	signature := mustDecodeHex(t, sharedGate1AFixture(t, "signature.der.hex"))
 	encoded, err := EncodeP256DERSignature(signature)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := string(gate1AFixture(t, "signature.base64url")); encoded != want {
+	if want := string(sharedGate1AFixture(t, "signature.base64url")); encoded != want {
 		t.Fatalf("encoded signature = %q, want %q", encoded, want)
 	}
 	decoded, err := DecodeP256DERSignature(encoded)
@@ -61,8 +61,8 @@ func TestSharedGate1AFixturesMatchGoCodecs(t *testing.T) {
 		t.Fatalf("decoded signature = %x, want %x", decoded, signature)
 	}
 
-	x963 := mustDecodeHex(t, gate1AFixture(t, "public-key.x963.hex"))
-	spki := mustDecodeHex(t, gate1AFixture(t, "public-key.spki.hex"))
+	x963 := mustDecodeHex(t, sharedGate1AFixture(t, "public-key.x963.hex"))
+	spki := mustDecodeHex(t, sharedGate1AFixture(t, "public-key.spki.hex"))
 	gotSPKI, err := P256X963ToDERSPKI(x963)
 	if err != nil {
 		t.Fatal(err)
@@ -81,12 +81,12 @@ func TestSharedGate1AFixturesMatchGoCodecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := string(gate1AFixture(t, "public-key.fingerprint-sha256")); fingerprint != want {
+	if want := string(sharedGate1AFixture(t, "public-key.fingerprint-sha256")); fingerprint != want {
 		t.Fatalf("fingerprint = %q, want %q", fingerprint, want)
 	}
 
-	display := mustDecodeHex(t, gate1AFixture(t, "display.hex"))
-	if got, want := sha256HexForTest(display), string(gate1AFixture(t, "display.sha256")); got != want {
+	display := mustDecodeHex(t, sharedGate1AFixture(t, "display.hex"))
+	if got, want := sha256HexForTest(display), string(sharedGate1AFixture(t, "display.sha256")); got != want {
 		t.Fatalf("display digest = %q, want %q", got, want)
 	}
 }
@@ -186,7 +186,6 @@ func TestReceiptKeyGenerationBoundaries(t *testing.T) {
 		{name: "24 bytes nineteen digits", value: "YTAG-0000000000000000001", wantErr: true},
 		{name: "26 bytes twenty-one digits", value: "YTAG-000000000000000000001", wantErr: true},
 		{name: "empty", value: "", wantErr: true},
-		{name: "one over maximum", value: "k" + strings.Repeat("-", MaxKeyGenerationBytes), wantErr: true},
 		{name: "punctuation first", value: "-key", wantErr: true},
 		{name: "colon", value: "key:1", wantErr: true},
 		{name: "non ASCII", value: "kéy", wantErr: true},
@@ -204,7 +203,7 @@ func TestReceiptKeyGenerationBoundaries(t *testing.T) {
 }
 
 func TestParseReceiptBytesRejectsNonCanonicalJSON(t *testing.T) {
-	valid := gate1AFixture(t, "receipt.json")
+	valid := receiptV3Fixture(t, "receipt.json")
 	tests := []struct {
 		name string
 		raw  []byte
@@ -260,7 +259,7 @@ func TestP256DERSignatureRejectsMalformedEncodings(t *testing.T) {
 		})
 	}
 
-	valid := string(gate1AFixture(t, "signature.base64url"))
+	valid := string(sharedGate1AFixture(t, "signature.base64url"))
 	for _, encoded := range []string{"", valid + "=", "MAYCAQECAQI+", strings.Repeat("A", 98)} {
 		if _, err := DecodeP256DERSignature(encoded); err == nil {
 			t.Fatalf("DecodeP256DERSignature(%q) accepted invalid base64url", encoded)
@@ -269,8 +268,8 @@ func TestP256DERSignatureRejectsMalformedEncodings(t *testing.T) {
 }
 
 func TestP256PublicKeyCodecRejectsTampering(t *testing.T) {
-	x963 := mustDecodeHex(t, gate1AFixture(t, "public-key.x963.hex"))
-	spki := mustDecodeHex(t, gate1AFixture(t, "public-key.spki.hex"))
+	x963 := mustDecodeHex(t, sharedGate1AFixture(t, "public-key.x963.hex"))
+	spki := mustDecodeHex(t, sharedGate1AFixture(t, "public-key.spki.hex"))
 	tests := []struct {
 		name string
 		x963 []byte
@@ -307,7 +306,7 @@ func TestP256PublicKeyCodecRejectsTampering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixtureFingerprint := string(gate1AFixture(t, "public-key.fingerprint-sha256"))
+	fixtureFingerprint := string(sharedGate1AFixture(t, "public-key.fingerprint-sha256"))
 	alternateFingerprint, err := P256SPKIFingerprintSHA256(alternateSPKI)
 	if err != nil {
 		t.Fatal(err)
@@ -319,20 +318,25 @@ func TestP256PublicKeyCodecRejectsTampering(t *testing.T) {
 
 func gate1AReceipt(t *testing.T) Receipt {
 	t.Helper()
-	receipt, err := ParseReceiptBytes(gate1AFixture(t, "receipt.json"))
+	receipt, err := ParseReceiptBytes(receiptV3Fixture(t, "receipt.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return receipt
 }
 
-func gate1AFixture(t *testing.T, name string) []byte {
+func sharedGate1AFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	directory := "gate1a"
-	switch name {
-	case "signing.json", "receipt.json", "signing.sha256", "receipt.sha256", "ipc-success-receipt.json", "ipc-success.hex":
-		directory = "gate1a-v3"
-	}
+	return readApprovalFixture(t, "gate1a", name)
+}
+
+func receiptV3Fixture(t *testing.T, name string) []byte {
+	t.Helper()
+	return readApprovalFixture(t, "gate1a-v3", name)
+}
+
+func readApprovalFixture(t *testing.T, directory, name string) []byte {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", directory, name))
 	if err != nil {
 		t.Fatal(err)

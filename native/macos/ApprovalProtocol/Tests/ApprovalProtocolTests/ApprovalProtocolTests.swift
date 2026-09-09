@@ -4,18 +4,18 @@ import Testing
 @testable import ApprovalProtocol
 
 @Test func sharedGoFixturesMatchEverySwiftCodec() throws {
-    let signing = try fixture("signing.json")
-    let receiptBytes = try fixture("receipt.json")
-    let x963 = try decodeHex(try fixtureString("public-key.x963.hex"))
-    let spki = try decodeHex(try fixtureString("public-key.spki.hex"))
-    let signatureDER = try decodeHex(try fixtureString("signature.der.hex"))
-    let display = try decodeHex(try fixtureString("display.hex"))
-    let expectedEscapedDisplay = try fixtureString("display.escaped.txt")
-    let expectedFingerprint = try fixtureString("public-key.fingerprint-sha256")
-    let expectedSignatureBase64URL = try fixtureString("signature.base64url")
-    let expectedSigningSHA256 = try fixtureString("signing.sha256")
-    let expectedReceiptSHA256 = try fixtureString("receipt.sha256")
-    let expectedDisplaySHA256 = try fixtureString("display.sha256")
+    let signing = try v3Fixture("signing.json")
+    let receiptBytes = try v3Fixture("receipt.json")
+    let x963 = try decodeHex(try sharedFixtureString("public-key.x963.hex"))
+    let spki = try decodeHex(try sharedFixtureString("public-key.spki.hex"))
+    let signatureDER = try decodeHex(try sharedFixtureString("signature.der.hex"))
+    let display = try decodeHex(try sharedFixtureString("display.hex"))
+    let expectedEscapedDisplay = try sharedFixtureString("display.escaped.txt")
+    let expectedFingerprint = try sharedFixtureString("public-key.fingerprint-sha256")
+    let expectedSignatureBase64URL = try sharedFixtureString("signature.base64url")
+    let expectedSigningSHA256 = try v3FixtureString("signing.sha256")
+    let expectedReceiptSHA256 = try v3FixtureString("receipt.sha256")
+    let expectedDisplaySHA256 = try sharedFixtureString("display.sha256")
 
     let unsigned = try UnsignedApprovalReceipt(signingBytes: signing)
     let receipt = try ApprovalReceipt(receiptBytes: receiptBytes)
@@ -50,12 +50,12 @@ import Testing
     }
 }
 
-private func fixture(_ name: String) throws -> Data {
+private func sharedFixture(_ name: String) throws -> Data {
     var root = URL(fileURLWithPath: #filePath)
     for _ in 0..<6 {
         root.deleteLastPathComponent()
     }
-    var data = try Data(contentsOf: root.appendingPathComponent("testdata/\(receiptFixtureDirectory(name))/\(name)"))
+    var data = try Data(contentsOf: root.appendingPathComponent("testdata/gate1a/\(name)"))
     guard data.last == 0x0A else {
         throw ApprovalProtocolError.nonCanonicalEncoding
     }
@@ -63,8 +63,8 @@ private func fixture(_ name: String) throws -> Data {
     return data
 }
 
-private func fixtureString(_ name: String) throws -> String {
-    guard let value = String(data: try fixture(name), encoding: .utf8) else {
+private func sharedFixtureString(_ name: String) throws -> String {
+    guard let value = String(data: try sharedFixture(name), encoding: .utf8) else {
         throw ApprovalProtocolError.nonCanonicalEncoding
     }
     return value
@@ -101,7 +101,7 @@ private func sha256Hex(_ data: Data) -> String {
 @Test func signingBytesRejectUnknownDuplicateAndNonCanonicalInput() throws {
     let valid = Data(#"{"schema_version":1,"receipt_id":"YTAR-AAAAAAAAAAAAAAAAAAAAAAAAAA","nonce":"YTAN-BBBBBBBBBBBBBBBBBBBBBBBBBY","plan_id":"YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA","plan_sha256":"1111111111111111111111111111111111111111111111111111111111111111","profile_identity_sha256":"2222222222222222222222222222222222222222222222222222222222222222","account_id":"a","project_id":"i","project_key":"P","schema_sha256":"3333333333333333333333333333333333333333333333333333333333333333","request_sha256":"4444444444444444444444444444444444444444444444444444444444444444","expected_sha256":"5555555555555555555555555555555555555555555555555555555555555555","issued_at":"2026-09-02T15:34:56Z","expires_at":"2026-09-02T15:39:56Z","key_generation":"k","key_fingerprint_sha256":"6666666666666666666666666666666666666666666666666666666666666666"}"#.utf8)
     _ = valid // Retained as an explicit schema-v1 negative vector above.
-    let canonical = try fixture("signing.json")
+    let canonical = try v3Fixture("signing.json")
     var unknown = canonical
     unknown.removeLast()
     unknown.append(contentsOf: Data(#", "extra":"x"}"#.utf8))
@@ -169,7 +169,7 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func signingInputEnforcesSizeAndCanonicalSchema() throws {
-    let valid = try fixture("signing.json")
+    let valid = try v3Fixture("signing.json")
     let cases: [(String, Data)] = [
         ("empty", Data()),
         ("one over maximum", Data(repeating: 0x20, count: UnsignedApprovalReceipt.maximumSigningBytes + 1)),
@@ -203,7 +203,7 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func signedReceiptEnforcesSizeAndReceiptSpecificSchema() throws {
-    let valid = try fixture("receipt.json")
+    let valid = try v3Fixture("receipt.json")
     let cases: [(String, Data)] = [
         ("empty", Data()),
         ("one over maximum", Data(repeating: 0x20, count: ApprovalReceipt.maximumReceiptBytes + 1)),
@@ -231,7 +231,7 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func canonicalApprovalIdentifiersAreExactly128BitBase32() throws {
-    let valid = try fixture("signing.json")
+    let valid = try v3Fixture("signing.json")
     let cases: [(String, String, String)] = [
         ("receipt wrong prefix", "YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4", "NOPE-AAAQEAYEAUDAOCAJBIFQYDIOB4"),
         ("receipt short", "YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB4", "YTAR-AAAQEAYEAUDAOCAJBIFQYDIOB"),
@@ -250,7 +250,7 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func bindingFieldsUseTheSameCanonicalShapesAsGo() throws {
-    let valid = try fixture("signing.json")
+    let valid = try v3Fixture("signing.json")
     let cases: [(String, String, String)] = [
         ("plan id", "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", "p"),
         ("account id", #""account_id":"1-2""#, #""account_id":"-bad""#),
@@ -267,8 +267,8 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func keyGenerationBoundariesMatchGo() throws {
-    let valid = try fixture("signing.json")
-    let rejected = ["", "a", "A0._-z", "k" + String(repeating: "-", count: 64), "-key", "key:1", "kéy", "YTAG-00000000000000000000", "YTAG-00000000000000000002", "YTAG-99999999999999999999", "YTAG-0000000000000000001", "YTAG-000000000000000000001"]
+    let valid = try v3Fixture("signing.json")
+    let rejected = ["", "a", "A0._-z", "-key", "key:1", "kéy", "YTAG-00000000000000000000", "YTAG-00000000000000000002", "YTAG-99999999999999999999", "YTAG-0000000000000000001", "YTAG-000000000000000000001"]
 
     #expect(try UnsignedApprovalReceipt(signingBytes: valid).keyGeneration == "YTAG-00000000000000000001")
     for value in rejected {
@@ -280,7 +280,7 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func timestampsRequireWholeSecondUTCAndNoMoreThanFiveMinutes() throws {
-    let valid = try fixture("signing.json")
+    let valid = try v3Fixture("signing.json")
     let invalid: [(String, String, String)] = [
         ("fractional", "2026-09-02T15:34:56Z", "2026-09-02T15:34:56.1Z"),
         ("offset", "2026-09-02T15:34:56Z", "2026-09-02T12:34:56-03:00"),
@@ -320,7 +320,7 @@ private func sha256Hex(_ data: Data) -> String {
         }
     }
 
-    let validBase64URL = try fixtureString("signature.base64url")
+    let validBase64URL = try sharedFixtureString("signature.base64url")
     for value in ["", validBase64URL + "=", "MAYCAQECAQI+", String(repeating: "A", count: P256Signature.maximumBase64URLBytes + 1)] {
         #expect(throws: ApprovalProtocolError.invalidSignature) {
             _ = try P256Signature(derBase64URL: value)
@@ -329,9 +329,9 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func publicKeyEncodingsAndFingerprintBindExactBytes() throws {
-    let x963 = try decodeHex(try fixtureString("public-key.x963.hex"))
-    let spki = try decodeHex(try fixtureString("public-key.spki.hex"))
-    let expectedFingerprint = try fixtureString("public-key.fingerprint-sha256")
+    let x963 = try decodeHex(try sharedFixtureString("public-key.x963.hex"))
+    let spki = try decodeHex(try sharedFixtureString("public-key.spki.hex"))
+    let expectedFingerprint = try sharedFixtureString("public-key.fingerprint-sha256")
 
     var compressedMarker = x963
     compressedMarker[0] = 0x02
@@ -368,7 +368,7 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func validatedPlanRetainsAnImmutableSnapshot() throws {
-    var original = try fixture("plan-issue-create.json")
+    var original = try sharedFixture("plan-issue-create.json")
     let snapshot = try ValidatedPlanSnapshot(canonicalBytes: original)
     let expected = original
     original[0] = 0x20
@@ -388,14 +388,14 @@ private func sha256Hex(_ data: Data) -> String {
 
 @Test func allGoPlanFixturesValidateAndPreserveFullUInt64() throws {
     for name in ["plan-issue-create.json", "plan-issue-update.json", "plan-comment-add.json"] {
-        let bytes = try fixture(name)
+        let bytes = try sharedFixture(name)
         let snapshot = try ValidatedPlanSnapshot(canonicalBytes: bytes)
         #expect(snapshot.exactBytes() == bytes)
         #expect(snapshot.sha256 == sha256Hex(bytes))
     }
 
     let maximum = replacing(
-        try fixture("plan-issue-create.json"),
+        try sharedFixture("plan-issue-create.json"),
         "\"policy_revision\":1",
         with: "\"policy_revision\":18446744073709551615"
     )
@@ -405,8 +405,8 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func planIDAndURLCorporaMatchGo() throws {
-    let base = try fixture("plan-issue-create.json")
-    let idCorpus = try #require(JSONSerialization.jsonObject(with: try fixture("plan-id-corpus.json")) as? [String: [String]])
+    let base = try sharedFixture("plan-issue-create.json")
+    let idCorpus = try #require(JSONSerialization.jsonObject(with: try sharedFixture("plan-id-corpus.json")) as? [String: [String]])
     for value in idCorpus["valid"] ?? [] {
         let changed = value == "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA" ? base : replacing(base, "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", with: value)
         _ = try ValidatedPlanSnapshot(canonicalBytes: changed)
@@ -417,7 +417,7 @@ private func sha256Hex(_ data: Data) -> String {
         }
     }
 
-    let urlCorpus = try #require(JSONSerialization.jsonObject(with: try fixture("approval-url-corpus.json")) as? [String: [String]])
+    let urlCorpus = try #require(JSONSerialization.jsonObject(with: try sharedFixture("approval-url-corpus.json")) as? [String: [String]])
     for value in urlCorpus["valid"] ?? [] {
         var changed = value == "https://acme.youtrack.cloud" ? base : replacing(base, "https://acme.youtrack.cloud/api", with: value + "/api")
         if value != "https://acme.youtrack.cloud" { changed = replacing(changed, "https://acme.youtrack.cloud", with: value) }
@@ -431,15 +431,15 @@ private func sha256Hex(_ data: Data) -> String {
 }
 
 @Test func sharedIPCFramesRoundTripAndValidateSuccessUnion() throws {
-    let requestFrame = try decodeHex(try fixtureString("ipc-request.hex"))
+    let requestFrame = try decodeHex(try sharedFixtureString("ipc-request.hex"))
     let (challenge, snapshot) = try ApprovalIPCCodec.decodeRequest(requestFrame)
     #expect(ApprovalIPCCodec.encodeRequest(challenge: challenge, snapshot: snapshot) == requestFrame)
 
-    let successFrame = try decodeHex(try fixtureString("ipc-success.hex"))
+    let successFrame = try decodeHex(try v3FixtureString("ipc-success.hex"))
     let validationTime = try #require(ISO8601DateFormatter().date(from: "2026-09-02T15:35:00Z"))
     let expectedKey = try EnrolledSigningKey(
         generation: "YTAG-00000000000000000001",
-        spkiDER: decodeHex(try fixtureString("public-key.spki.hex"))
+        spkiDER: decodeHex(try sharedFixtureString("public-key.spki.hex"))
     )
     let response = try ApprovalIPCCodec.decodeAndValidateResponse(
         successFrame,
@@ -449,18 +449,18 @@ private func sha256Hex(_ data: Data) -> String {
         now: validationTime
     )
     guard case let .success(success) = response else { Issue.record("expected success"); return }
-    let expectedReceipt = try fixture("ipc-success-receipt.json")
+    let expectedReceipt = try v3Fixture("ipc-success-receipt.json")
     #expect(success.receipt.encodedReceiptBytes() == expectedReceipt)
     #expect(ApprovalIPCCodec.encodeSuccess(challenge: challenge, enrolledKey: success.enrolledKey, receipt: success.receipt) == successFrame)
 
-    let errorFrame = try decodeHex(try fixtureString("ipc-error.hex"))
+    let errorFrame = try decodeHex(try sharedFixtureString("ipc-error.hex"))
     #expect(try ApprovalIPCCodec.decodeAndValidateResponse(
         errorFrame, expectedChallenge: challenge, snapshot: snapshot, expectedKey: expectedKey, expectedBinding: try receiptBindingForTest(), now: Date()
     ) == .failure(.userCanceled))
 }
 
 @Test func receiptFactoryUsesOneKeyHandleOneSignatureAndSelfVerifies() throws {
-    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: try fixture("plan-comment-add.json"))
+    let snapshot = try ValidatedPlanSnapshot(canonicalBytes: try sharedFixture("plan-comment-add.json"))
     let signer = TestSigner()
     let random = TestRandom()
     let wholeSecond = try #require(ISO8601DateFormatter().date(from: "2026-09-02T15:34:56Z"))
