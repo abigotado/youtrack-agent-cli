@@ -45,11 +45,25 @@ public enum P256PublicKeyCodec {
     }
 
     public static func verify(message: Data, derSignature: Data, x963: Data) throws -> Bool {
-        _ = try P256Signature(der: derSignature)
+        let validatedSignature = try P256Signature(der: derSignature)
         do {
             let key = try P256.Signing.PublicKey(x963Representation: x963)
             let signature = try P256.Signing.ECDSASignature(derRepresentation: derSignature)
-            return key.isValidSignature(signature, for: message)
+            if key.isValidSignature(signature, for: message) { return true }
+
+            // Some native verifiers reject a valid low-S representation but accept
+            // its (r, N-s) twin. The verification point negates, preserving x.
+            // Strict low-S ingress above remains mandatory; the twin stays local.
+            let equivalentDER = try validatedSignature.equivalentHighSDER()
+            let equivalentSignature: P256.Signing.ECDSASignature
+            do {
+                equivalentSignature = try P256.Signing.ECDSASignature(derRepresentation: equivalentDER)
+            } catch {
+                // The optional compatibility representation may be unsupported.
+                // Preserve the original verification verdict in that case.
+                return false
+            }
+            return key.isValidSignature(equivalentSignature, for: message)
         } catch {
             throw ApprovalProtocolError.invalidSignature
         }
@@ -125,6 +139,19 @@ public struct P256Signature: Equatable, Sendable {
         var result = Data([0x30, UInt8(body.count)])
         result.append(body)
         return try P256Signature(der: result)
+    }
+
+    fileprivate func equivalentHighSDER() throws -> Data {
+        let bytes = Array(der)
+        var offset = 2
+        let r = try Self.parseInteger(bytes, offset: &offset)
+        let s = try Self.parseInteger(bytes, offset: &offset)
+        var body = Data()
+        Self.appendInteger(Array(r), into: &body)
+        Self.appendInteger(Self.subtractFromOrder(Array(s)), into: &body)
+        var result = Data([0x30, UInt8(body.count)])
+        result.append(body)
+        return result
     }
 
     private static func parseInteger(_ bytes: [UInt8], offset: inout Int) throws -> ArraySlice<UInt8> {
