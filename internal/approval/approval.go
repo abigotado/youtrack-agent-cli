@@ -17,16 +17,18 @@ import (
 
 const (
 	// ReceiptSchemaVersion is the current durable approval receipt schema.
-	ReceiptSchemaVersion = 2
+	ReceiptSchemaVersion = 3
 	// MaxApprovalDisplayBytes bounds the immutable canonical plan snapshot.
 	MaxApprovalDisplayBytes = intent.MaxCanonicalPlanBytes
 	// MaxReceiptBytes bounds one canonical signed receipt.
 	MaxReceiptBytes = 4 << 10
 	// MaxSigningBytes bounds the canonical unsigned receipt signed by the helper.
 	MaxSigningBytes = 3 << 10
-	// MaxKeyGenerationBytes bounds the non-secret helper-key generation label.
-	MaxKeyGenerationBytes = 64
-	// MaximumReceiptTTL is the longest receipt lifetime accepted by protocol v2.
+	// MaxKeyGenerationBytes is the exact width of YTAG- plus twenty decimal digits.
+	MaxKeyGenerationBytes = 25
+	// MaxRegistryRevision is the largest supported receipt registry revision.
+	MaxRegistryRevision = 256
+	// MaximumReceiptTTL is the longest receipt lifetime accepted by schema v3.
 	MaximumReceiptTTL = 5 * time.Minute
 
 	defaultClockSkew = 30 * time.Second
@@ -34,24 +36,26 @@ const (
 
 // Receipt is a non-secret, short-lived signed binding to one exact plan.
 type Receipt struct {
-	SchemaVersion         int       `json:"schema_version"`
-	ReceiptID             string    `json:"receipt_id"`
-	Nonce                 string    `json:"nonce"`
-	ChallengeSHA256       string    `json:"challenge_sha256"`
-	PlanID                string    `json:"plan_id"`
-	PlanSHA256            string    `json:"plan_sha256"`
-	ProfileIdentitySHA256 string    `json:"profile_identity_sha256"`
-	AccountID             string    `json:"account_id"`
-	ProjectID             string    `json:"project_id"`
-	ProjectKey            string    `json:"project_key"`
-	SchemaSHA256          string    `json:"schema_sha256"`
-	RequestSHA256         string    `json:"request_sha256"`
-	ExpectedSHA256        string    `json:"expected_sha256"`
-	IssuedAt              time.Time `json:"issued_at"`
-	ExpiresAt             time.Time `json:"expires_at"`
-	KeyGeneration         string    `json:"key_generation"`
-	KeyFingerprintSHA256  string    `json:"key_fingerprint_sha256"`
-	Signature             string    `json:"signature"`
+	SchemaVersion              int       `json:"schema_version"`
+	ReceiptID                  string    `json:"receipt_id"`
+	Nonce                      string    `json:"nonce"`
+	ChallengeSHA256            string    `json:"challenge_sha256"`
+	RegistryRevision           int       `json:"registry_revision"`
+	AuthorizationContextSHA256 string    `json:"authorization_context_sha256"`
+	PlanID                     string    `json:"plan_id"`
+	PlanSHA256                 string    `json:"plan_sha256"`
+	ProfileIdentitySHA256      string    `json:"profile_identity_sha256"`
+	AccountID                  string    `json:"account_id"`
+	ProjectID                  string    `json:"project_id"`
+	ProjectKey                 string    `json:"project_key"`
+	SchemaSHA256               string    `json:"schema_sha256"`
+	RequestSHA256              string    `json:"request_sha256"`
+	ExpectedSHA256             string    `json:"expected_sha256"`
+	IssuedAt                   time.Time `json:"issued_at"`
+	ExpiresAt                  time.Time `json:"expires_at"`
+	KeyGeneration              string    `json:"key_generation"`
+	KeyFingerprintSHA256       string    `json:"key_fingerprint_sha256"`
+	Signature                  string    `json:"signature"`
 }
 
 // Approver displays one immutable canonical plan snapshot. A successful helper
@@ -78,8 +82,9 @@ func SigningBytes(receipt Receipt) ([]byte, error) {
 	}
 	raw, err := json.Marshal(unsignedReceiptWire{
 		SchemaVersion: receipt.SchemaVersion, ReceiptID: receipt.ReceiptID, Nonce: receipt.Nonce,
-		ChallengeSHA256: receipt.ChallengeSHA256,
-		PlanID:          receipt.PlanID, PlanSHA256: receipt.PlanSHA256,
+		ChallengeSHA256:  receipt.ChallengeSHA256,
+		RegistryRevision: receipt.RegistryRevision, AuthorizationContextSHA256: receipt.AuthorizationContextSHA256,
+		PlanID: receipt.PlanID, PlanSHA256: receipt.PlanSHA256,
 		ProfileIdentitySHA256: receipt.ProfileIdentitySHA256, AccountID: receipt.AccountID,
 		ProjectID: receipt.ProjectID, ProjectKey: receipt.ProjectKey, SchemaSHA256: receipt.SchemaSHA256,
 		RequestSHA256: receipt.RequestSHA256, ExpectedSHA256: receipt.ExpectedSHA256,
@@ -141,12 +146,12 @@ func validateUnsignedReceipt(receipt Receipt) error {
 	if !receipt.ExpiresAt.After(receipt.IssuedAt) || receipt.ExpiresAt.Sub(receipt.IssuedAt) > MaximumReceiptTTL {
 		return receiptError("RECEIPT_TTL_INVALID", "the approval receipt time window is invalid")
 	}
-	for _, value := range []string{receipt.ChallengeSHA256, receipt.PlanSHA256, receipt.ProfileIdentitySHA256, receipt.SchemaSHA256, receipt.RequestSHA256, receipt.ExpectedSHA256, receipt.KeyFingerprintSHA256} {
+	for _, value := range []string{receipt.AuthorizationContextSHA256, receipt.ChallengeSHA256, receipt.PlanSHA256, receipt.ProfileIdentitySHA256, receipt.SchemaSHA256, receipt.RequestSHA256, receipt.ExpectedSHA256, receipt.KeyFingerprintSHA256} {
 		if !isSHA256(value) {
 			return receiptError("RECEIPT_INVALID", "the approval receipt contains a non-canonical digest")
 		}
 	}
-	if !isCanonicalKeyGeneration(receipt.KeyGeneration) {
+	if !validRegistryRevision(receipt.RegistryRevision) || keyGenerationRevision(receipt.KeyGeneration) != receipt.RegistryRevision {
 		return receiptError("RECEIPT_INVALID", "the approval receipt key generation is not canonical")
 	}
 	return nil

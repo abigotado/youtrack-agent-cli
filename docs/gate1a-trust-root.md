@@ -570,12 +570,13 @@ post-grant disposal must precede publication-envelope signing. No missing
 attestation, runner self-report, empty-inventory claim, partial cleanup, or
 reused host may pass either transition.
 
-The existing pre-Gate receipt schema v2 does not carry registry revision and is
-therefore not activation-eligible. Before durable confirmation, the shared Go
-and Swift contract must advance to schema v3 as specified in
-[Gate 1A approval protocol](gate1a-protocol.md#required-schema-v3-delta), reject
-v2 at the candidate boundary, and regenerate every cross-language golden
-vector. No v2 receipt has been released, so there is no compatibility fallback.
+The shared Go and Swift receipt contract implements schema v3 as specified in
+[Gate 1A approval protocol](gate1a-protocol.md#implemented-schema-v3-delta), with
+new cross-language golden vectors and rejection of historical v2 receipts.
+Expected revision/context bindings compare claims only; complete registry and
+authorization-chain verification, journal v2, durable confirmation, and the
+native helper remain unimplemented. These codecs are not activation authority.
+No v2 receipt has been released, so there is no compatibility fallback.
 
 ### First-release, rollover, rollback, and uninstall
 

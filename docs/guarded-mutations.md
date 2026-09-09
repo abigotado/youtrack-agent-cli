@@ -33,15 +33,15 @@ additional commands or authority available in the current build.
 The native helper protocol has two distinct byte sequences. It displays the
 exact bytes returned by `intent.ApprovalDisplayBytes`, stores their SHA-256 as
 `receipt.plan_sha256`, then signs the exact unsigned-receipt JSON returned by
-`approval.SigningBytes`. The implemented v2 field order and signed bindings are
+`approval.SigningBytes`. The implemented v3 field order and signed bindings are
 defined by that [codec](../internal/approval/approval.go), including plan ID,
-profile identity, key generation/fingerprint, and the challenge digest.
-V2 does not contain the proposed registry revision or authorization-context
-digest. A cross-language golden vector pins the unsigned-receipt encoding.
+profile identity, key generation/fingerprint, challenge digest, registry revision,
+and authorization-context digest. Cross-language golden vectors pin the encoding.
 The [Gate 1A protocol](gate1a-protocol.md) records
-the implemented pre-Gate v2 contract and the mandatory activation-eligible v3
-registry-revision and authorization-context delta; neither constitutes a
-trusted helper or a passed Gate 1A.
+the implemented pre-Gate v3 contract. Expected revision/context values are
+comparison claims, not verified authority. Journal v2, full authority-chain
+verification, durable confirmation, and the native helper remain unimplemented;
+these codecs do not constitute a passed Gate 1A.
 The activation boundary also requires the exact event-ledger codec in
 [Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md) and a
 capability-specific, offline-root-signed provisional authorization plus
@@ -165,6 +165,15 @@ PID loss, and user presence cannot free an unclosed lease; it remains
 protocol. Read-only commands remain available.
 
 ## Future journal record v2 and migration
+
+Journal v1 deliberately retains its legacy metadata contract: `ReceiptBinding`
+requires only a non-whitespace key-generation label and has neither a registry
+revision nor an authorization-context digest. That is not the schema-v3 approval
+grammar, and a valid v1 metadata record does not establish valid v3 authority.
+The production approver remains `approval.Unsupported`; confirmation does not
+persist a v3 receipt into that record. Do not bridge the schemas by copying
+metadata or treating the journal's validation as receipt verification. Full
+authority verification and the strict v2 record/migration below must land first.
 
 The current implementation writes journal record version 1. Native authority
 work must first introduce strict record version 2; no v1 record can enter the

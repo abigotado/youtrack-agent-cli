@@ -56,18 +56,6 @@ func IsProjectKey(value string) bool {
 	return true
 }
 
-func IsKeyGeneration(value string, maximumBytes int) bool {
-	if len(value) == 0 || len(value) > maximumBytes || !IsASCIIAlphaNumeric(value[0]) {
-		return false
-	}
-	for index := 1; index < len(value); index++ {
-		if !IsASCIIAlphaNumeric(value[index]) && !strings.ContainsRune("._-", rune(value[index])) {
-			return false
-		}
-	}
-	return true
-}
-
 func IsSHA256(value string) bool {
 	if len(value) != sha256.Size*2 || value != strings.ToLower(value) {
 		return false

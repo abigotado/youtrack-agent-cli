@@ -103,6 +103,12 @@ The CLI creates a fresh opaque 32-byte CSPRNG challenge per request. Both
 success and error responses echo it, Go compares it in constant time, and a
 success receipt signs its lowercase SHA-256 as `challenge_sha256`.
 
+With valid caller dependencies, error frames are interpreted after strict frame,
+challenge, and closed-code validation. They carry no receipt or signing key;
+an otherwise-valid expected key/binding revision mismatch does not replace the
+helper's failure code. Key/revision cross-binding is checked only for success.
+A failure is never approval authority or permission to retry automatically.
+
 ### Cross-binding acceptance
 
 Go accepts a success only after all of these checks succeed:
@@ -375,8 +381,9 @@ generation before UI and revalidates them afterward.
   fields, helper-supplied text, or integer byte order.
 - The pure Go validator requires an explicit enrolled key generation, exact
   SPKI, and fingerprint; the response cannot select its own verification key.
-- The implemented v2 receipt is pre-Gate evidence only. The signed candidate
-  requires the protocol document's v3 registry-revision binding and rejects v2.
+- The implemented v3 receipt binds an explicit expected revision and context
+  and rejects v2. The expected claims are not authenticated authority; a signed
+  candidate still requires complete registry/context verification.
 - `approval.Unsupported` remains the only production adapter. Gate 1A stays
   **NOT PASSED** until signed/notarized native execution, Secure Enclave
   isolation, peer validation, UI review, and clean-host lifecycle evidence all

@@ -1,12 +1,14 @@
 import struct Foundation.Data
 
 public struct UnsignedApprovalReceipt: Equatable, Sendable {
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
     public static let maximumSigningBytes = 3_072
 
     public let receiptID: String
     public let nonce: String
     public let challengeSHA256: String
+    public let registryRevision: Int
+    public let authorizationContextSHA256: String
     public let planID: String
     public let planSHA256: String
     public let profileIdentitySHA256: String
@@ -22,7 +24,8 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
     public let keyFingerprintSHA256: String
 
     init(
-        receiptID: String, nonce: String, challengeSHA256: String, planID: String, planSHA256: String,
+        receiptID: String, nonce: String, challengeSHA256: String,
+        registryRevision: Int, authorizationContextSHA256: String, planID: String, planSHA256: String,
         profileIdentitySHA256: String, accountID: String, projectID: String,
         projectKey: String, schemaSHA256: String, requestSHA256: String,
         expectedSHA256: String, issuedAt: String, expiresAt: String,
@@ -31,6 +34,8 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         self.receiptID = receiptID
         self.nonce = nonce
         self.challengeSHA256 = challengeSHA256
+        self.registryRevision = registryRevision
+        self.authorizationContextSHA256 = authorizationContextSHA256
         self.planID = planID
         self.planSHA256 = planSHA256
         self.profileIdentitySHA256 = profileIdentitySHA256
@@ -51,8 +56,17 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
     }
 
     public init(signingBytes: Data) throws {
-        var parser = try StrictJSONObjectParser(data: signingBytes, maximumBytes: Self.maximumSigningBytes)
-        var fields = try parser.parse()
+        guard signingBytes.count <= Self.maximumSigningBytes else {
+            throw ApprovalProtocolError.inputTooLarge(limit: Self.maximumSigningBytes)
+        }
+        var fields: [String: StrictJSONValue]
+        do {
+            var parser = try StrictJSONObjectParser(data: signingBytes, maximumBytes: Self.maximumSigningBytes)
+            fields = try parser.parse()
+        } catch {
+            // Decoder diagnostics may carry attacker-controlled duplicate keys.
+            throw ApprovalProtocolError.malformedJSON
+        }
 
         func takeString(_ name: String) throws -> String {
             guard let value = fields.removeValue(forKey: name) else {
@@ -74,6 +88,14 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         receiptID = try takeString("receipt_id")
         nonce = try takeString("nonce")
         challengeSHA256 = try takeString("challenge_sha256")
+        guard let revisionValue = fields.removeValue(forKey: "registry_revision") else {
+            throw ApprovalProtocolError.missingField("registry_revision")
+        }
+        guard case let .integer(revision) = revisionValue else {
+            throw ApprovalProtocolError.invalidField("registry_revision")
+        }
+        registryRevision = revision
+        authorizationContextSHA256 = try takeString("authorization_context_sha256")
         planID = try takeString("plan_id")
         planSHA256 = try takeString("plan_sha256")
         profileIdentitySHA256 = try takeString("profile_identity_sha256")
@@ -88,8 +110,8 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         keyGeneration = try takeString("key_generation")
         keyFingerprintSHA256 = try takeString("key_fingerprint_sha256")
 
-        if let unknown = fields.keys.sorted().first {
-            throw ApprovalProtocolError.unknownField(unknown)
+        if !fields.isEmpty {
+            throw ApprovalProtocolError.malformedJSON
         }
         try validate()
         guard encodedSigningBytes() == signingBytes else {
@@ -105,6 +127,8 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         appendString(name: "receipt_id", value: receiptID, into: &output)
         appendString(name: "nonce", value: nonce, into: &output)
         appendString(name: "challenge_sha256", value: challengeSHA256, into: &output)
+        appendInteger(name: "registry_revision", value: registryRevision, into: &output)
+        appendString(name: "authorization_context_sha256", value: authorizationContextSHA256, into: &output)
         appendString(name: "plan_id", value: planID, into: &output)
         appendString(name: "plan_sha256", value: planSHA256, into: &output)
         appendString(name: "profile_identity_sha256", value: profileIdentitySHA256, into: &output)
@@ -134,6 +158,7 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         }
         for (name, value) in [
             ("challenge_sha256", challengeSHA256),
+            ("authorization_context_sha256", authorizationContextSHA256),
             ("plan_sha256", planSHA256),
             ("profile_identity_sha256", profileIdentitySHA256),
             ("schema_sha256", schemaSHA256),
@@ -147,7 +172,10 @@ public struct UnsignedApprovalReceipt: Equatable, Sendable {
         guard ProtocolGrammar.isIdentifier(accountID) else { throw ApprovalProtocolError.invalidField("account_id") }
         guard ProtocolGrammar.isIdentifier(projectID) else { throw ApprovalProtocolError.invalidField("project_id") }
         guard ProtocolGrammar.isProjectKey(projectKey) else { throw ApprovalProtocolError.invalidField("project_key") }
-        guard ProtocolGrammar.isKeyGeneration(keyGeneration) else {
+        guard (1...ProtocolGrammar.maximumRegistryRevision).contains(registryRevision) else {
+            throw ApprovalProtocolError.invalidField("registry_revision")
+        }
+        guard ProtocolGrammar.keyGenerationRevision(keyGeneration) == registryRevision else {
             throw ApprovalProtocolError.invalidField("key_generation")
         }
         guard let issuedSeconds = Self.wholeSecondUTCValue(issuedAt),
@@ -239,8 +267,13 @@ public struct ApprovalReceipt: Equatable, Sendable {
         var wrapper = Data("{\"signature\":".utf8)
         wrapper.append(signatureValue)
         wrapper.append(0x7D)
-        var parser = try StrictJSONObjectParser(data: wrapper, maximumBytes: Self.maximumReceiptBytes)
-        let fields = try parser.parse()
+        let fields: [String: StrictJSONValue]
+        do {
+            var parser = try StrictJSONObjectParser(data: wrapper, maximumBytes: Self.maximumReceiptBytes)
+            fields = try parser.parse()
+        } catch {
+            throw ApprovalProtocolError.malformedJSON
+        }
         guard fields.count == 1, case let .string(parsed)? = fields["signature"] else {
             throw ApprovalProtocolError.invalidField("signature")
         }

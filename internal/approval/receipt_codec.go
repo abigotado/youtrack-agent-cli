@@ -11,49 +11,53 @@ import (
 )
 
 type unsignedReceiptWire struct {
-	SchemaVersion         int    `json:"schema_version"`
-	ReceiptID             string `json:"receipt_id"`
-	Nonce                 string `json:"nonce"`
-	ChallengeSHA256       string `json:"challenge_sha256"`
-	PlanID                string `json:"plan_id"`
-	PlanSHA256            string `json:"plan_sha256"`
-	ProfileIdentitySHA256 string `json:"profile_identity_sha256"`
-	AccountID             string `json:"account_id"`
-	ProjectID             string `json:"project_id"`
-	ProjectKey            string `json:"project_key"`
-	SchemaSHA256          string `json:"schema_sha256"`
-	RequestSHA256         string `json:"request_sha256"`
-	ExpectedSHA256        string `json:"expected_sha256"`
-	IssuedAt              string `json:"issued_at"`
-	ExpiresAt             string `json:"expires_at"`
-	KeyGeneration         string `json:"key_generation"`
-	KeyFingerprintSHA256  string `json:"key_fingerprint_sha256"`
+	SchemaVersion              int    `json:"schema_version"`
+	ReceiptID                  string `json:"receipt_id"`
+	Nonce                      string `json:"nonce"`
+	ChallengeSHA256            string `json:"challenge_sha256"`
+	RegistryRevision           int    `json:"registry_revision"`
+	AuthorizationContextSHA256 string `json:"authorization_context_sha256"`
+	PlanID                     string `json:"plan_id"`
+	PlanSHA256                 string `json:"plan_sha256"`
+	ProfileIdentitySHA256      string `json:"profile_identity_sha256"`
+	AccountID                  string `json:"account_id"`
+	ProjectID                  string `json:"project_id"`
+	ProjectKey                 string `json:"project_key"`
+	SchemaSHA256               string `json:"schema_sha256"`
+	RequestSHA256              string `json:"request_sha256"`
+	ExpectedSHA256             string `json:"expected_sha256"`
+	IssuedAt                   string `json:"issued_at"`
+	ExpiresAt                  string `json:"expires_at"`
+	KeyGeneration              string `json:"key_generation"`
+	KeyFingerprintSHA256       string `json:"key_fingerprint_sha256"`
 }
 
 type receiptWire struct {
-	SchemaVersion         int    `json:"schema_version"`
-	ReceiptID             string `json:"receipt_id"`
-	Nonce                 string `json:"nonce"`
-	ChallengeSHA256       string `json:"challenge_sha256"`
-	PlanID                string `json:"plan_id"`
-	PlanSHA256            string `json:"plan_sha256"`
-	ProfileIdentitySHA256 string `json:"profile_identity_sha256"`
-	AccountID             string `json:"account_id"`
-	ProjectID             string `json:"project_id"`
-	ProjectKey            string `json:"project_key"`
-	SchemaSHA256          string `json:"schema_sha256"`
-	RequestSHA256         string `json:"request_sha256"`
-	ExpectedSHA256        string `json:"expected_sha256"`
-	IssuedAt              string `json:"issued_at"`
-	ExpiresAt             string `json:"expires_at"`
-	KeyGeneration         string `json:"key_generation"`
-	KeyFingerprintSHA256  string `json:"key_fingerprint_sha256"`
-	Signature             string `json:"signature"`
+	SchemaVersion              int    `json:"schema_version"`
+	ReceiptID                  string `json:"receipt_id"`
+	Nonce                      string `json:"nonce"`
+	ChallengeSHA256            string `json:"challenge_sha256"`
+	RegistryRevision           int    `json:"registry_revision"`
+	AuthorizationContextSHA256 string `json:"authorization_context_sha256"`
+	PlanID                     string `json:"plan_id"`
+	PlanSHA256                 string `json:"plan_sha256"`
+	ProfileIdentitySHA256      string `json:"profile_identity_sha256"`
+	AccountID                  string `json:"account_id"`
+	ProjectID                  string `json:"project_id"`
+	ProjectKey                 string `json:"project_key"`
+	SchemaSHA256               string `json:"schema_sha256"`
+	RequestSHA256              string `json:"request_sha256"`
+	ExpectedSHA256             string `json:"expected_sha256"`
+	IssuedAt                   string `json:"issued_at"`
+	ExpiresAt                  string `json:"expires_at"`
+	KeyGeneration              string `json:"key_generation"`
+	KeyFingerprintSHA256       string `json:"key_fingerprint_sha256"`
+	Signature                  string `json:"signature"`
 }
 
-const receiptFieldCount = 18
+const receiptFieldCount = 20
 
-// ReceiptBytes returns the deterministic protocol-v2 signed receipt JSON.
+// ReceiptBytes returns the deterministic schema-v3 signed receipt JSON.
 // Its field order is part of the cross-language contract.
 func ReceiptBytes(receipt Receipt) ([]byte, error) {
 	if err := validateReceipt(receipt); err != nil {
@@ -70,6 +74,7 @@ func ReceiptBytes(receipt Receipt) ([]byte, error) {
 	raw, err := json.Marshal(receiptWire{
 		SchemaVersion: receipt.SchemaVersion, ReceiptID: receipt.ReceiptID,
 		Nonce: receipt.Nonce, ChallengeSHA256: receipt.ChallengeSHA256,
+		RegistryRevision: receipt.RegistryRevision, AuthorizationContextSHA256: receipt.AuthorizationContextSHA256,
 		PlanID: receipt.PlanID, PlanSHA256: receipt.PlanSHA256,
 		ProfileIdentitySHA256: receipt.ProfileIdentitySHA256, AccountID: receipt.AccountID,
 		ProjectID: receipt.ProjectID, ProjectKey: receipt.ProjectKey,
@@ -97,18 +102,19 @@ func ReceiptDigestSHA256(receipt Receipt) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-// ParseReceiptBytes parses only the exact canonical protocol-v2 receipt JSON.
+// ParseReceiptBytes parses only the exact canonical schema-v3 receipt JSON.
 // The size check happens before decoder, map, or field allocations.
 func ParseReceiptBytes(raw []byte) (Receipt, error) {
 	if len(raw) == 0 || len(raw) > MaxReceiptBytes {
 		return Receipt{}, receiptError("RECEIPT_INVALID", "the signed approval receipt is empty or exceeds the protocol limit")
 	}
 	if err := decodeExactReceiptObject(raw); err != nil {
-		return Receipt{}, receiptError("RECEIPT_INVALID", "the signed approval receipt JSON is not canonical").Wrap(err)
+		// Decoder diagnostics can include attacker-controlled field names or values.
+		return Receipt{}, receiptError("RECEIPT_INVALID", "the signed approval receipt JSON is not canonical")
 	}
 	var wire receiptWire
 	if err := json.Unmarshal(raw, &wire); err != nil {
-		return Receipt{}, receiptError("RECEIPT_INVALID", "the signed approval receipt fields are malformed").Wrap(err)
+		return Receipt{}, receiptError("RECEIPT_INVALID", "the signed approval receipt fields are malformed")
 	}
 	issuedAt, err := parseCanonicalReceiptTime(wire.IssuedAt)
 	if err != nil {
@@ -120,8 +126,9 @@ func ParseReceiptBytes(raw []byte) (Receipt, error) {
 	}
 	receipt := Receipt{
 		SchemaVersion: wire.SchemaVersion, ReceiptID: wire.ReceiptID, Nonce: wire.Nonce,
-		ChallengeSHA256: wire.ChallengeSHA256,
-		PlanID:          wire.PlanID, PlanSHA256: wire.PlanSHA256,
+		ChallengeSHA256:  wire.ChallengeSHA256,
+		RegistryRevision: wire.RegistryRevision, AuthorizationContextSHA256: wire.AuthorizationContextSHA256,
+		PlanID: wire.PlanID, PlanSHA256: wire.PlanSHA256,
 		ProfileIdentitySHA256: wire.ProfileIdentitySHA256, AccountID: wire.AccountID,
 		ProjectID: wire.ProjectID, ProjectKey: wire.ProjectKey, SchemaSHA256: wire.SchemaSHA256,
 		RequestSHA256: wire.RequestSHA256, ExpectedSHA256: wire.ExpectedSHA256,
@@ -184,7 +191,7 @@ func decodeExactReceiptObject(raw []byte) error {
 
 func isReceiptFieldName(name string) bool {
 	switch name {
-	case "schema_version", "receipt_id", "nonce", "challenge_sha256", "plan_id", "plan_sha256",
+	case "schema_version", "receipt_id", "nonce", "challenge_sha256", "registry_revision", "authorization_context_sha256", "plan_id", "plan_sha256",
 		"profile_identity_sha256", "account_id", "project_id", "project_key",
 		"schema_sha256", "request_sha256", "expected_sha256", "issued_at",
 		"expires_at", "key_generation", "key_fingerprint_sha256", "signature":
