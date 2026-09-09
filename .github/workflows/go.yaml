@@ -60,6 +60,11 @@ jobs:
       - name: go build
         run: go build ./...
 
+      - name: Registry and receipt fixture provenance
+        run: |
+          go run ./testdata/gate1a-registry/generate.go -check
+          go run ./testdata/gate1a-v3/generate.go -check
+
       - name: Darwin credential backend build modes
         if: runner.os == 'macOS'
         run: |

@@ -62,10 +62,11 @@ func registryNullable(field string) bool {
 // The exact ordered re-encoding rejects duplicate, extra, missing and reordered
 // fields without relying on encoding/json's permissive duplicate-key behavior.
 func registryParse(raw string, kind string) (registryObject, string) {
-	if _, reason := registryParsePhase(raw, kind, false); reason != "" {
+	o, reason := registryParseCanonical(raw, kind)
+	if reason != "" {
 		return nil, reason
 	}
-	return registryParsePhase(raw, kind, true)
+	return o, registryValidateGrammar(o, kind)
 }
 
 func registryCap(kind string) int {
@@ -79,7 +80,7 @@ func registryCap(kind string) int {
 	return cap
 }
 
-func registryParsePhase(raw string, kind string, grammar bool) (registryObject, string) {
+func registryParseCanonical(raw string, kind string) (registryObject, string) {
 	if len(raw) > registryCap(kind) {
 		return nil, "bounds_grammar"
 	}
@@ -102,21 +103,11 @@ func registryParsePhase(raw string, kind string, grammar bool) (registryObject, 
 	for _, field := range fields {
 		value := string(o[field])
 		if value == "null" {
-			if grammar && !registryNullable(field) {
-				return nil, "bounds_grammar"
-			}
 			continue
 		}
 		if field == "schema_version" || field == "registry_revision" || field == "expected_registry_revision" {
 			if !registryIntegerToken(value) {
 				return nil, "canonical_encoding"
-			}
-			if !grammar {
-				continue
-			}
-			n, err := strconv.ParseInt(value, 10, 16)
-			if err != nil || n < 0 || (field == "schema_version" && n != 1) || (field != "schema_version" && (n > 256 || (field == "registry_revision" && n == 0))) {
-				return nil, "bounds_grammar"
 			}
 			continue
 		}
@@ -138,78 +129,97 @@ func registryParsePhase(raw string, kind string, grammar bool) (registryObject, 
 				return nil, "canonical_encoding"
 			}
 		}
-		if !grammar {
+	}
+	return o, ""
+}
+
+// Called only after canonical validation; reuse its object without decoding again.
+func registryValidateGrammar(o registryObject, kind string) string {
+	for _, field := range registryFields(kind) {
+		value := string(o[field])
+		if value == "null" {
+			if !registryNullable(field) {
+				return "bounds_grammar"
+			}
 			continue
 		}
+		if field == "schema_version" || field == "registry_revision" || field == "expected_registry_revision" {
+			n, err := strconv.ParseInt(value, 10, 16)
+			if err != nil || n < 0 || (field == "schema_version" && n != 1) || (field != "schema_version" && (n > 256 || (field == "registry_revision" && n == 0))) {
+				return "bounds_grammar"
+			}
+			continue
+		}
+		if field == "accepted" || field == "revokes_all_prior" {
+			continue
+		}
+		s := value[1 : len(value)-1]
 		if strings.HasSuffix(field, "_sha256") && !registryHex(s, 64) {
-			return nil, "bounds_grammar"
+			return "bounds_grammar"
 		}
 		if strings.HasSuffix(field, "_key_id") && !registryHex(s, 32) {
-			return nil, "bounds_grammar"
+			return "bounds_grammar"
 		}
 		if strings.HasSuffix(field, "_generation") && registryGeneration(s) == 0 {
-			return nil, "bounds_grammar"
+			return "bounds_grammar"
 		}
 		if strings.HasSuffix(field, "_key_tag") && (!strings.HasPrefix(s, "io.github.abigotado.youtrack-agent.approval.signing.v1/") || !registryHex(strings.TrimPrefix(s, "io.github.abigotado.youtrack-agent.approval.signing.v1/"), 32)) {
-			return nil, "bounds_grammar"
+			return "bounds_grammar"
 		}
 		if field == "challenge" {
 			if _, ok := registryBase64(s, 32); !ok {
-				return nil, "bounds_grammar"
+				return "bounds_grammar"
 			}
 		}
 		if strings.HasSuffix(field, "_spki") {
 			b, ok := registryBase64(s, 91)
 			if !ok {
-				return nil, "bounds_grammar"
+				return "bounds_grammar"
 			}
 			if _, err := P256DERSPKIToX963(b); err != nil {
-				return nil, "bounds_grammar"
+				return "bounds_grammar"
 			}
 		}
 		if strings.HasSuffix(field, "signature") {
 			if _, err := DecodeP256DERSignature(s); err != nil {
-				return nil, "bounds_grammar"
+				return "bounds_grammar"
 			}
 		}
 		if strings.HasSuffix(field, "_at") {
 			when, err := time.Parse("2006-01-02T15:04:05Z", s)
 			if err != nil || when.Format("2006-01-02T15:04:05Z") != s {
-				return nil, "bounds_grammar"
+				return "bounds_grammar"
 			}
 		}
 	}
-	if !grammar {
-		return o, ""
-	}
 	if _, ok := o["message_type"]; ok && registryString(o, "message_type") != "registry_"+strings.TrimSuffix(kind, "_unsigned") {
-		return nil, "bounds_grammar"
+		return "bounds_grammar"
 	}
 	if _, ok := o["record_type"]; ok && registryString(o, "record_type") != "approval_registry_transition" {
-		return nil, "bounds_grammar"
+		return "bounds_grammar"
 	}
 	if transition, ok := o["transition_kind"]; ok && string(transition) != `"enroll"` && string(transition) != `"rotate"` && string(transition) != `"revoke"` && string(transition) != `"recover"` {
-		return nil, "bounds_grammar"
+		return "bounds_grammar"
 	}
 	for _, field := range []string{"target_previous_status", "target_new_status", "new_status"} {
 		if value, ok := o[field]; ok && string(value) != "null" && string(value) != `"active"` && string(value) != `"retained"` && string(value) != `"revoked"` {
-			return nil, "bounds_grammar"
+			return "bounds_grammar"
 		}
 	}
 	if value, ok := o["proposal_signer_role"]; ok && string(value) != `"old"` && string(value) != `"new"` {
-		return nil, "bounds_grammar"
+		return "bounds_grammar"
 	}
 	if kind == "proposal_unsigned" || kind == "proposal" || kind == "final_body" || kind == "record" {
 		for _, prefix := range []string{"target_", "new_"} {
 			if _, reason := registryTuple(o, prefix); reason != "" {
-				return nil, reason
+				return reason
 			}
 		}
 		if gen := registryString(o, "new_generation"); gen != "" && registryGeneration(gen) != registryNumber(o, "registry_revision") {
-			return nil, "bounds_grammar"
+			return "bounds_grammar"
 		}
 	}
-	return o, ""
+	return ""
 }
 
 func registryIntegerToken(raw string) bool {
@@ -300,13 +310,16 @@ func registryVerifySignature(spki, signature, domain, raw string) bool {
 	if err != nil {
 		return false
 	}
-	x, y := elliptic.Unmarshal(elliptic.P256(), point)
+	key, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), point)
+	if err != nil {
+		return false
+	}
 	sig, err := DecodeP256DERSignature(signature)
 	if err != nil {
 		return false
 	}
 	digest := sha256.Sum256([]byte(domain + raw))
-	return ecdsa.VerifyASN1(&ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, digest[:], sig)
+	return ecdsa.VerifyASN1(key, digest[:], sig)
 }
 
 func registryTime(o registryObject, field string) time.Time {

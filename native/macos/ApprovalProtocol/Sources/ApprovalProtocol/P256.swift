@@ -54,9 +54,15 @@ public enum P256PublicKeyCodec {
             // Some native verifiers reject a valid low-S representation but accept
             // its (r, N-s) twin. The verification point negates, preserving x.
             // Strict low-S ingress above remains mandatory; the twin stays local.
-            let equivalentSignature = try P256.Signing.ECDSASignature(
-                derRepresentation: validatedSignature.equivalentHighSDER()
-            )
+            let equivalentDER = try validatedSignature.equivalentHighSDER()
+            let equivalentSignature: P256.Signing.ECDSASignature
+            do {
+                equivalentSignature = try P256.Signing.ECDSASignature(derRepresentation: equivalentDER)
+            } catch {
+                // The optional compatibility representation may be unsupported.
+                // Preserve the original verification verdict in that case.
+                return false
+            }
             return key.isValidSignature(equivalentSignature, for: message)
         } catch {
             throw ApprovalProtocolError.invalidSignature

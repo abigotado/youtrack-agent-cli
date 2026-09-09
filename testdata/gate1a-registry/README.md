@@ -73,20 +73,28 @@ state-transition expectation. Positive manifest comparisons are separate from
 negative validation; stale baseline manifest metadata is not a rejection oracle.
 All raw caps and canonical/primitive checks run before cryptographic work.
 The complete supplied prefix is then validated before the candidate's digest,
-signature, temporal, recovery-eligibility and state checks. A recovery candidate
+signature, temporal, recovery-eligibility and state checks. After prefix
+validation, a recovery candidate must supply recovery evidence before candidate
+digest checks begin. Only presence is checked at this stage; evidence contents
+are checked after signatures and time. Thus missing evidence plus a bad candidate
+digest reports `recovery_eligibility`, while an invalid prefix still wins.
+A recovery candidate
 cannot repair an invalid prefix. Composite faults must not imply a universal
 cross-prefix/candidate error priority that the corpus does not test.
 
-OSStatus vectors cover canonical signed-int32 parsing and exact re-encoding,
-including numeric absence `-25300`. They do not classify arbitrary statuses as
-success, and do not satisfy the coordinator-result classification requirement.
+OSStatus vectors describe canonical signed-int32 parsing and exact re-encoding,
+including numeric absence `-25300`. Their fixture-consistency tests use test-only
+reference parsers and independently pinned raw-value sets. There is no production
+OSStatus parser here: these tests cannot catch defects in a future implementation
+until the vectors are wired to that implementation. They do not classify arbitrary
+statuses as success or satisfy the coordinator-result classification requirement.
 
 ## Remaining prerequisite inventory
 
 | Surface | Status |
 | --- | --- |
 | Core transcript bytes, signatures, hashes, history and state | This corpus; synthetic data only |
-| OSStatus scalar grammar | This corpus; no native status classification |
+| OSStatus scalar grammar | Fixture consistency only; no production parser coverage or native status classification |
 | Registry intent and intent/request/coordinator binding | Pending; [state derivation](../../docs/gate1a-registry-protocol.md#state-derivation) |
 | Commit authorization and ambiguous-result reconciliation | Pending; [commit contract](../../docs/gate1a-registry-protocol.md#commit-and-ambiguous-result-reconciliation) |
 | Typed Security.framework dictionaries/results and persistent-reference provenance | Pending; [native projections](../../docs/gate1a-registry-protocol.md#exact-securityframework-dictionaries-and-projections) |
@@ -129,7 +137,16 @@ then verifies it normally. Only a false result permits one verification of an
 ephemeral equivalent representation with the same backend, key and message.
 Negating the ECDSA verification point preserves its x-coordinate. The twin is
 internal only: it is never accepted as a wire `P256Signature`, stored, returned,
-or granted authority. Errors do not trigger another attempt.
+or granted authority. If CryptoKit cannot construct only the alternate signature
+after the original verification returned false, the result stays false. Original
+input/key construction and internal DER invariant errors retain their closed
+error behavior and do not trigger another attempt.
+
+The fixed public scalars and nonce deliberately preserve the known valid-signature
+regression. Changing the nonce can avoid this input, but does not repair native
+verification of the original signature. Sampling other keys/nonces with no
+failures does not prove impossibility for all such keys. The compatibility path
+has a fixed ceiling of two verifications even on a non-matching signature.
 
 The original fixture and strict expected reason remain intact. Dedicated
 public-API tests pin the exact message hash, key and signature, reject high-S

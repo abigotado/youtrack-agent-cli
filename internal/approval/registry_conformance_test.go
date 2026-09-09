@@ -2,6 +2,7 @@ package approval
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -199,6 +200,9 @@ func TestSharedRegistryNegativeCorpus(t *testing.T) {
 				t.Fatal("duplicate negative")
 			}
 			seen[n.ID] = true
+			if n.ReasonClass != registryExpectedReason(n.ID) {
+				t.Fatal("fixture reason class differs from independently pinned taxonomy")
+			}
 			base, ok := positives[n.Base]
 			if !ok {
 				t.Fatal("unknown negative base")
@@ -241,9 +245,127 @@ func TestSharedRegistryNegativeCorpus(t *testing.T) {
 			t.Fatalf("missing required negative %s", id)
 		}
 	}
+	if len(seen) != len(required) {
+		t.Fatal("unexpected negative vector ID")
+	}
 }
 
-func TestSharedRegistryOSStatusCorpus(t *testing.T) {
+func registryExpectedReason(id string) string {
+	switch id {
+	case "recovery-invalid-prefix-signature":
+		return "signature"
+	case "acceptance-false":
+		return "state_transition"
+	case "prefix-time-reversed":
+		return "temporal"
+	case "prefix-recovery-digest-unexpected", "prefix-recovery-digest-missing":
+		return "recovery_eligibility"
+	}
+	switch {
+	case strings.HasPrefix(id, "encoding-"), strings.HasPrefix(id, "size-") && strings.HasSuffix(id, "-at"):
+		return "canonical_encoding"
+	case strings.HasPrefix(id, "grammar-"), strings.HasPrefix(id, "size-"):
+		return "bounds_grammar"
+	case strings.HasPrefix(id, "digest-"):
+		return "digest_domain"
+	case strings.HasPrefix(id, "signature-"):
+		return "signature"
+	case strings.HasPrefix(id, "time-"):
+		return "temporal"
+	case strings.HasPrefix(id, "recovery-"):
+		return "recovery_eligibility"
+	case strings.HasPrefix(id, "state-"):
+		return "state_transition"
+	default:
+		return ""
+	}
+}
+
+func TestRegistryCombinedFaultPrecedence(t *testing.T) {
+	c := readRegistryCorpus(t)
+	positives := registryPositiveMap(t, c)
+	base := positives["recover-active3"]
+	missing := base.registryTranscript
+	missing.RecoveryEvidence = nil
+	request, reason := registryParse(missing.Request, "request")
+	if reason != "" {
+		t.Fatal(reason)
+	}
+	request["previous_record_sha256"] = json.RawMessage(`"` + strings.Repeat("0", 64) + `"`)
+	missing.Request = string(registryObjectBytes(request, registryFields("request")))
+	var invalidPrefix []string
+	var badEvidence registryTranscript
+	for _, n := range c.Negatives {
+		switch n.ID {
+		case "recovery-invalid-prefix-signature":
+			if n.PrefixRecords == nil {
+				t.Fatal("missing invalid prefix records")
+			}
+			invalidPrefix = *n.PrefixRecords
+		case "recovery-continuity-success":
+			badEvidence = n.Transcript
+		}
+	}
+	if len(invalidPrefix) == 0 || badEvidence.Record == "" {
+		t.Fatal("missing compound-fault source fixture")
+	}
+	record, reason := registryParse(badEvidence.Record, "record")
+	if reason != "" {
+		t.Fatal(reason)
+	}
+	baseRecord, reason := registryParse(base.Record, "record")
+	if reason != "" {
+		t.Fatal(reason)
+	}
+	record["new_signature"] = baseRecord["new_signature"]
+	badEvidence.Record = string(registryObjectBytes(record, registryFields("record")))
+	for _, tc := range []struct {
+		name   string
+		tr     registryTranscript
+		prefix []string
+		want   string
+	}{
+		{"missing evidence before wrong candidate digest", missing, registryPrefix(t, base.Prefix, positives), "recovery_eligibility"},
+		{"invalid prefix before missing evidence", missing, invalidPrefix, "signature"},
+		{"signature before evidence content eligibility", badEvidence, registryPrefix(t, base.Prefix, positives), "signature"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, reason := registryVerifyTranscript(tc.tr, tc.prefix); reason != tc.want {
+				t.Fatalf("got %q, want %q", reason, tc.want)
+			}
+		})
+	}
+}
+
+func TestRegistrySignatureVerifierRejectsMalformedKeys(t *testing.T) {
+	c := readRegistryCorpus(t)
+	base := registryPositiveMap(t, c)["enroll1"]
+	proposal, reason := registryParse(base.Proposal, "proposal")
+	if reason != "" {
+		t.Fatal(reason)
+	}
+	signature := registryString(proposal, "proposal_signature")
+	validKey := registryString(proposal, "new_spki")
+	if !registryVerifySignature(validKey, signature, "YTA-REGISTRY-PROPOSAL-V1\x00", base.UnsignedProposal) {
+		t.Fatal("valid signature control rejected")
+	}
+	spki, ok := registryBase64(validKey, 91)
+	if !ok {
+		t.Fatal("invalid control SPKI")
+	}
+	clear(spki[len(spki)-64:]) // Preserve DER and point tag, replace X/Y with an off-curve point.
+	for _, key := range []string{"", "not-base64", base64.RawURLEncoding.EncodeToString(spki)} {
+		t.Run(key, func(t *testing.T) {
+			if registryVerifySignature(key, signature, "YTA-REGISTRY-PROPOSAL-V1\x00", base.UnsignedProposal) {
+				t.Fatal("malformed or off-curve public key accepted")
+			}
+		})
+	}
+}
+
+// This checks fixture grammar consistency only. It does not exercise a
+// production OSStatus parser or the native Security.framework boundary.
+func TestSharedRegistryOSStatusFixtureConsistency(t *testing.T) {
 	c := readRegistryCorpus(t)
 	positives := make(map[string]bool)
 	negatives := make(map[string]bool)
@@ -346,26 +468,31 @@ func registryVerifyTranscript(tr registryTranscript, prefix []string) ([]registr
 	}
 	// All canonical shapes and then all primitive grammars precede any hashing
 	// or cryptography, even when a later object is malformed.
-	for _, grammar := range []bool{false, true} {
-		for i, raw := range allRaws {
-			if _, why := registryParsePhase(raw, allKinds[i], grammar); why != "" {
-				return nil, why
-			}
-		}
-	}
-	state, tuples, reason := registryReplay(prefix)
-	if reason != "" {
-		return nil, reason
-	}
-	objects := make([]registryObject, len(raws))
-	for i := range raws {
-		o, why := registryParse(raws[i], kinds[i])
+	allObjects := make([]registryObject, len(allRaws))
+	for i, raw := range allRaws {
+		o, why := registryParseCanonical(raw, allKinds[i])
 		if why != "" {
 			return nil, why
 		}
-		objects[i] = o
+		allObjects[i] = o
 	}
+	for i, o := range allObjects {
+		if why := registryValidateGrammar(o, allKinds[i]); why != "" {
+			return nil, why
+		}
+	}
+	state, tuples, reason := registryReplay(prefix, allObjects[len(raws):])
+	if reason != "" {
+		return nil, reason
+	}
+	objects := allObjects[:len(raws)]
 	q, u, p, a, b, r := objects[0], objects[1], objects[2], objects[3], objects[4], objects[5]
+	transition := registryString(q, "transition_kind")
+	// Missing recovery evidence is a structural eligibility failure, after the
+	// entire prefix is validated but before candidate digest comparisons.
+	if transition == "recover" && tr.RecoveryEvidence == nil {
+		return nil, "recovery_eligibility"
+	}
 	if string(registryObjectBytes(p, registryFields("proposal_unsigned"))) != tr.UnsignedProposal || string(registryObjectBytes(r, registryFields("final_body"))) != tr.FinalBody {
 		return nil, "digest_domain"
 	}
@@ -402,9 +529,6 @@ func registryVerifyTranscript(tr registryTranscript, prefix []string) ([]registr
 			return nil, "digest_domain"
 		}
 		if value, exists := o["recovery_evidence_sha256"]; exists {
-			if tr.RecoveryEvidence == nil && registryString(q, "transition_kind") == "recover" {
-				continue
-			}
 			expected := "null"
 			if recoveryDigest != "" {
 				expected = `"` + recoveryDigest + `"`
@@ -424,8 +548,7 @@ func registryVerifyTranscript(tr registryTranscript, prefix []string) ([]registr
 	if !registryVerifySignature(registryString(p, signer), registryString(p, "proposal_signature"), "YTA-REGISTRY-PROPOSAL-V1\x00", tr.UnsignedProposal) {
 		return nil, "signature"
 	}
-	transition := registryString(q, "transition_kind")
-	if (string(r["old_signature"]) != "null") != (transition == "rotate" || transition == "revoke") || (string(r["new_signature"]) != "null") != (transition != "revoke") {
+	if !registrySignatureShape(r, transition) {
 		return nil, "signature"
 	}
 	for _, s := range []struct{ field, key, domain string }{{"old_signature", "target_spki", "YTA-REGISTRY-RECORD-OLD-V1\x00"}, {"new_signature", "new_spki", "YTA-REGISTRY-RECORD-NEW-V1\x00"}} {
@@ -464,7 +587,7 @@ func registryVerifyTranscript(tr registryTranscript, prefix []string) ([]registr
 		}
 	}
 	if transition == "recover" {
-		if tr.RecoveryEvidence == nil || registryString(q, "recovery_mode") != "missing_key_item_or_disabled_registry" {
+		if registryString(q, "recovery_mode") != "missing_key_item_or_disabled_registry" {
 			return nil, "recovery_eligibility"
 		}
 		e := objects[6]
@@ -509,29 +632,19 @@ func registryVerifyTranscript(tr registryTranscript, prefix []string) ([]registr
 	return registryApply(state, tuples, b, r, len(prefix)+1)
 }
 
-func registryReplay(records []string) ([]registryStateEntry, map[string][5]string, string) {
+// Inputs have completed the all-caps, all-canonical, all-grammar preflight.
+func registryReplay(records []string, objects []registryObject) ([]registryStateEntry, map[string][5]string, string) {
 	state := []registryStateEntry{}
 	tuples := make(map[string][5]string)
-	if len(records) > 256 {
-		return nil, nil, "bounds_grammar"
-	}
-	total := 0
 	previous := strings.Repeat("0", 64)
 	for i, raw := range records {
-		total += len(raw)
-		if total > 1114112 {
-			return nil, nil, "bounds_grammar"
-		}
-		r, why := registryParse(raw, "record")
-		if why != "" {
-			return nil, nil, why
-		}
+		r := objects[i]
 		if registryString(r, "previous_record_sha256") != previous {
 			return nil, nil, "digest_domain"
 		}
 		body := string(registryObjectBytes(r, registryFields("final_body")))
 		transition := registryString(r, "transition_kind")
-		if (string(r["old_signature"]) != "null") != (transition == "rotate" || transition == "revoke") || (string(r["new_signature"]) != "null") != (transition != "revoke") {
+		if !registrySignatureShape(r, transition) {
 			return nil, nil, "signature"
 		}
 		for _, s := range []struct{ field, key, domain string }{{"old_signature", "target_spki", "YTA-REGISTRY-RECORD-OLD-V1\x00"}, {"new_signature", "new_spki", "YTA-REGISTRY-RECORD-NEW-V1\x00"}} {
@@ -553,6 +666,11 @@ func registryReplay(records []string) ([]registryStateEntry, map[string][5]strin
 		previous = registryHash("", raw)
 	}
 	return state, tuples, ""
+}
+
+func registrySignatureShape(record registryObject, transition string) bool {
+	return (string(record["old_signature"]) != "null") == (transition == "rotate" || transition == "revoke") &&
+		(string(record["new_signature"]) != "null") == (transition != "revoke")
 }
 
 func registryApply(state []registryStateEntry, tuples map[string][5]string, b, r registryObject, revision int) ([]registryStateEntry, string) {
@@ -580,9 +698,8 @@ func registryApply(state []registryStateEntry, tuples map[string][5]string, b, r
 	if target[0] != active || (active != "" && target != tuples[active]) {
 		return nil, "state_transition"
 	}
-	oldRequired := transition == "rotate" || transition == "revoke"
 	newRequired := transition != "revoke"
-	if (string(r["old_signature"]) != "null") != oldRequired || (string(r["new_signature"]) != "null") != newRequired {
+	if !registrySignatureShape(r, transition) {
 		return nil, "state_transition"
 	}
 	if (string(b["revokes_all_prior"]) == "true") != (transition == "recover") {

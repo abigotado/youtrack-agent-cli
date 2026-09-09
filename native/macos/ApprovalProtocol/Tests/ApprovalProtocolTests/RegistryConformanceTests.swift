@@ -137,7 +137,7 @@ private func registryPrefix(_ ids: [String], corpus: RegistryCorpus) throws -> R
     requiredIDs.formUnion("digest-request-without-nul digest-request-splice digest-acceptance-splice digest-predecessor signature-proposal-domain signature-proposal-domain-without-nul signature-proposal-wrong-key signature-old-wrong-domain signature-new-wrong-domain signature-missing-old signature-missing-new grammar-high-s time-proposal-at-expiry time-acceptance-before-proposal time-commit-at-expiry time-request-window-over acceptance-false state-revoke-all-false state-wrong-target state-key-reuse state-revision-gap recovery-lookup-success recovery-continuity-success recovery-lookup-canceled recovery-lookup-auth-failed recovery-lookup-interaction recovery-lookup-unknown recovery-wrong-eligibility recovery-evidence-missing recovery-invalid-prefix-signature grammar-record-revision--1 grammar-record-revision-0 grammar-record-revision-257 grammar-request-negative-revision grammar-schema-negative grammar-generation-revision grammar-partial-tuple grammar-fingerprint grammar-challenge-padding grammar-time-fraction".split(separator: " ").map(String.init))
     requiredIDs.formUnion("grammar-signature-der grammar-signature-nonminimal-der grammar-spki-der grammar-spki-offcurve grammar-key-tag grammar-digest-uppercase grammar-spki-padding encoding-schema-fraction".split(separator: " ").map(String.init))
     requiredIDs.formUnion(["prefix-time-reversed", "prefix-recovery-digest-unexpected", "prefix-recovery-digest-missing"])
-    try #require(requiredIDs.isSubset(of: Set(corpus.negatives.map(\.id))))
+    try #require(requiredIDs == Set(corpus.negatives.map(\.id)))
     for vector in corpus.negatives {
         let expected = try #require(RegistryReason(rawValue: vector.reason_class))
         // Reviewed case families pin taxonomy independently of the generated label.
@@ -149,7 +149,7 @@ private func registryPrefix(_ ids: [String], corpus: RegistryCorpus) throws -> R
             case "prefix-time-reversed": pinned = .temporal
             case "prefix-recovery-digest-unexpected", "prefix-recovery-digest-missing": pinned = .recoveryEligibility
             default:
-                if vector.id.hasPrefix("encoding-") || vector.id.hasPrefix("size-") && vector.id.hasSuffix("-at") { pinned = .canonicalEncoding }
+                if vector.id.hasPrefix("encoding-") || (vector.id.hasPrefix("size-") && vector.id.hasSuffix("-at")) { pinned = .canonicalEncoding }
                 else if vector.id.hasPrefix("grammar-") || vector.id.hasPrefix("size-") { pinned = .boundsGrammar }
                 else if vector.id.hasPrefix("digest-") { pinned = .digestDomain }
                 else if vector.id.hasPrefix("signature-") { pinned = .signature }
@@ -180,13 +180,48 @@ private func registryPrefix(_ ids: [String], corpus: RegistryCorpus) throws -> R
     }
 }
 
+@Test func registryCompoundFaultPrecedence() throws {
+    let corpus = try registryCorpus()
+    let base = try #require(corpus.positives.first { $0.id == "recover-active3" })
+    let t = base.transcript
+    let request = try RegistryObject(t.request, keys: registryRequestKeys, cap: 2048)
+    let previous = try #require(request.string("previous_record_sha256"))
+    let badRequest = t.request.replacingOccurrences(of: previous, with: String(repeating: "0", count: 64))
+    let missing = RegistryTranscript(request: badRequest, recovery_evidence: nil, unsigned_proposal: t.unsigned_proposal, proposal: t.proposal, acceptance: t.acceptance, final_body: t.final_body, record: t.record)
+    var ledger = try registryPrefix(base.prefix, corpus: corpus)
+    #expect(throws: RegistryReason.recoveryEligibility) { try ledger.validate(missing) }
+
+    let badPrefix = try #require(corpus.negatives.first { $0.id == "recovery-invalid-prefix-signature" }).prefix_records
+    let records = try #require(badPrefix)
+    #expect(throws: RegistryReason.signature) {
+        _ = try missing.parsed()
+        var invalidLedger = RegistryLedger()
+        for record in records { try invalidLedger.append(record) }
+        try invalidLedger.validate(missing)
+    }
+
+    // This signed vector has present, structurally valid but ineligible evidence.
+    // Substituting another valid DER signature must fail before eligibility.
+    let ineligible = try #require(corpus.negatives.first { $0.id == "recovery-continuity-success" }).transcript
+    let record = try RegistryObject(ineligible.record, keys: registryBodyKeys + ["old_signature", "new_signature"], cap: 4352)
+    let other = try RegistryObject(t.record, keys: registryBodyKeys + ["old_signature", "new_signature"], cap: 4352)
+    let originalSignature = try #require(record.string("new_signature"))
+    let wrongSignature = try #require(other.string("new_signature"))
+    try #require(originalSignature != wrongSignature)
+    let badRecord = ineligible.record.replacingOccurrences(of: originalSignature, with: wrongSignature)
+    let badSignature = RegistryTranscript(request: ineligible.request, recovery_evidence: ineligible.recovery_evidence, unsigned_proposal: ineligible.unsigned_proposal, proposal: ineligible.proposal, acceptance: ineligible.acceptance, final_body: ineligible.final_body, record: badRecord)
+    #expect(throws: RegistryReason.signature) { try ledger.validate(badSignature) }
+}
+
 private func registryOSStatus(_ raw: String) throws -> Int32 {
     guard raw.utf8.count <= 11, raw.range(of: "^(0|[1-9][0-9]*|-[1-9][0-9]*)$", options: .regularExpression) != nil,
           let value = Int64(raw), let narrowed = Int32(exactly: value) else { throw RegistryReason.boundsGrammar }
     return narrowed
 }
 
-@Test func sharedRegistryOSStatusCorpus() throws {
+// Fixture consistency only: this local parser does not exercise a production
+// Security.framework OSStatus projection, which remains outside this tranche.
+@Test func sharedRegistryOSStatusFixtureConsistency() throws {
     let vectors = try registryCorpus().osstatus
     let positives = Set(["-2147483648", "-25300", "-1", "0", "1", "2147483647"])
     let negatives = Set(["-2147483649", "2147483648", "-0", "+1", "01", "-01", "1.0", "1e0", "\"-25300\"", "null"])

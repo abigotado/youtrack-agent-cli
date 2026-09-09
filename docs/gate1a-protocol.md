@@ -260,6 +260,10 @@ receipt digest. There are no trailing bytes. Receipt JSON carries those DER
 bytes as RFC 4648 base64url without `=` padding. Parsers decode and re-encode
 both DER and base64url and require exact equality.
 
+The native verifier's bounded internal equivalent-signature compatibility path
+is specified in the [native boundary](gate1a-native-boundary.md). It does not
+relax this low-S wire grammar or change the signed bytes or expected key.
+
 The public-key interchange form is exactly the 65-byte uncompressed ANSI X9.63
 point `0x04 || X || Y`, and the point must lie on P-256. Its DER SubjectPublicKeyInfo
 form is exactly the following 26-byte prefix followed by that X9.63 point:

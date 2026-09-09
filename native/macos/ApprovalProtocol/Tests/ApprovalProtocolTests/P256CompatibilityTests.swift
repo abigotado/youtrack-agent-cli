@@ -66,7 +66,7 @@ private struct P256CompatibilityFixture {
     var wrongR = fixture.signature
     wrongR[36] ^= 1
     var wrongS = fixture.signature
-    wrongS[wrongS.count - 1] -= 1
+    wrongS[wrongS.count - 1] ^= 1
     let cases: [(String, Data, Data, Data)] = [
         ("message", fixture.message + Data([0]), fixture.signature, fixture.key),
         ("key", fixture.message, fixture.signature, fixture.wrongKey),
@@ -99,6 +99,26 @@ private struct P256CompatibilityFixture {
         }
         #expect(throws: ApprovalProtocolError.invalidSignature, "verifier accepted \(name)") {
             _ = try P256PublicKeyCodec.verify(message: fixture.message, derSignature: der, x963: fixture.key)
+        }
+    }
+}
+
+@Test func p256CompatibilityErrorsAreClosedAndRedacted() throws {
+    let fixture = try P256CompatibilityFixture()
+    let sentinel = "UNTRUSTED_SENTINEL"
+    let malformed = Data(sentinel.utf8)
+    let cases: [(Data, Data)] = [
+        (malformed, fixture.key),
+        (fixture.signature, malformed),
+    ]
+    for (signature, key) in cases {
+        do {
+            _ = try P256PublicKeyCodec.verify(message: fixture.message, derSignature: signature, x963: key)
+            Issue.record("malformed input did not throw")
+        } catch {
+            #expect(error as? ApprovalProtocolError == .invalidSignature)
+            #expect(String(describing: error) == "invalidSignature")
+            #expect(!String(reflecting: error).contains(sentinel))
         }
     }
 }

@@ -267,6 +267,10 @@ struct RegistryLedger {
         let new = try RegistryTuple.read(proposal, prefix: "new")
         let bodyTarget = try RegistryTuple.read(body, prefix: "target")
         let bodyNew = try RegistryTuple.read(body, prefix: "new")
+        // Prefix validation belongs to the caller and precedes this candidate.
+        // Missing required evidence is structural; present evidence eligibility
+        // remains after digest, signature, and temporal validation below.
+        guard request.string("transition_kind") != "recover" || evidence != nil else { throw RegistryReason.recoveryEligibility }
         let challenge = try registryBase64(request.string("challenge") ?? "", count: 32)
         let challengeDigest = SHA256.hash(data: challenge).map { String(format: "%02x", $0) }.joined()
         let requestDigest = registryHash(t.request, domain: "YTA-REGISTRY-REQUEST-V1")
@@ -281,7 +285,7 @@ struct RegistryLedger {
                   object.string("challenge_sha256") == challengeDigest,
                   object.string("artifact_descriptor_sha256") == request.string("artifact_descriptor_sha256"),
                   object.string("previous_record_sha256") == request.string("previous_record_sha256"),
-                  (evidence == nil && request.string("transition_kind") == "recover" || object.string("recovery_evidence_sha256") == recoveryDigest),
+                  object.string("recovery_evidence_sha256") == recoveryDigest,
                   object["registry_revision"] == proposal["registry_revision"],
                   object.string("target_generation") == request.string("target_generation"),
                   object.string("new_generation") == request.string("new_generation") else { throw RegistryReason.digestDomain }

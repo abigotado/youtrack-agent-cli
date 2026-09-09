@@ -128,6 +128,24 @@ Go accepts a success only after all of these checks succeed:
 7. the low-S strict DER ECDSA P-256 signature verifies over the exact
    `approval.SigningBytes` using only the enrolled expected key.
 
+The Swift verifier strictly validates the incoming low-S DER before calling
+CryptoKit. It first verifies the original signature; only an ordinary `false`
+permits one internal verification of the mathematically equivalent `(r, N-s)`
+representation using the same key, message and backend. This negates the ECDSA
+verification point without changing its x-coordinate. The alternate DER is
+ephemeral: it is neither an accepted wire signature nor stored or returned.
+Verification is bounded to two cryptographic calls, including invalid inputs
+that pass strict parsing. There is no network, signing, UI, or backend retry.
+
+If CryptoKit cannot construct the alternate signature after the original
+verification returned `false`, the result remains `false`. Strict ingress,
+key/original-signature construction and internal DER invariant failures retain
+their closed error behavior; no supplied content is included in diagnostics.
+The [preserved synthetic regression](../testdata/gate1a-registry/README.md#native-signature-compatibility-regression)
+motivates this compatibility path. Its observed concentration on synthetic key
+and nonce values does not prove that other keys can never encounter it; the
+internal platform cause remains unknown.
+
 The future native factory uses an exact two-minute receipt lifetime. This is a
 minting policy; the five-minute bound remains the verifier safety ceiling.
 
