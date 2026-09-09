@@ -1,0 +1,199 @@
+import Foundation
+import Testing
+@testable import ApprovalProtocol
+
+private struct RegistryCorpus: Decodable {
+    struct State: Decodable, Equatable { let generation: String; let status: String }
+    struct Manifest: Decodable { let purpose: String; let input_hex: String; let sha256: String }
+    struct Positive: Decodable {
+        let id: String
+        let prefix: [String]
+        let request: String
+        let recovery_evidence: String?
+        let unsigned_proposal: String
+        let proposal: String
+        let acceptance: String
+        let final_body: String
+        let record: String
+        let manifest: [Manifest]
+        let expected_state: [State]
+        var transcript: RegistryTranscript {
+            RegistryTranscript(request: request, recovery_evidence: recovery_evidence, unsigned_proposal: unsigned_proposal, proposal: proposal, acceptance: acceptance, final_body: final_body, record: record)
+        }
+    }
+    struct Negative: Decodable {
+        let id: String
+        let base: String
+        let change: String
+        let reason_class: String
+        let prefix: [String]
+        let transcript: RegistryTranscript
+        let prefix_records: [String]?
+    }
+    struct Status: Decodable { let id: String; let raw: String; let accepted: Bool }
+    struct Key: Decodable { let generation: String; let key_id: String; let key_tag: String; let spki: String; let fingerprint_sha256: String }
+    let schema_version: Int
+    let scope: String
+    let keys: [Key]
+    let positives: [Positive]
+    let negatives: [Negative]
+    let osstatus: [Status]
+}
+
+private func registryCorpus() throws -> RegistryCorpus {
+    var root = URL(fileURLWithPath: #filePath)
+    for _ in 0..<6 { root.deleteLastPathComponent() }
+    let corpus = try JSONDecoder().decode(RegistryCorpus.self, from: Data(contentsOf: root.appendingPathComponent("testdata/gate1a-registry/corpus.json")))
+    try #require(corpus.schema_version == 1)
+    try #require(corpus.scope == "registry-transcript-core")
+    return corpus
+}
+
+private func registryPrefix(_ ids: [String], corpus: RegistryCorpus) throws -> RegistryLedger {
+    var ledger = RegistryLedger()
+    try #require(ids.count <= 256)
+    var total = 0
+    for id in ids {
+        let positive = try #require(corpus.positives.first { $0.id == id })
+        total += positive.record.utf8.count
+        try #require(total <= 1_114_112)
+        try ledger.validate(positive.transcript)
+    }
+    return ledger
+}
+
+@Test func sharedRegistryCeremonyCorpus() throws {
+    let corpus = try registryCorpus()
+    let ids = ["enroll1", "rotate2", "revoke3", "recover-disabled4", "recover-active3"]
+    try #require(corpus.positives.map(\.id) == ids)
+    let expectedPrefixes = [[], ["enroll1"], ["enroll1", "rotate2"], ["enroll1", "rotate2", "revoke3"], ["enroll1", "rotate2"]]
+    let expectedStatuses = [["active"], ["retained", "active"], ["retained", "revoked"], ["revoked", "revoked", "active"], ["revoked", "revoked", "active"]]
+    let expectedGenerations = [[1], [1, 2], [1, 2], [1, 2, 4], [1, 2, 3]]
+    for (index, vector) in corpus.positives.enumerated() {
+        #expect(vector.prefix == expectedPrefixes[index])
+        var ledger = try registryPrefix(vector.prefix, corpus: corpus)
+        try ledger.validate(vector.transcript)
+        let expected = zip(expectedGenerations[index], expectedStatuses[index]).map { RegistryCorpus.State(generation: String(format: "YTAG-%020d", $0.0), status: $0.1) }
+        let derived = ledger.entries.map { RegistryCorpus.State(generation: $0.generation, status: ledger.statuses[$0.generation]!) }
+        #expect(derived == expected)
+        #expect(vector.expected_state == expected)
+        // Exercise record-only replay separately: full transcripts must not mask
+        // weaker stored-record validation when recovery receives a raw prefix.
+        var recordOnly = RegistryLedger()
+        for id in vector.prefix + [vector.id] {
+            let event = try #require(corpus.positives.first { $0.id == id })
+            try recordOnly.append(event.record)
+        }
+        let recordState = recordOnly.entries.map { RegistryCorpus.State(generation: $0.generation, status: recordOnly.statuses[$0.generation]!) }
+        #expect(recordState == expected)
+        #expect(recordOnly.revision == vector.prefix.count + 1)
+        #expect(recordOnly.previous == registryHash(vector.record))
+        var inputs: [String: String] = [
+            "request_digest": "YTA-REGISTRY-REQUEST-V1\0" + vector.request,
+            "proposal_signature": "YTA-REGISTRY-PROPOSAL-V1\0" + vector.unsigned_proposal,
+            "proposal_digest": "YTA-REGISTRY-PROPOSAL-DIGEST-V1\0" + vector.proposal,
+            "acceptance_digest": "YTA-REGISTRY-ACCEPTANCE-V1\0" + vector.acceptance,
+            "record_digest": "YTA-REGISTRY-COMMIT-V1\0" + vector.record,
+            "predecessor_digest": vector.record,
+        ]
+        if let evidence = vector.recovery_evidence { inputs["recovery_evidence_digest"] = "YTA-REGISTRY-RECOVERY-EVIDENCE-V1\0" + evidence }
+        let record = try RegistryObject(vector.record, keys: registryBodyKeys + ["old_signature", "new_signature"], cap: 4352)
+        if record.string("old_signature") != nil { inputs["old_signature"] = "YTA-REGISTRY-RECORD-OLD-V1\0" + vector.final_body }
+        if record.string("new_signature") != nil { inputs["new_signature"] = "YTA-REGISTRY-RECORD-NEW-V1\0" + vector.final_body }
+        try #require(Set(vector.manifest.map(\.purpose)) == Set(inputs.keys))
+        try #require(vector.manifest.count == inputs.count)
+        for manifest in vector.manifest {
+            let raw = try #require(inputs[manifest.purpose])
+            #expect(manifest.input_hex == raw.utf8.map { String(format: "%02x", $0) }.joined())
+            #expect(manifest.sha256 == registryHash(raw))
+        }
+    }
+    // Independently parse the synthetic public roster, never any private material.
+    try #require(corpus.keys.count == 4)
+    try #require(Set(corpus.keys.map(\.generation)).count == corpus.keys.count)
+    var roster: [RegistryTuple] = []
+    for key in corpus.keys {
+        let raw = "{\"schema_version\":1,\"new_generation\":\"\(key.generation)\",\"new_key_id\":\"\(key.key_id)\",\"new_key_tag\":\"\(key.key_tag)\",\"new_spki\":\"\(key.spki)\",\"new_fingerprint_sha256\":\"\(key.fingerprint_sha256)\"}"
+        let object = try RegistryObject(raw, keys: ["schema_version", "new_generation", "new_key_id", "new_key_tag", "new_spki", "new_fingerprint_sha256"], cap: 2048)
+        roster.append(try #require(try RegistryTuple.read(object, prefix: "new")))
+    }
+    for vector in corpus.positives {
+        let object = try RegistryObject(vector.proposal, keys: registryProposalKeys, cap: 4096)
+        for prefix in ["target", "new"] {
+            if let tuple = try RegistryTuple.read(object, prefix: prefix) { #expect(roster.contains(tuple)) }
+        }
+    }
+}
+
+@Test func sharedRegistryNegativeCorpus() throws {
+    let corpus = try registryCorpus()
+    try #require(!corpus.negatives.isEmpty)
+    try #require(Set(corpus.negatives.map(\.id)).count == corpus.negatives.count)
+    var requiredIDs = Set<String>()
+    for object in ["request", "recovery_evidence", "unsigned_proposal", "proposal", "acceptance", "final_body", "record"] {
+        for change in ["missing", "duplicate", "unknown", "reordered", "escaped", "whitespace", "trailing", "nonobject"] { requiredIDs.insert("encoding-\(object)-\(change)") }
+        for boundary in ["over", "at"] { requiredIDs.insert("size-\(object)-\(boundary)") }
+    }
+    requiredIDs.formUnion("digest-request-without-nul digest-request-splice digest-acceptance-splice digest-predecessor signature-proposal-domain signature-proposal-domain-without-nul signature-proposal-wrong-key signature-old-wrong-domain signature-new-wrong-domain signature-missing-old signature-missing-new grammar-high-s time-proposal-at-expiry time-acceptance-before-proposal time-commit-at-expiry time-request-window-over acceptance-false state-revoke-all-false state-wrong-target state-key-reuse state-revision-gap recovery-lookup-success recovery-continuity-success recovery-lookup-canceled recovery-lookup-auth-failed recovery-lookup-interaction recovery-lookup-unknown recovery-wrong-eligibility recovery-evidence-missing recovery-invalid-prefix-signature grammar-record-revision--1 grammar-record-revision-0 grammar-record-revision-257 grammar-request-negative-revision grammar-schema-negative grammar-generation-revision grammar-partial-tuple grammar-fingerprint grammar-challenge-padding grammar-time-fraction".split(separator: " ").map(String.init))
+    requiredIDs.formUnion("grammar-signature-der grammar-signature-nonminimal-der grammar-spki-der grammar-spki-offcurve grammar-key-tag grammar-digest-uppercase grammar-spki-padding encoding-schema-fraction".split(separator: " ").map(String.init))
+    requiredIDs.formUnion(["prefix-time-reversed", "prefix-recovery-digest-unexpected", "prefix-recovery-digest-missing"])
+    try #require(requiredIDs.isSubset(of: Set(corpus.negatives.map(\.id))))
+    for vector in corpus.negatives {
+        let expected = try #require(RegistryReason(rawValue: vector.reason_class))
+        // Reviewed case families pin taxonomy independently of the generated label.
+        if requiredIDs.contains(vector.id) {
+            let pinned: RegistryReason
+            switch vector.id {
+            case "recovery-invalid-prefix-signature": pinned = .signature
+            case "acceptance-false": pinned = .stateTransition
+            case "prefix-time-reversed": pinned = .temporal
+            case "prefix-recovery-digest-unexpected", "prefix-recovery-digest-missing": pinned = .recoveryEligibility
+            default:
+                if vector.id.hasPrefix("encoding-") || vector.id.hasPrefix("size-") && vector.id.hasSuffix("-at") { pinned = .canonicalEncoding }
+                else if vector.id.hasPrefix("grammar-") || vector.id.hasPrefix("size-") { pinned = .boundsGrammar }
+                else if vector.id.hasPrefix("digest-") { pinned = .digestDomain }
+                else if vector.id.hasPrefix("signature-") { pinned = .signature }
+                else if vector.id.hasPrefix("time-") { pinned = .temporal }
+                else if vector.id.hasPrefix("recovery-") { pinned = .recoveryEligibility }
+                else { pinned = .stateTransition }
+            }
+            #expect(expected == pinned)
+        }
+        let base = try #require(corpus.positives.first { $0.id == vector.base })
+        let t = vector.transcript
+        let baseRecords = try base.prefix.map { id in try #require(corpus.positives.first { $0.id == id }).record }
+        let candidateRecords = try vector.prefix_records ?? vector.prefix.map { id in try #require(corpus.positives.first { $0.id == id }).record }
+        #expect(t.request != base.request || t.recovery_evidence != base.recovery_evidence || t.unsigned_proposal != base.unsigned_proposal || t.proposal != base.proposal || t.acceptance != base.acceptance || t.final_body != base.final_body || t.record != base.record || candidateRecords != baseRecords)
+        var verdict: RegistryReason?
+        do {
+            _ = try t.parsed()
+            var ledger: RegistryLedger
+            if let records = vector.prefix_records {
+                ledger = RegistryLedger()
+                guard records.count <= 256, records.reduce(0, { $0 + $1.utf8.count }) <= 1_114_112 else { throw RegistryReason.boundsGrammar }
+                for record in records { try ledger.append(record) }
+            } else { ledger = try registryPrefix(vector.prefix, corpus: corpus) }
+            try ledger.validate(t)
+        } catch let reason as RegistryReason { verdict = reason }
+        catch { Issue.record("unclassified registry failure: \(vector.id)") }
+        #expect(verdict == expected, "\(vector.id): expected \(expected.rawValue), got \(verdict?.rawValue ?? "accepted")")
+    }
+}
+
+private func registryOSStatus(_ raw: String) throws -> Int32 {
+    guard raw.utf8.count <= 11, raw.range(of: "^(0|[1-9][0-9]*|-[1-9][0-9]*)$", options: .regularExpression) != nil,
+          let value = Int64(raw), let narrowed = Int32(exactly: value) else { throw RegistryReason.boundsGrammar }
+    return narrowed
+}
+
+@Test func sharedRegistryOSStatusCorpus() throws {
+    let vectors = try registryCorpus().osstatus
+    let positives = Set(["-2147483648", "-25300", "-1", "0", "1", "2147483647"])
+    let negatives = Set(["-2147483649", "2147483648", "-0", "+1", "01", "-01", "1.0", "1e0", "\"-25300\"", "null"])
+    #expect(Set(vectors.filter(\.accepted).map(\.raw)) == positives)
+    #expect(negatives.isSubset(of: Set(vectors.filter { !$0.accepted }.map(\.raw))))
+    for vector in vectors {
+        if vector.accepted { #expect(try String(registryOSStatus(vector.raw)) == vector.raw) }
+        else { #expect(throws: RegistryReason.boundsGrammar) { _ = try registryOSStatus(vector.raw) } }
+    }
+}
