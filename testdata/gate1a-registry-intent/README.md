@@ -8,13 +8,15 @@ defines the intent bytes; its coordinator section defines the binding.
 ## Scope
 
 The corpus contains seven positives (five core-linked scenarios and standalone
-1-second/300-second lifetime boundaries) and 51 negatives. Rejection classes are
+1-second/300-second lifetime boundaries) and 52 negatives. Rejection classes are
 test-only `canonical_encoding`, `bounds_grammar`, `temporal`, `digest_domain`,
 and `intent_binding`; they add no CLI error or authority state.
 
 The authoritative parser input is `raw_hex`, decoded directly to bytes. This
 preserves malformed UTF-8 rather than silently replacing it during JSON/string
-conversion. Intent parsing enforces the 1,024-byte cap, exact ordered fields,
+conversion. A leading UTF-8 BOM is rejected as `canonical_encoding`; decoding
+must preserve the original bytes rather than silently stripping the BOM.
+Intent parsing enforces the 1,024-byte cap, exact ordered fields,
 canonical primitive encodings, and a positive lifetime of at most 300 seconds.
 The digest covers `YTA-REGISTRY-INTENT-V1`, a NUL byte, then the exact intent.
 

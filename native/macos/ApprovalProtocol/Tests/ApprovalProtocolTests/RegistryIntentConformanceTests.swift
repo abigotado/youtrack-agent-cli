@@ -71,7 +71,10 @@ private func validateIntent(_ bytes: Data, digest: String, coreID: String?, corp
     // never a successful negative intent verdict. Replay the full core first.
     let request = try validatedIntentCore(coreID, corpus: corpus)
     guard bytes.count <= 1024 else { throw IntentFailure.bounds }
-    guard let raw = String(data: bytes, encoding: .utf8) else { throw IntentFailure.canonical }
+    // Foundation can strip a leading BOM; canonical validation must preserve every input byte.
+    guard let raw = String(data: bytes, encoding: .utf8), Data(raw.utf8) == bytes else {
+        throw IntentFailure.canonical
+    }
     let intent: RegistryObject
     do {
         intent = try RegistryObject(raw, keys: ["schema_version", "intent_type", "transition_kind", "artifact_descriptor_sha256", "ceremony_nonce", "requested_at", "expires_at"], cap: 1024, checkGrammar: false)
@@ -131,7 +134,7 @@ private func validateIntent(_ bytes: Data, digest: String, coreID: String?, corp
         }
     }
     let families: [(IntentFailure, String)] = [
-        (.canonical, "canonical-empty canonical-malformed canonical-unknown canonical-duplicate canonical-missing canonical-reordered canonical-whitespace canonical-trailing-lf canonical-trailing-token canonical-escaped-key canonical-escaped-value canonical-invalid-utf8 canonical-schema-string canonical-schema-bool canonical-null canonical-array canonical-object canonical-schema-fraction canonical-schema-exponent canonical-schema-leading-zero canonical-schema-plus canonical-schema-negative-zero canonical-size-1024"),
+        (.canonical, "canonical-empty canonical-malformed canonical-unknown canonical-duplicate canonical-missing canonical-reordered canonical-whitespace canonical-trailing-lf canonical-bom canonical-trailing-token canonical-escaped-key canonical-escaped-value canonical-invalid-utf8 canonical-schema-string canonical-schema-bool canonical-null canonical-array canonical-object canonical-schema-fraction canonical-schema-exponent canonical-schema-leading-zero canonical-schema-plus canonical-schema-negative-zero canonical-size-1024"),
         (.bounds, "bounds-size-1025 schema-version field-intent-type field-transition field-descriptor-uppercase field-descriptor-short field-descriptor-long field-descriptor-nonhex field-nonce-padding field-nonce-alphabet field-nonce-31-bytes field-nonce-33-bytes field-nonce-pad-bits field-date-offset field-date-fraction field-date-invalid"),
         (.temporal, "temporal-zero temporal-negative temporal-301s"),
         (.digest, "digest-wrong digest-no-nul digest-wrong-domain digest-plain-hash digest-lf-hash"),
@@ -148,6 +151,10 @@ private func validateIntent(_ bytes: Data, digest: String, coreID: String?, corp
         #expect(vector.core_id == (reason == .binding ? "enroll1" : nil))
         #expect(vector.raw_hex != base.raw_hex || vector.sha256 != base.sha256)
         let bytes = try intentBytes(vector.raw_hex)
+        if vector.id == "canonical-bom" {
+            #expect(vector.raw_hex == "efbbbf" + base.raw_hex)
+            #expect(vector.sha256 == intentDigest(bytes))
+        }
         if vector.id == "canonical-size-1024" { #expect(bytes.count == 1024) }
         if vector.id == "bounds-size-1025" { #expect(bytes.count == 1025) }
         if reason == .binding { #expect(vector.sha256 == intentDigest(bytes)) }

@@ -135,6 +135,7 @@ func generate() ([]byte, error) {
 		{"canonical-missing", strings.Replace(base, `"intent_type":"registry_commit",`, "", 1)},
 		{"canonical-reordered", strings.Replace(base, `"schema_version":1,"intent_type":"registry_commit"`, `"intent_type":"registry_commit","schema_version":1`, 1)},
 		{"canonical-whitespace", " " + base}, {"canonical-trailing-lf", base + "\n"},
+		{"canonical-bom", "\xef\xbb\xbf" + base},
 		{"canonical-trailing-token", base + "{}"},
 		{"canonical-escaped-key", strings.Replace(base, `schema_version`, `schema_\u0076ersion`, 1)},
 		{"canonical-escaped-value", strings.Replace(base, `registry_commit`, `registry_\u0063ommit`, 1)},

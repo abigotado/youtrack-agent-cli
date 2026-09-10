@@ -239,8 +239,12 @@ func TestSharedRegistryIntentCorpus(t *testing.T) {
 		"ttl-1s":                   {"", "enroll", "ERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzA", "12:00:01", "2abebaaa0750eb86ce1cfe7d360742623afca9a49e8b831f20476fbf56014e73"},
 		"ttl-300s":                 {"", "enroll", "ERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzA", "12:05:00", "d4e4dc20ba7cc0295a3affd81dc28bc4fd38c836211eddcc4c2da529f1692b67"},
 	}
+	var baseRawHex string
 	seen := make(map[string]bool)
 	for _, v := range c.Positives {
+		if v.ID == "intent-enroll1" {
+			baseRawHex = v.RawHex
+		}
 		t.Run(v.ID, func(t *testing.T) {
 			p, ok := want[v.ID]
 			if !ok || seen[v.ID] {
@@ -266,7 +270,7 @@ func TestSharedRegistryIntentCorpus(t *testing.T) {
 
 	expected := make(map[string]string)
 	for reason, ids := range map[string]string{
-		"canonical_encoding": "canonical-empty canonical-malformed canonical-unknown canonical-duplicate canonical-missing canonical-reordered canonical-whitespace canonical-trailing-lf canonical-trailing-token canonical-escaped-key canonical-escaped-value canonical-invalid-utf8 canonical-schema-string canonical-schema-bool canonical-null canonical-array canonical-object canonical-schema-fraction canonical-schema-exponent canonical-schema-leading-zero canonical-schema-plus canonical-schema-negative-zero canonical-size-1024",
+		"canonical_encoding": "canonical-empty canonical-malformed canonical-unknown canonical-duplicate canonical-missing canonical-reordered canonical-whitespace canonical-trailing-lf canonical-bom canonical-trailing-token canonical-escaped-key canonical-escaped-value canonical-invalid-utf8 canonical-schema-string canonical-schema-bool canonical-null canonical-array canonical-object canonical-schema-fraction canonical-schema-exponent canonical-schema-leading-zero canonical-schema-plus canonical-schema-negative-zero canonical-size-1024",
 		"bounds_grammar":     "bounds-size-1025 schema-version field-intent-type field-transition field-descriptor-uppercase field-descriptor-short field-descriptor-long field-descriptor-nonhex field-nonce-padding field-nonce-alphabet field-nonce-31-bytes field-nonce-33-bytes field-nonce-pad-bits field-date-offset field-date-fraction field-date-invalid",
 		"temporal":           "temporal-zero temporal-negative temporal-301s",
 		"digest_domain":      "digest-wrong digest-no-nul digest-wrong-domain digest-plain-hash digest-lf-hash",
@@ -289,6 +293,18 @@ func TestSharedRegistryIntentCorpus(t *testing.T) {
 			}
 			if (v.CoreID != nil) != (want == "intent_binding") || (v.CoreID != nil && *v.CoreID != "enroll1") {
 				t.Fatal("unexpected negative core reference")
+			}
+			if v.ID == "canonical-bom" {
+				if baseRawHex == "" || v.RawHex != "efbbbf"+baseRawHex {
+					t.Fatal("BOM vector must prefix the exact base bytes")
+				}
+				raw, err := hex.DecodeString(v.RawHex)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if v.SHA256 != registryHash("YTA-REGISTRY-INTENT-V1\x00", string(raw)) {
+					t.Fatal("BOM vector must hash the domain and original bytes")
+				}
 			}
 			if reason, err := registryVerifyIntent(v, cores); err != nil || reason != want {
 				t.Fatalf("got %q, %v; want %q", reason, err, want)
