@@ -95,7 +95,8 @@ statuses as success or satisfy the coordinator-result classification requirement
 | --- | --- |
 | Core transcript bytes, signatures, hashes, history and state | This corpus; synthetic data only |
 | OSStatus scalar grammar | Fixture consistency only; no production parser coverage or native status classification |
-| Registry intent and intent/request/coordinator binding | Pending; [state derivation](../../docs/gate1a-registry-protocol.md#state-derivation) |
+| Registry intent canonical bytes/hash and supplied intent/request binding | [Supplemental fixture consistency](../gate1a-registry-intent/README.md); no production parser coverage |
+| Coordinator acquisition binding and actual pre-read intent/runtime ordering | Pending; [state derivation](../../docs/gate1a-registry-protocol.md#state-derivation) |
 | Commit authorization and ambiguous-result reconciliation | Pending; [commit contract](../../docs/gate1a-registry-protocol.md#commit-and-ambiguous-result-reconciliation) |
 | Typed Security.framework dictionaries/results and persistent-reference provenance | Pending; [native projections](../../docs/gate1a-registry-protocol.md#exact-securityframework-dictionaries-and-projections) |
 | Coordinator acquisition, exclusion, quiescence, quarantine, cleanup and classification | Pending; [coordinator contract](../../docs/gate1a-registry-protocol.md#helper-owned-apply-authority-coordinator) |
