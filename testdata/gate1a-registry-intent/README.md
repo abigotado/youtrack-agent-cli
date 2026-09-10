@@ -56,6 +56,10 @@ test-oracle conformance, not coverage of a future production intent parser.
 
 ## Still pending
 
+The [registry-active supplement](../gate1a-registry-active/README.md) checks
+supplied active bytes against these validated intent fixtures. This is offline
+fixture consistency, not coordinator acquisition or actual execution ordering.
+
 Supplied matching bytes cannot prove random freshness, an intent created before
 mutable authority reads, coordinator acquisition, live ownership, uninterrupted
 peer authentication, time-of-use checks, or quiescence. Alternative revision-3
