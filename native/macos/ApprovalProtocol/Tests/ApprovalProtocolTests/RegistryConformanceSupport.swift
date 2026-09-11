@@ -13,6 +13,35 @@ enum RegistryReason: String, Error {
     case stateTransition = "state_transition"
 }
 
+// Test-only registry timestamps use a four-digit proleptic Gregorian calendar,
+// including year zero, without Foundation's historical calendar normalization.
+func registryWholeSecondUTCSeconds(_ value: String) -> Int64? {
+    guard value.utf8.count == 20 else { return nil }
+    let bytes = Array(value.utf8)
+    guard bytes[4] == 45, bytes[7] == 45, bytes[10] == 84,
+          bytes[13] == 58, bytes[16] == 58, bytes[19] == 90 else { return nil }
+    func number(_ start: Int, _ end: Int) -> Int64? {
+        var value: Int64 = 0
+        for byte in bytes[start..<end] {
+            guard byte >= 48 && byte <= 57 else { return nil }
+            value = value * 10 + Int64(byte - 48)
+        }
+        return value
+    }
+    guard let year = number(0, 4), let month = number(5, 7),
+          let day = number(8, 10), let hour = number(11, 13),
+          let minute = number(14, 16), let second = number(17, 19),
+          (1...12).contains(month), hour <= 23, minute <= 59, second <= 59 else { return nil }
+    let leap = year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)
+    let monthDays: [Int64] = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    guard (1...monthDays[Int(month) - 1]).contains(day) else { return nil }
+    // Count from year zero with nonnegative operands, avoiding negative-era division.
+    let daysBeforeYear = 365 * year + (year + 3) / 4 - (year + 99) / 100 + (year + 399) / 400
+    let daysBeforeMonth = monthDays.prefix(Int(month) - 1).reduce(0, +)
+    let unixDays = daysBeforeYear + daysBeforeMonth + day - 1 - 719528
+    return unixDays * 86400 + hour * 3600 + minute * 60 + second
+}
+
 struct RegistryObject {
     let fields: [(String, String)]
     var bytes: String { "{" + fields.map { "\"\($0.0)\":\($0.1)" }.joined(separator: ",") + "}" }
@@ -111,10 +140,9 @@ struct RegistryObject {
         text.utf8.count == count && text.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
     func time(_ key: String) throws -> Date {
-        guard let text = string(key), text.range(of: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", options: .regularExpression) != nil else { throw RegistryReason.boundsGrammar }
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: text), formatter.string(from: date) == text else { throw RegistryReason.boundsGrammar }
-        return date
+        guard let text = string(key), let seconds = registryWholeSecondUTCSeconds(text) else { throw RegistryReason.boundsGrammar }
+        // The supported whole-second range fits exactly in Double (well below 2^53).
+        return Date(timeIntervalSince1970: Double(seconds))
     }
 }
 

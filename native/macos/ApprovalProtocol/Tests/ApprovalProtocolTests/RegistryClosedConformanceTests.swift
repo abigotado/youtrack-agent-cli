@@ -31,30 +31,6 @@ private func closedDigest(_ bytes: Data) -> String {
     intentHex(Data(SHA256.hash(data: Data("YTA-APPLY-COORDINATOR-CLOSED-V1\0".utf8) + bytes)))
 }
 
-// Four-digit proleptic Gregorian grammar, including year zero. Foundation date
-// conversion normalizes some valid spellings; this check makes no chronology claim.
-private func closedWholeSecondUTC(_ value: String) -> Bool {
-    let bytes = Array(value.utf8)
-    guard bytes.count == 20,
-          bytes[4] == 45, bytes[7] == 45, bytes[10] == 84,
-          bytes[13] == 58, bytes[16] == 58, bytes[19] == 90 else { return false }
-    func number(_ start: Int, _ end: Int) -> Int? {
-        var value = 0
-        for byte in bytes[start..<end] {
-            guard byte >= 48 && byte <= 57 else { return nil }
-            value = value * 10 + Int(byte - 48)
-        }
-        return value
-    }
-    guard let year = number(0, 4), let month = number(5, 7),
-          let day = number(8, 10), let hour = number(11, 13),
-          let minute = number(14, 16), let second = number(17, 19),
-          (1...12).contains(month), hour <= 23, minute <= 59, second <= 59 else { return false }
-    let leap = year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)
-    let monthDays = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    return (1...monthDays[month - 1]).contains(day)
-}
-
 private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, activeID: String, actives: ActiveCorpus, intents: IntentCorpus, core: RegistryCorpus) throws -> RegistryObject {
     guard let supplied = actives.positives.first(where: { $0.id == activeID }) else { throw ClosedFixtureError.unknownActive }
     let active: RegistryObject
@@ -95,7 +71,7 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
         for key in ["permit_sha256", "receipt_sha256", "journal_revision"] {
             guard closed[key] == "null" else { throw ClosedFailure.bounds }
         }
-        guard closedWholeSecondUTC(closed.string("closed_at") ?? "") else { throw ClosedFailure.bounds }
+        guard registryWholeSecondUTCSeconds(closed.string("closed_at") ?? "") != nil else { throw ClosedFailure.bounds }
     } catch RegistryReason.canonicalEncoding { throw ClosedFailure.canonical }
     catch RegistryReason.boundsGrammar { throw ClosedFailure.bounds }
     guard digest == closedDigest(bytes) else { throw ClosedFailure.digest }

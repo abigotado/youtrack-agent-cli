@@ -98,6 +98,7 @@ statuses as success or satisfy the coordinator-result classification requirement
 | Registry intent canonical bytes/hash and supplied intent/request binding | [Supplemental fixture consistency](../gate1a-registry-intent/README.md); no production parser coverage |
 | Registry-commit active canonical bytes/hash and supplied active/intent binding | [Supplemental fixture consistency](../gate1a-registry-active/README.md); no acquisition or ownership evidence |
 | Registry retained-candidate closed bytes/hash and supplied links | [Supplemental fixture consistency](../gate1a-registry-closed/README.md); not native outcome, quiescence or durable-close evidence |
+| Registry timestamp grammar and elapsed seconds | [Shared calendar fixtures](../gate1a-registry-time/README.md); synthetic parsing/arithmetic checks, not trusted time or acquisition evidence |
 | Coordinator acquisition binding and actual pre-read intent/runtime ordering | Pending; [state derivation](../../docs/gate1a-registry-protocol.md#state-derivation) |
 | Commit authorization and ambiguous-result reconciliation | Pending; [commit contract](../../docs/gate1a-registry-protocol.md#commit-and-ambiguous-result-reconciliation) |
 | Typed Security.framework dictionaries/results and persistent-reference provenance | Pending; [native projections](../../docs/gate1a-registry-protocol.md#exact-securityframework-dictionaries-and-projections) |
