@@ -75,6 +75,7 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
         for key in ["record_type", "lease_id", "active_sha256", "operation_kind", "terminal_outcome", "closed_at", "close_mode"] {
             guard closed.string(key) != nil else { throw ClosedFailure.canonical }
         }
+        guard closed["registry_record_sha256"] == "null" || closed.string("registry_record_sha256") != nil else { throw ClosedFailure.canonical }
         guard try closed.integer("schema_version") == 1,
               closed.string("record_type") == "apply_coordinator_closed",
               closed.string("close_mode") == "normal" else { throw ClosedFailure.bounds }
@@ -83,8 +84,10 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
         guard closed.string("operation_kind") == "registry_commit" else { throw ClosedFailure.bounds }
         if ["ambiguous", "applied", "failed_before_mutation"].contains(closed.string("terminal_outcome") ?? "") { throw ClosedScopeError.unsupportedBranch }
         guard ["registry_committed", "registry_not_committed"].contains(closed.string("terminal_outcome") ?? "") else { throw ClosedFailure.bounds }
-        if closed["registry_record_sha256"] == "null" { throw ClosedScopeError.unsupportedBranch }
-        guard closed.string("registry_record_sha256") != nil else { throw ClosedFailure.canonical }
+        if closed["registry_record_sha256"] == "null" {
+            guard closed.string("terminal_outcome") == "registry_not_committed" else { throw ClosedFailure.bounds }
+            throw ClosedScopeError.unsupportedBranch
+        }
         guard ProtocolGrammar.isCanonicalBase32ID(closed.string("lease_id") ?? "", prefix: "YTAL-") else { throw ClosedFailure.bounds }
         for key in ["active_sha256", "registry_record_sha256"] {
             guard let value = closed.string(key), RegistryObject.hex(value, count: 64) else { throw ClosedFailure.bounds }
@@ -155,7 +158,12 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
         (.digest, "digest-wrong digest-no-nul digest-wrong-domain digest-plain-hash digest-lf-hash"),
         (.binding, "binding-lease binding-active binding-candidate binding-candidate-plain-hash binding-candidate-intent"),
     ]
-    let reasons = Dictionary(uniqueKeysWithValues: families.flatMap { reason, ids in ids.split(separator: " ").map { (String($0), reason) } })
+    let candidatePrimitives = [("true", "true"), ("false", "false"), ("integer", "0"), ("fraction", "1.0"), ("array", "[]"), ("object", "{}")]
+    var reasons = Dictionary(uniqueKeysWithValues: families.flatMap { reason, ids in ids.split(separator: " ").map { (String($0), reason) } })
+    for (name, _) in candidatePrimitives {
+        for suffix in ["", "-apply", "-close-mode"] { reasons["canonical-candidate-" + name + suffix] = .canonical }
+    }
+    reasons["field-candidate-committed-null"] = .bounds
     try #require(Set(corpus.negatives.map(\.id)) == Set(reasons.keys))
     try #require(corpus.negatives.count == reasons.count)
     let base = try #require(corpus.positives.first)
@@ -190,6 +198,19 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
         }
         if vector.id == "canonical-size-4096" { #expect(bytes.count == 4096) }
         if vector.id == "bounds-size-4097" { #expect(bytes.count == 4097) }
+        for (name, primitive) in candidatePrimitives {
+            let literal = baseRaw.replacingOccurrences(of: "\"" + pinned[0].2 + "\"", with: primitive)
+            if vector.id == "canonical-candidate-" + name { #expect(bytes == Data(literal.utf8)) }
+            if vector.id == "canonical-candidate-" + name + "-apply" {
+                #expect(bytes == Data(literal.replacingOccurrences(of: "\"operation_kind\":\"registry_commit\"", with: "\"operation_kind\":\"apply\"").utf8))
+            }
+            if vector.id == "canonical-candidate-" + name + "-close-mode" {
+                #expect(bytes == Data(literal.replacingOccurrences(of: "\"close_mode\":\"normal\"", with: "\"close_mode\":\"unknown\"").utf8))
+            }
+        }
+        if vector.id == "field-candidate-committed-null" {
+            #expect(bytes == Data(baseRaw.replacingOccurrences(of: "\"" + pinned[0].2 + "\"", with: "null").utf8))
+        }
         if let (date, hash) = invalidDates[vector.id] {
             #expect(bytes == Data(baseRaw.replacingOccurrences(of: "2026-09-01T12:00:04Z", with: date).utf8))
             #expect(vector.sha256 == hash)
@@ -203,9 +224,15 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
         }
     }
     // Scope is not a claim of protocol invalidity, and timestamps are grammar-only here.
-    for (old, replacement) in [("registry_commit\"", "apply\""), ("registry_committed", "ambiguous"), ("registry_committed", "applied"), ("registry_committed", "failed_before_mutation"), ("\"" + pinned[0].2 + "\"", "null")] {
+    for (old, replacement) in [("registry_commit\"", "apply\""), ("registry_committed", "ambiguous"), ("registry_committed", "applied"), ("registry_committed", "failed_before_mutation")] {
         let bytes = Data(baseRaw.replacingOccurrences(of: old, with: replacement).utf8)
         #expect(throws: ClosedScopeError.unsupportedBranch) {
+            _ = try validateRetainedCandidateClosed(bytes, digest: closedDigest(bytes), activeID: base.active_id, actives: actives, intents: intents, core: core)
+        }
+    }
+    for outcome in ["registry_not_committed", "ambiguous", "applied", "failed_before_mutation"] {
+        let bytes = Data(baseRaw.replacingOccurrences(of: "registry_committed", with: outcome).replacingOccurrences(of: "\"" + pinned[0].2 + "\"", with: "null").utf8)
+        #expect(throws: ClosedScopeError.unsupportedBranch, "null candidate with \(outcome)") {
             _ = try validateRetainedCandidateClosed(bytes, digest: closedDigest(bytes), activeID: base.active_id, actives: actives, intents: intents, core: core)
         }
     }

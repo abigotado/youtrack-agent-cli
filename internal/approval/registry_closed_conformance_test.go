@@ -209,6 +209,9 @@ func registryParseRetainedCandidateClosed(raw []byte) (registryObject, string, e
 		return nil, "bounds_grammar", nil
 	}
 	if string(o["registry_record_sha256"]) == "null" {
+		if registryString(o, "terminal_outcome") == "registry_committed" {
+			return nil, "bounds_grammar", nil
+		}
 		return nil, "", fmt.Errorf("test scope: missing retained candidate")
 	}
 	for _, f := range []string{"permit_sha256", "receipt_sha256", "journal_revision"} {
@@ -350,6 +353,25 @@ func TestSharedRegistryClosedCorpus(t *testing.T) {
 		}
 	}
 	base := want["closed-enroll1-committed"].raw
+	candidatePins := map[string]pin{}
+	for _, tc := range []struct{ id, value, isolated, apply, mode string }{
+		{"true", "true", "7dac967f7b7ad5626d3cf3221128f8f6a5c0ae8fd3a9a546986f9ad43b1032e0", "876388ef077b0e40dbf16ad5250892b75d1aac0bcdc14e4a329c2a7a0cd3d84a", "27b9a4e70f94e872106480d21d18123cc8a7a7d0942e166fe6cbfb7a6a85b195"},
+		{"false", "false", "fb64061e3fcaaec1796cf2049eceb77c1bff7c27b48d8492bed62dd968000092", "c1470ee32498e27c8aee428fd222a27c2301a52a7dfef0841845e21e3c6799ef", "7b35f07705b730b6115901bc4aa368ab14c2827bfa13bc167558ea8ad8ae866a"},
+		{"integer", "0", "9deb863679c21330dcdbe52ccd696385b84013052ae847cd996f9a600903fc4d", "c3a4b5da8d4b9032d76ae68277bdfcc96c1ef2b49db60f1b94683dbf0ab48f4e", "23c215f5298501023ebfc6486dcaf9d19984d733ed68b0a920e36acf4bb51f0e"},
+		{"fraction", "1.0", "4dfc72c6e862d7bf2f076960aa3cb6c4d3a27005ff303648a2f24fa685faa344", "e423c2a7adfcdf3c0a4176baa39d145a9be052d59ca8182c0d1a3851787ca19a", "f75a753518a80ea1eb2b5bbc1e69d402ea5dc1adef5555319538334d7606ff55"},
+		{"array", "[]", "ea41a04f4899a2dba334611000a303f2ca039341fa70d799f0c45de6a97e003f", "c6fbe9ca369e14bbd4a0cc1335fdd0d65c173dc3704588b7a4afbe3fc415e33e", "94821943b0c58fc2ab6175976886593170690f96224240462d2617052bb4c4db"},
+		{"object", "{}", "b73c1081adc7a5a8d967819691594836b02667f34471241d933eca3be7861542", "219865277faec7646e5cacfba7ddcc3694ada6ed08e2e8c5e4482668c422233e", "a0dc8b6722fa8da8d5dbf29dce46080fddfce7bd385d98c21f714a5f3d2667ba"},
+	} {
+		raw := strings.Replace(base, `"registry_record_sha256":"`+pins["enroll1"].candidate+`"`, `"registry_record_sha256":`+tc.value, 1)
+		candidatePins["canonical-candidate-"+tc.id] = pin{raw: raw, digest: tc.isolated}
+		candidatePins["canonical-candidate-"+tc.id+"-apply"] = pin{raw: strings.Replace(raw, `"operation_kind":"registry_commit"`, `"operation_kind":"apply"`, 1), digest: tc.apply}
+		candidatePins["canonical-candidate-"+tc.id+"-close-mode"] = pin{raw: strings.Replace(raw, `"close_mode":"normal"`, `"close_mode":"unknown"`, 1), digest: tc.mode}
+	}
+	for id := range candidatePins {
+		expected[id] = "canonical_encoding"
+	}
+	candidatePins["field-candidate-committed-null"] = pin{raw: strings.Replace(base, `"registry_record_sha256":"`+pins["enroll1"].candidate+`"`, `"registry_record_sha256":null`, 1), digest: "94c3d9cf3c4790a1526ed5d339301b537fbc646ca16cbda4d95c394770ec1a67"}
+	expected["field-candidate-committed-null"] = "bounds_grammar"
 	seen = make(map[string]bool)
 	for _, v := range c.Negatives {
 		t.Run(v.ID, func(t *testing.T) {
@@ -369,6 +391,12 @@ func TestSharedRegistryClosedCorpus(t *testing.T) {
 				t.Fatal("negative must hash original bytes")
 			}
 			var exact string
+			if p, ok := candidatePins[v.ID]; ok {
+				exact = p.raw
+				if v.SHA256 != p.digest {
+					t.Fatal("candidate primitive vector differs from literal digest")
+				}
+			}
 			switch v.ID {
 			case "canonical-bom":
 				exact = "\xef\xbb\xbf" + base

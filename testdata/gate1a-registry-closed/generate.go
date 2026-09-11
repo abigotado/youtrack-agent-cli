@@ -191,6 +191,15 @@ func generate() ([]byte, error) {
 		add(tc.id, tc.raw, "canonical_encoding")
 	}
 	add("bounds-size-4097", strings.Repeat("x", 4097), "bounds_grammar")
+	for _, tc := range []struct{ id, value string }{
+		{"true", "true"}, {"false", "false"}, {"integer", "0"}, {"fraction", "1.0"}, {"array", "[]"}, {"object", "{}"},
+	} {
+		raw := replace("registry_record_sha256", tc.value)
+		add("canonical-candidate-"+tc.id, raw, "canonical_encoding")
+		add("canonical-candidate-"+tc.id+"-apply", strings.Replace(raw, `"operation_kind":"registry_commit"`, `"operation_kind":"apply"`, 1), "canonical_encoding")
+		add("canonical-candidate-"+tc.id+"-close-mode", strings.Replace(raw, `"close_mode":"normal"`, `"close_mode":"unknown"`, 1), "canonical_encoding")
+	}
+	add("field-candidate-committed-null", replace("registry_record_sha256", "null"), "bounds_grammar")
 	for _, tc := range []struct{ id, field, value string }{
 		{"schema-version", "schema_version", "2"}, {"field-record-type", "record_type", `"unknown"`}, {"field-operation-kind", "operation_kind", `"unknown"`},
 		{"field-terminal-outcome", "terminal_outcome", `"unknown"`}, {"field-close-mode", "close_mode", `"unknown"`},
@@ -205,7 +214,7 @@ func generate() ([]byte, error) {
 		add(tc.id, replace(tc.field, tc.value), "bounds_grammar")
 	}
 	for _, field := range []string{"active_sha256", "registry_record_sha256"} {
-		// A null candidate digest belongs to the deferred pre-candidate branch, not this corpus.
+		// The committed-null refusal is covered separately; not-committed null is deferred.
 		if field == "active_sha256" {
 			add("canonical-active_sha256-null", replace(field, "null"), "canonical_encoding")
 		}

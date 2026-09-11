@@ -7,7 +7,7 @@ validator, native execution or production authority. Approval remains unsupporte
 ## Scope
 
 The corpus has 16 positives (five source core scenarios, each with both supplied
-registry outcome labels, plus six timestamp-grammar fixtures) and 72 negatives.
+registry outcome labels, plus six timestamp-grammar fixtures) and 91 negatives.
 
 The [registry protocol](../../docs/gate1a-registry-protocol.md#helper-owned-apply-authority-coordinator)
 defines the twelve ordered fields and 4,096-byte raw cap. This subset requires
@@ -65,6 +65,12 @@ swift test --package-path native/macos/ApprovalProtocol --filter registryClosed
 ```
 
 ## Not covered
+
+The corpus rejects a null candidate digest with `registry_committed` as
+`bounds_grammar`. A null digest with `registry_not_committed` remains outside
+this retained-candidate subset; that scope refusal is not proof of a legal abort.
+Non-string, non-null candidate values are canonical-encoding refusals even with
+an apply operation or unknown close mode, before branch scope or grammar checks.
 
 The legal pre-candidate null-digest abort, registry ambiguous-outcome handling,
 apply and permit branches are outside this retained-candidate subset. They are
