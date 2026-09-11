@@ -66,6 +66,7 @@ jobs:
           go run ./testdata/gate1a-registry-intent/generate.go -check
           go run ./testdata/gate1a-registry-active/generate.go -check
           go run ./testdata/gate1a-registry-closed/generate.go -check
+          go run ./testdata/gate1a-registry-time/generate.go -check
           go run ./testdata/gate1a-v3/generate.go -check
 
       - name: Darwin credential backend build modes
