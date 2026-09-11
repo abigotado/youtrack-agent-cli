@@ -699,8 +699,11 @@ that order. `close_mode` is exactly `normal`; recovery actor, recovery reason,
 and recovery-close fields are not part of this unimplemented codec. Journal
 revision is required for apply and null for registry commit. Registry-record
 digest is null for apply. For registry commit it is required for a retained
-commit candidate and otherwise null only for a provably pre-candidate registry
-abort with `terminal_outcome=registry_not_committed`. Such an abort retains the
+commit candidate. `registry_record_sha256` is the commit-candidate digest of
+the exact complete retained record, not the undomained hash used for predecessor
+links; the closed object does not embed the candidate bytes. This field is
+otherwise null only for a provably pre-candidate registry abort with
+`terminal_outcome=registry_not_committed`. Such an abort retains the
 exact intent and owner-produced normal close; the close binds the active digest
 and therefore that intent, and no candidate or revision add is inferred.
 Registry commit never has a permit and sets `receipt_sha256` null.
