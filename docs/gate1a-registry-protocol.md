@@ -674,8 +674,9 @@ validated later while the lease is held and must repeat the intent's
 transition and descriptor; its `challenge` equals the intent's decoded
 `ceremony_nonce` bytes re-encoded by the request codec, and its expiry equals
 the intent expiry. It never changes
-the acquired active bytes. Expiry is at most
-ten minutes after creation and never turns an abandoned record into permission
+the acquired active bytes. Expiry is strictly after creation and at most
+600 whole seconds later (a lifetime of 1 through 600 seconds inclusive).
+Expiry never turns an abandoned record into permission
 to delete, steal, or reuse it.
 
 An apply permit is compact canonical JSON capped at 4,096 bytes with fields
