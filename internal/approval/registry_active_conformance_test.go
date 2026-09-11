@@ -332,6 +332,16 @@ func TestSharedRegistryActiveCorpus(t *testing.T) {
 			if v.ID == "canonical-bom" && (baseRawHex == "" || v.RawHex != "efbbbf"+baseRawHex) {
 				t.Fatal("BOM must prefix exact base bytes")
 			}
+			if v.ID == "field-lease-case" {
+				base, err := hex.DecodeString(baseRawHex)
+				if err != nil {
+					t.Fatal(err)
+				}
+				exact := strings.Replace(string(base), `"lease_id":"YTAL-EEQSCIJBEEQSCIJBEEQSCIJBEE"`, `"lease_id":"YTAL-eeqscijbeeqscijbeeqscijbee"`, 1)
+				if string(raw) != exact {
+					t.Fatal("lease case vector must lowercase only the body with the exact YTAL- prefix intact")
+				}
+			}
 			if v.ID == "binding-candidate-record" {
 				candidate := registryHash("YTA-REGISTRY-COMMIT-V1\x00", cores["enroll1"].Record)
 				if candidate != "f86e37d14900784636e841daa65e31d16d39e0b7c5be24f07c84e95d825ba9b9" {

@@ -6,8 +6,10 @@ Keychain, or transport. Production approval remains unsupported.
 
 ## Scope
 
-The corpus contains seven positives (five linked core scenarios and the 1/600
-second lifetime boundaries) and 82 negatives.
+The corpus contains seven named positives with six unique byte sequences and
+82 negatives. Five positives are linked core scenarios; `ttl-1s` covers the
+lower lifetime boundary. `ttl-600s` is a named alias of `active-enroll1`, not
+additional unique coverage: the five linked scenarios already use 600 seconds.
 
 The [registry protocol](../../docs/gate1a-registry-protocol.md#helper-owned-apply-authority-coordinator)
 defines the ordered active fields. This supplement covers only the

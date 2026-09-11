@@ -190,7 +190,7 @@ func generate() ([]byte, error) {
 	for _, tc := range []struct{ id, field, value string }{
 		{"schema-version", "schema_version", "2"}, {"field-record-type", "record_type", `"unknown"`}, {"field-operation-kind", "operation_kind", `"apply"`},
 		{"field-lease-prefix", "lease_id", `"BADL-` + first.LeaseID[5:] + `"`},
-		{"field-lease-case", "lease_id", `"` + strings.ToLower(first.LeaseID) + `"`},
+		{"field-lease-case", "lease_id", `"YTAL-` + strings.ToLower(first.LeaseID[5:]) + `"`},
 		{"field-lease-alphabet", "lease_id", `"YTAL-0` + first.LeaseID[6:] + `"`},
 		{"field-lease-15-bytes", "lease_id", `"YTAL-` + base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(bytes.Repeat([]byte{0x21}, 15)) + `"`},
 		{"field-lease-17-bytes", "lease_id", `"YTAL-` + base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(bytes.Repeat([]byte{0x21}, 17)) + `"`},

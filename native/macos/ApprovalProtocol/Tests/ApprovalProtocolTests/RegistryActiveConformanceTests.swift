@@ -132,6 +132,11 @@ private func validateActive(_ bytes: Data, digest: String, intentID: String, int
         let bytes = try intentBytes(vector.raw_hex)
         if reason != .digest { #expect(vector.sha256 == activeDigest(bytes)) }
         if vector.id == "canonical-bom" { #expect(vector.raw_hex == "efbbbf" + base.raw_hex) }
+        if vector.id == "field-lease-case" {
+            let baseRaw = try #require(String(data: intentBytes(base.raw_hex), encoding: .utf8))
+            let expectedRaw = baseRaw.replacingOccurrences(of: #""lease_id":"YTAL-EEQSCIJBEEQSCIJBEEQSCIJBEE""#, with: #""lease_id":"YTAL-eeqscijbeeqscijbeeqscijbee""#)
+            #expect(bytes == Data(expectedRaw.utf8))
+        }
         if vector.id == "canonical-size-4096" { #expect(bytes.count == 4096) }
         if vector.id == "bounds-size-4097" { #expect(bytes.count == 4097) }
         if vector.id == "binding-candidate-record" {
