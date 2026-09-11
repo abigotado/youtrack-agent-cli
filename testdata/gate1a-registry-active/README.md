@@ -58,6 +58,10 @@ swift test --package-path native/macos/ApprovalProtocol --filter 'registry(Inten
 
 ## Still pending
 
+The [retained-candidate closed supplement](../gate1a-registry-closed/README.md)
+checks supplied closed bytes against these validated active fixtures. It does
+not establish native ownership, an actual commit outcome or durable closure.
+
 This linked supplemental directory does not satisfy the complete shared
 conformance prerequisite by itself. Inventory/classification, typed native
 projections, actual acquisition and pre-read ordering, one-shot add outcomes,
