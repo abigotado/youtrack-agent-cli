@@ -31,6 +31,30 @@ private func closedDigest(_ bytes: Data) -> String {
     intentHex(Data(SHA256.hash(data: Data("YTA-APPLY-COORDINATOR-CLOSED-V1\0".utf8) + bytes)))
 }
 
+// Four-digit proleptic Gregorian grammar, including year zero. Foundation date
+// conversion normalizes some valid spellings; this check makes no chronology claim.
+private func closedWholeSecondUTC(_ value: String) -> Bool {
+    let bytes = Array(value.utf8)
+    guard bytes.count == 20,
+          bytes[4] == 45, bytes[7] == 45, bytes[10] == 84,
+          bytes[13] == 58, bytes[16] == 58, bytes[19] == 90 else { return false }
+    func number(_ start: Int, _ end: Int) -> Int? {
+        var value = 0
+        for byte in bytes[start..<end] {
+            guard byte >= 48 && byte <= 57 else { return nil }
+            value = value * 10 + Int(byte - 48)
+        }
+        return value
+    }
+    guard let year = number(0, 4), let month = number(5, 7),
+          let day = number(8, 10), let hour = number(11, 13),
+          let minute = number(14, 16), let second = number(17, 19),
+          (1...12).contains(month), hour <= 23, minute <= 59, second <= 59 else { return false }
+    let leap = year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)
+    let monthDays = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    return (1...monthDays[month - 1]).contains(day)
+}
+
 private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, activeID: String, actives: ActiveCorpus, intents: IntentCorpus, core: RegistryCorpus) throws -> RegistryObject {
     guard let supplied = actives.positives.first(where: { $0.id == activeID }) else { throw ClosedFixtureError.unknownActive }
     let active: RegistryObject
@@ -68,7 +92,7 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
         for key in ["permit_sha256", "receipt_sha256", "journal_revision"] {
             guard closed[key] == "null" else { throw ClosedFailure.bounds }
         }
-        _ = try closed.time("closed_at") // Grammar only: no unproven chronology or live clock check.
+        guard closedWholeSecondUTC(closed.string("closed_at") ?? "") else { throw ClosedFailure.bounds }
     } catch RegistryReason.canonicalEncoding { throw ClosedFailure.canonical }
     catch RegistryReason.boundsGrammar { throw ClosedFailure.bounds }
     guard digest == closedDigest(bytes) else { throw ClosedFailure.digest }
@@ -98,9 +122,18 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
         ("recover-disabled4", "2a80ebbe805fef70364c30ab4ceca1aa420fc0aadb45fbd4aa32ac97d33a8116", "b009d402b328c95af51abd92b84555e4d42cb66a39f73b6b8642f2638eb9ae8c", "0b397898c96502e8da09496147a64b4f22f7604737ed3e3d06e29e159e58bf30", "d3a12fb30d66fe2b58b2c44076f662fbcf2d77344673b3b3031b59f39341eb95"),
         ("recover-active3", "fcd9911c103141b81e6319ca67898f298f3e3efa5a6ba101c127ccfe2ee86905", "60d954ac63dd2d4fa7a83b389f97f9352cab52b4285c4ad08c70008ed60d4797", "c1980fba695ea5f1ab25ab333676f9b0f6dc298ee3f930fd4a64a3bba56de847", "0c16b9285a6ffb792295f3bebae550d3fd2b218e977a7aacae8e20c0890d3323"),
     ]
-    let expectedIDs = pinned.flatMap { ["closed-" + $0.0 + "-committed", "closed-" + $0.0 + "-not-committed"] }
+    // Grammar-only fixtures: these dates do not establish valid historical close chronology.
+    let datePins: [(String, String, String)] = [
+        ("date-grammar-year-zero", "0000-01-01T00:00:00Z", "13a0fdbda3f28cf415fbf39db457773bbace1e04249bca66d3e38d44545d45e7"),
+        ("date-grammar-year-one", "0001-01-01T00:00:00Z", "10fae6f87684b87ef066a3123a137644bbb2fcbaa82b74f6f41943e164e6ae21"),
+        ("date-grammar-year-max", "9999-12-31T23:59:59Z", "3c6aca19e8f8284c539673a20908657d7a5bbab42552ab382ab3c5a25fe30e54"),
+        ("date-grammar-year-zero-leap", "0000-02-29T12:00:00Z", "b24c73a9463e57994632d19920bd3c176b150f7d332d04c9180c91ab60775bcb"),
+        ("date-grammar-century-leap", "2000-02-29T12:00:00Z", "f5e8eea4ef783fceb9e684dd5a976a2901a800d17aa8582645fab6d3f73be8ff"),
+        ("date-grammar-gregorian-cutover", "1582-10-10T12:00:00Z", "13a3e41224954cc7d898bbb71aa4ac684eb0680e1356c2545df4b2fbb6cd667c"),
+    ]
+    let expectedIDs = pinned.flatMap { ["closed-" + $0.0 + "-committed", "closed-" + $0.0 + "-not-committed"] } + datePins.map { $0.0 }
     try #require(corpus.positives.map(\.id) == expectedIDs)
-    for (index, vector) in corpus.positives.enumerated() {
+    for (index, vector) in corpus.positives.prefix(pinned.count * 2).enumerated() {
         let pin = pinned[index / 2]
         let outcome = index % 2 == 0 ? "registry_committed" : "registry_not_committed"
         let hash = index % 2 == 0 ? pin.3 : pin.4
@@ -118,7 +151,7 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
     }
     let families: [(ClosedFailure, String)] = [
         (.canonical, "canonical-empty canonical-malformed canonical-bom canonical-unknown canonical-duplicate canonical-missing canonical-reordered canonical-whitespace canonical-trailing-lf canonical-trailing-token canonical-escaped-key canonical-escaped-value canonical-invalid-utf8 canonical-schema-string canonical-schema-bool canonical-null canonical-array canonical-object canonical-schema-fraction canonical-schema-exponent canonical-schema-leading-zero canonical-schema-plus canonical-schema-negative-zero canonical-size-4096 canonical-active_sha256-null canonical-permit_sha256-array canonical-permit_sha256-object canonical-receipt_sha256-array canonical-receipt_sha256-object canonical-journal_revision-array canonical-journal_revision-object"),
-        (.bounds, "bounds-size-4097 schema-version field-record-type field-operation-kind field-terminal-outcome field-close-mode field-lease-prefix field-lease-case field-lease-alphabet field-lease-15-bytes field-lease-17-bytes field-lease-padding field-lease-pad-bits field-active_sha256-empty field-active_sha256-short field-active_sha256-long field-active_sha256-uppercase field-active_sha256-nonhex field-registry_record_sha256-empty field-registry_record_sha256-short field-registry_record_sha256-long field-registry_record_sha256-uppercase field-registry_record_sha256-nonhex field-forbidden-permit_sha256 field-forbidden-receipt_sha256 field-forbidden-journal_revision field-closed_at-offset field-closed_at-fraction field-closed_at-invalid"),
+        (.bounds, "bounds-size-4097 schema-version field-record-type field-operation-kind field-terminal-outcome field-close-mode field-lease-prefix field-lease-case field-lease-alphabet field-lease-15-bytes field-lease-17-bytes field-lease-padding field-lease-pad-bits field-active_sha256-empty field-active_sha256-short field-active_sha256-long field-active_sha256-uppercase field-active_sha256-nonhex field-registry_record_sha256-empty field-registry_record_sha256-short field-registry_record_sha256-long field-registry_record_sha256-uppercase field-registry_record_sha256-nonhex field-forbidden-permit_sha256 field-forbidden-receipt_sha256 field-forbidden-journal_revision field-closed_at-offset field-closed_at-fraction field-closed_at-invalid field-closed_at-century-nonleap field-closed_at-year-zero-invalid-day"),
         (.digest, "digest-wrong digest-no-nul digest-wrong-domain digest-plain-hash digest-lf-hash"),
         (.binding, "binding-lease binding-active binding-candidate binding-candidate-plain-hash binding-candidate-intent"),
     ]
@@ -127,6 +160,22 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
     try #require(corpus.negatives.count == reasons.count)
     let base = try #require(corpus.positives.first)
     let baseRaw = try #require(String(data: intentBytes(base.raw_hex), encoding: .utf8))
+    for (id, date, hash) in datePins {
+        let vector = try #require(corpus.positives.first { $0.id == id })
+        let literal = baseRaw.replacingOccurrences(of: "2026-09-01T12:00:04Z", with: date)
+        let bytes = try intentBytes(vector.raw_hex)
+        #expect(bytes == Data(literal.utf8))
+        #expect(vector.active_id == "active-enroll1")
+        #expect(vector.sha256 == hash)
+        #expect(closedDigest(bytes) == hash)
+        #expect(vector.signing_input_hex == intentHex(Data("YTA-APPLY-COORDINATOR-CLOSED-V1\0".utf8) + Data(literal.utf8)))
+        do { _ = try validateRetainedCandidateClosed(bytes, digest: hash, activeID: vector.active_id, actives: actives, intents: intents, core: core) }
+        catch { Issue.record("positive \(id): unexpected \(error)") }
+    }
+    let invalidDates: [String: (String, String)] = [
+        "field-closed_at-century-nonleap": ("1900-02-29T12:00:00Z", "b04bf7a78452a85c87d9df1f3542ba349cd09518a814b5b23dbdfbe8fcf65d57"),
+        "field-closed_at-year-zero-invalid-day": ("0000-02-30T12:00:00Z", "89739181ca2de095ea4c101feecf577ccc8c30a89e8c1096205f7a6acac05b3b"),
+    ]
     for vector in corpus.negatives {
         let reason = try #require(reasons[vector.id])
         #expect(vector.reason_class == reason.rawValue)
@@ -141,6 +190,10 @@ private func validateRetainedCandidateClosed(_ bytes: Data, digest: String, acti
         }
         if vector.id == "canonical-size-4096" { #expect(bytes.count == 4096) }
         if vector.id == "bounds-size-4097" { #expect(bytes.count == 4097) }
+        if let (date, hash) = invalidDates[vector.id] {
+            #expect(bytes == Data(baseRaw.replacingOccurrences(of: "2026-09-01T12:00:04Z", with: date).utf8))
+            #expect(vector.sha256 == hash)
+        }
         if vector.id == "binding-candidate-plain-hash" || vector.id == "binding-candidate-intent" {
             let replacement = vector.id == "binding-candidate-plain-hash" ? "c8154cd7d2a72f7e23dcbfa9f52d1b9ca97afad557c6becedf9eaf7a772db16b" : "d4e4dc20ba7cc0295a3affd81dc28bc4fd38c836211eddcc4c2da529f1692b67"
             #expect(bytes == Data(baseRaw.replacingOccurrences(of: pinned[0].2, with: replacement).utf8))

@@ -296,6 +296,17 @@ func TestSharedRegistryClosedCorpus(t *testing.T) {
 			want["closed-"+id+"-"+suffix] = pin{"active-" + id, raw, digest}
 		}
 	}
+	for _, p := range []struct{ id, date, digest string }{
+		{"date-grammar-year-zero", "0000-01-01T00:00:00Z", "13a0fdbda3f28cf415fbf39db457773bbace1e04249bca66d3e38d44545d45e7"},
+		{"date-grammar-year-one", "0001-01-01T00:00:00Z", "10fae6f87684b87ef066a3123a137644bbb2fcbaa82b74f6f41943e164e6ae21"},
+		{"date-grammar-year-max", "9999-12-31T23:59:59Z", "3c6aca19e8f8284c539673a20908657d7a5bbab42552ab382ab3c5a25fe30e54"},
+		{"date-grammar-year-zero-leap", "0000-02-29T12:00:00Z", "b24c73a9463e57994632d19920bd3c176b150f7d332d04c9180c91ab60775bcb"},
+		{"date-grammar-century-leap", "2000-02-29T12:00:00Z", "f5e8eea4ef783fceb9e684dd5a976a2901a800d17aa8582645fab6d3f73be8ff"},
+		{"date-grammar-gregorian-cutover", "1582-10-10T12:00:00Z", "13a3e41224954cc7d898bbb71aa4ac684eb0680e1356c2545df4b2fbb6cd667c"},
+	} {
+		raw := strings.Replace(want["closed-enroll1-committed"].raw, "2026-09-01T12:00:04Z", p.date, 1)
+		want[p.id] = pin{"active-enroll1", raw, p.digest}
+	}
 	seen := make(map[string]bool)
 	for _, v := range c.Positives {
 		t.Run(v.ID, func(t *testing.T) {
@@ -319,7 +330,7 @@ func TestSharedRegistryClosedCorpus(t *testing.T) {
 	expected := make(map[string]string)
 	for reason, ids := range map[string]string{
 		"canonical_encoding": "canonical-empty canonical-malformed canonical-bom canonical-unknown canonical-duplicate canonical-missing canonical-reordered canonical-whitespace canonical-trailing-lf canonical-trailing-token canonical-escaped-key canonical-escaped-value canonical-invalid-utf8 canonical-schema-string canonical-schema-bool canonical-null canonical-array canonical-object canonical-schema-fraction canonical-schema-exponent canonical-schema-leading-zero canonical-schema-plus canonical-schema-negative-zero canonical-size-4096 canonical-active_sha256-null",
-		"bounds_grammar":     "bounds-size-4097 schema-version field-record-type field-operation-kind field-terminal-outcome field-close-mode field-lease-prefix field-lease-case field-lease-alphabet field-lease-15-bytes field-lease-17-bytes field-lease-padding field-lease-pad-bits field-closed_at-offset field-closed_at-fraction field-closed_at-invalid",
+		"bounds_grammar":     "bounds-size-4097 schema-version field-record-type field-operation-kind field-terminal-outcome field-close-mode field-lease-prefix field-lease-case field-lease-alphabet field-lease-15-bytes field-lease-17-bytes field-lease-padding field-lease-pad-bits field-closed_at-offset field-closed_at-fraction field-closed_at-invalid field-closed_at-century-nonleap field-closed_at-year-zero-invalid-day",
 		"digest_domain":      "digest-wrong digest-no-nul digest-wrong-domain digest-plain-hash digest-lf-hash",
 		"closed_binding":     "binding-lease binding-active binding-candidate binding-candidate-plain-hash binding-candidate-intent",
 	} {
@@ -363,6 +374,16 @@ func TestSharedRegistryClosedCorpus(t *testing.T) {
 				exact = "\xef\xbb\xbf" + base
 			case "field-lease-case":
 				exact = strings.Replace(base, "YTAL-EEQSCIJBEEQSCIJBEEQSCIJBEE", "YTAL-eeqscijbeeqscijbeeqscijbee", 1)
+			case "field-closed_at-century-nonleap":
+				exact = strings.Replace(base, "2026-09-01T12:00:04Z", "1900-02-29T12:00:00Z", 1)
+				if v.SHA256 != "b04bf7a78452a85c87d9df1f3542ba349cd09518a814b5b23dbdfbe8fcf65d57" {
+					t.Fatal("century non-leap digest differs from literal pin")
+				}
+			case "field-closed_at-year-zero-invalid-day":
+				exact = strings.Replace(base, "2026-09-01T12:00:04Z", "0000-02-30T12:00:00Z", 1)
+				if v.SHA256 != "89739181ca2de095ea4c101feecf577ccc8c30a89e8c1096205f7a6acac05b3b" {
+					t.Fatal("year-zero invalid-day digest differs from literal pin")
+				}
 			case "binding-candidate-plain-hash":
 				exact = strings.Replace(base, pins["enroll1"].candidate, registryHash("", cores["enroll1"].Record), 1)
 			case "binding-candidate-intent":

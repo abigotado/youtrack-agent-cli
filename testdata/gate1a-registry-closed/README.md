@@ -6,8 +6,8 @@ validator, native execution or production authority. Approval remains unsupporte
 
 ## Scope
 
-The corpus has ten positives (five source core scenarios, each with both supplied
-registry outcome labels) and 70 negatives.
+The corpus has 16 positives (five source core scenarios, each with both supplied
+registry outcome labels, plus six timestamp-grammar fixtures) and 72 negatives.
 
 The [registry protocol](../../docs/gate1a-registry-protocol.md#helper-owned-apply-authority-coordinator)
 defines the twelve ordered fields and 4,096-byte raw cap. This subset requires
@@ -39,8 +39,11 @@ fixture errors, not successful negative verdicts or new CLI error codes.
 
 Bindings check the exact lease, validated active digest and candidate digest
 within the registry branch. `closed_at` is checked for whole-second UTC grammar
-only. This corpus does not define chronology or prove trusted time, and its
-ordinary post-creation fixture dates do not establish a live temporal policy.
+only. Timestamp-grammar fixtures cover years `0000`, `0001` and `9999`, Gregorian
+leap days and a date in the historical Gregorian cutover interval. These check
+the four-digit proleptic Gregorian grammar, not valid historical closure
+chronology. Neither these dates nor the ordinary post-creation fixture dates
+define chronology, prove trusted time or establish a live temporal policy.
 
 Sources are hash-linked to the unchanged core, intent and active corpora.
 Generator data is deterministic and public, not fresh random or native evidence.

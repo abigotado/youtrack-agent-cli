@@ -140,6 +140,23 @@ func generate() ([]byte, error) {
 			}
 		}
 	}
+	// These exercise date grammar only, not historical closure chronology.
+	for _, tc := range []struct{ id, date string }{
+		{"date-grammar-year-zero", "0000-01-01T00:00:00Z"},
+		{"date-grammar-year-one", "0001-01-01T00:00:00Z"},
+		{"date-grammar-year-max", "9999-12-31T23:59:59Z"},
+		{"date-grammar-year-zero-leap", "0000-02-29T12:00:00Z"},
+		{"date-grammar-century-leap", "2000-02-29T12:00:00Z"},
+		{"date-grammar-gregorian-cutover", "1582-10-10T12:00:00Z"},
+	} {
+		v := first
+		v.ClosedAt = tc.date
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("marshal date grammar close: %w", err)
+		}
+		c.Positives = append(c.Positives, positive{tc.id, "active-enroll1", hex.EncodeToString(b), hex.EncodeToString([]byte(domain + string(b))), sum(domain + string(b))})
+	}
 	b, err := json.Marshal(first)
 	if err != nil {
 		return nil, fmt.Errorf("marshal base: %w", err)
@@ -205,7 +222,10 @@ func generate() ([]byte, error) {
 		add("canonical-"+field+"-array", replace(field, "[]"), "canonical_encoding")
 		add("canonical-"+field+"-object", replace(field, "{}"), "canonical_encoding")
 	}
-	for _, tc := range []struct{ id, value string }{{"offset", "2026-09-01T12:00:04+00:00"}, {"fraction", "2026-09-01T12:00:04.0Z"}, {"invalid", "2026-02-30T12:00:04Z"}} {
+	for _, tc := range []struct{ id, value string }{
+		{"offset", "2026-09-01T12:00:04+00:00"}, {"fraction", "2026-09-01T12:00:04.0Z"}, {"invalid", "2026-02-30T12:00:04Z"},
+		{"century-nonleap", "1900-02-29T12:00:00Z"}, {"year-zero-invalid-day", "0000-02-30T12:00:00Z"},
+	} {
 		add("field-closed_at-"+tc.id, replace("closed_at", `"`+tc.value+`"`), "bounds_grammar")
 	}
 	for _, tc := range []struct{ id, digest string }{{"digest-wrong", strings.Repeat("0", 64)}, {"digest-no-nul", sum(strings.TrimSuffix(domain, "\x00") + base)}, {"digest-wrong-domain", sum("YTA-APPLY-COORDINATOR-ACTIVE-V1\x00" + base)}, {"digest-plain-hash", sum(base)}, {"digest-lf-hash", sum(domain + base + "\n")}} {
