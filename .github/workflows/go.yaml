@@ -97,7 +97,9 @@ jobs:
             ./cmd/youtrack-agent-cli ./internal/readonlycli ./internal/skills ./assets ./internal/profile
           CGO_ENABLED=1 go build -tags "${IDENTITY_TAG}" -o "${IDENTITY_BINARY}" ./cmd/youtrack-agent-cli
 
-          EXPECTED_INTERNAL_DEPS='github.com/abigotado/youtrack-agent-cli/internal/endpoint
+          EXPECTED_OWNED_DEPS='github.com/abigotado/youtrack-agent-cli/assets
+          github.com/abigotado/youtrack-agent-cli/cmd/youtrack-agent-cli
+          github.com/abigotado/youtrack-agent-cli/internal/endpoint
           github.com/abigotado/youtrack-agent-cli/internal/errx
           github.com/abigotado/youtrack-agent-cli/internal/lockfile
           github.com/abigotado/youtrack-agent-cli/internal/output
@@ -105,22 +107,22 @@ jobs:
           github.com/abigotado/youtrack-agent-cli/internal/protocolvalue
           github.com/abigotado/youtrack-agent-cli/internal/readonlycli
           github.com/abigotado/youtrack-agent-cli/internal/skills'
-          ACTUAL_INTERNAL_DEPS=$(go list -tags "${IDENTITY_TAG}" -deps ./cmd/youtrack-agent-cli \
-            | grep '^github.com/abigotado/youtrack-agent-cli/internal/' \
+          ACTUAL_OWNED_DEPS=$(go list -tags "${IDENTITY_TAG}" -deps ./cmd/youtrack-agent-cli \
+            | grep '^github.com/abigotado/youtrack-agent-cli/' \
             | sort)
-          if [ "${ACTUAL_INTERNAL_DEPS}" != "${EXPECTED_INTERNAL_DEPS}" ]; then
-            echo "::error::identity internal dependency closure changed"
-            printf 'expected:\n%s\nactual:\n%s\n' "${EXPECTED_INTERNAL_DEPS}" "${ACTUAL_INTERNAL_DEPS}"
+          if [ "${ACTUAL_OWNED_DEPS}" != "${EXPECTED_OWNED_DEPS}" ]; then
+            echo "::error::identity owned dependency closure changed"
+            printf 'expected:\n%s\nactual:\n%s\n' "${EXPECTED_OWNED_DEPS}" "${ACTUAL_OWNED_DEPS}"
             exit 1
           fi
           # Cobra/pflag transitively imports net for optional IP flag types,
           # even though this command never registers one. Forbid network
           # imports at the owned-package boundary so no identity package can
           # add transport capability through that dependency.
-          for INTERNAL_PACKAGE in ${EXPECTED_INTERNAL_DEPS}; do
+          for OWNED_PACKAGE in ${EXPECTED_OWNED_DEPS}; do
             for FORBIDDEN_IMPORT in net net/http crypto/tls; do
-              if go list -tags "${IDENTITY_TAG}" -f '{{join .Imports "\n"}}' "${INTERNAL_PACKAGE}" | grep -Fxq "${FORBIDDEN_IMPORT}"; then
-                echo "::error::identity package ${INTERNAL_PACKAGE} directly imports ${FORBIDDEN_IMPORT}"
+              if go list -tags "${IDENTITY_TAG}" -f '{{join .Imports "\n"}}' "${OWNED_PACKAGE}" | grep -Fxq "${FORBIDDEN_IMPORT}"; then
+                echo "::error::identity package ${OWNED_PACKAGE} directly imports ${FORBIDDEN_IMPORT}"
                 exit 1
               fi
             done

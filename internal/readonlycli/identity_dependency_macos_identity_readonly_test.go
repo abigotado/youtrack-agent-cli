@@ -16,7 +16,9 @@ import (
 
 const identityModule = "github.com/abigotado/youtrack-agent-cli"
 
-var identityInternalClosure = map[string]bool{
+var identityOwnedClosure = map[string]bool{
+	identityModule + "/assets":                 true,
+	identityModule + "/cmd/youtrack-agent-cli": true,
 	identityModule + "/internal/endpoint":      true,
 	identityModule + "/internal/errx":          true,
 	identityModule + "/internal/lockfile":      true,
@@ -32,7 +34,7 @@ type identityPackageInfo struct {
 	Imports    []string
 }
 
-func TestIdentityInternalClosureHasNoDirectNetworkImports(t *testing.T) {
+func TestIdentityOwnedClosureHasNoDirectNetworkImports(t *testing.T) {
 	command := exec.Command("go", "list", "-json", "-tags", "macos_identity_readonly", "-deps", "./cmd/youtrack-agent-cli")
 	command.Dir = identityRepositoryRoot(t)
 	raw, err := command.Output()
@@ -40,7 +42,7 @@ func TestIdentityInternalClosureHasNoDirectNetworkImports(t *testing.T) {
 		t.Fatalf("go list identity closure: %v", err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	seen := make(map[string]bool, len(identityInternalClosure))
+	seen := make(map[string]bool, len(identityOwnedClosure))
 	for {
 		var value identityPackageInfo
 		err := decoder.Decode(&value)
@@ -50,7 +52,7 @@ func TestIdentityInternalClosureHasNoDirectNetworkImports(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode identity closure: %v", err)
 		}
-		if !strings.HasPrefix(value.ImportPath, identityModule+"/internal/") {
+		if !strings.HasPrefix(value.ImportPath, identityModule+"/") {
 			continue
 		}
 		if err := validateIdentityPackageImports(value); err != nil {
@@ -58,7 +60,7 @@ func TestIdentityInternalClosureHasNoDirectNetworkImports(t *testing.T) {
 		}
 		seen[value.ImportPath] = true
 	}
-	for packagePath := range identityInternalClosure {
+	for packagePath := range identityOwnedClosure {
 		if !seen[packagePath] {
 			t.Errorf("identity closure omitted %s", packagePath)
 		}
@@ -78,8 +80,8 @@ func TestIdentityNetworkImportGuardRejectsDirectImports(t *testing.T) {
 }
 
 func validateIdentityPackageImports(value identityPackageInfo) error {
-	if !identityInternalClosure[value.ImportPath] {
-		return fmt.Errorf("identity closure contains unapproved internal package %s", value.ImportPath)
+	if !identityOwnedClosure[value.ImportPath] {
+		return fmt.Errorf("identity closure contains unapproved owned package %s", value.ImportPath)
 	}
 	for _, imported := range value.Imports {
 		switch imported {
