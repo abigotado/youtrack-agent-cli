@@ -7,6 +7,27 @@ manifest and its validator check dependency closure and offline source builds
 only. They are not Formula/Cask, signing, or native Gate proof and do not
 produce or publish a package.
 
+## Proposed identity-only Cask, separately
+
+The [macOS identity-only Cask ADR](macos-identity-readonly-adr.md) reserves a
+future disjoint `youtrack-agent-identity` Cask. It is **PROPOSED; NOT
+ACTIVATED**: no Cask, tap, signed app, release asset, or OAuth flow exists yet.
+It is not a predecessor or shortcut to the Gate 1A write-capable Cask described
+below.
+
+If activated after its own review, that Cask installs and links only the
+completed signed/notarized `YouTrackAgentIdentity.app`. It does not run OAuth,
+read/migrate/delete Keychain items, install Agent Skills, register helpers,
+make postflight network calls, or delete secrets. Authentication, Skill
+installation, and any explicit Keychain migration occur later under operator
+control. A source Formula is unsuitable because it rebuilds the executable and
+cannot preserve the designated signing identity needed for Keychain binding.
+
+This distinct identity channel has no issue REST operations, native helper, or
+mutation commands. The portable v0.1.0 release remains Linux-only and unchanged;
+the Gate 1A document remains the sole design for future write-capable
+distribution.
+
 ## Why Gate 1A blocks packaging
 
 An ordinary source-built Formula compiles the CLI in Homebrew's build
@@ -57,23 +78,26 @@ uninstall cleanup, migration cancellation, interruption at durable boundaries,
 and partial destination/source failure with a non-secret sentinel. A missing
 case or transcript is a Gate failure; these are not informal packaging tests.
 
-## Missing release provenance
+## Missing Gate 1A write-release provenance
 
-This repository has committed source and a remote, but it still has no immutable
-release tag, signed release archive checksum, notarization record, installed
+The Linux portable release has an immutable tag and checksummed archives, but
+there is no immutable **Gate 1A write-capable macOS** release tag, signed/stapled
+application archive, macOS archive checksum, notarization record, installed
 Developer ID Application identity, offline-root-signed descriptor/Gate
 evidence/provisional authorization/activation grant/post-grant verification/
-publication envelope, or
-operator-controlled signing evidence.
-Consequently, no correct Cask can be materialized from the repository today.
+publication envelope, or operator-controlled signing evidence. Consequently,
+no correct Gate 1A write-capable Cask can be materialized from the repository
+today. The proposed identity-only channel has its own, separate prerequisites
+in the [identity-only ADR](macos-identity-readonly-adr.md).
 
-Homebrew may be activated only after Gate 1A and live Gate 1B pass, the
+The **Gate 1A write-capable** Homebrew distribution may be activated only after
+Gate 1A and live Gate 1B pass, the
 non-production pilot and independent security review pass, and the
 fail-closed release-policy guard is deliberately updated in the same reviewed
-change. Until then, use a local source build for development and do not publish
-or install a Homebrew package.
+change. Until then, use a local source build for that topology and do not
+publish or install its Homebrew package.
 
-The future Cask must use a versioned immutable URL and the literal SHA-256 of
+The future Gate 1A write-capable Cask must use a versioned immutable URL and the literal SHA-256 of
 the exact outer delivery archive; it may not use `sha256 :no_check`. That
 archive contains the immutable signed/stapled app payload, detached provisional
 authorization and production activation grant, root-signed publication
