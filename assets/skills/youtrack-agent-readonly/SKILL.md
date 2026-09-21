@@ -5,7 +5,7 @@ description: Safely read explicitly selected JetBrains YouTrack instances throug
 
 # YouTrack remote read-only boundary
 
-This portable edition is read-only. It has no local authentication, REST,
+This Remote MCP-only edition is read-only. It has no local authentication, REST,
 write-policy, mutation, journal, or approval commands. Use it only to install
 this skill and validate non-secret, read-only profile metadata.
 

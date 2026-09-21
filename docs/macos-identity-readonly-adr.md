@@ -4,12 +4,15 @@
 - Date: 2026-09-21
 - Scope: a future, disjoint macOS identity-verification distribution channel
 
-This is a design reservation only. It does not create a Cask, tap, release
-workflow, signed application, OAuth client, Keychain item, or command. It does
-not alter the Linux portable `v0.1.0` release or the future write-capable Gate
-1A topology in [Gate 1A trust, storage, and package topology](gate1a-trust-root.md).
-The companion [threat model](macos-identity-readonly-threat-model.md) is part
-of this proposed decision.
+This decision remains unactivated as a distribution channel. Its first code
+milestone is a developer-only, compile-time `macos_identity_readonly` build;
+it is neither a Cask nor a release artifact. It does not create a tap, release
+workflow, signed application, OAuth client, Keychain item, or a published
+identity-authentication command. It does not alter the Linux portable `v0.1.0`
+release or the future write-capable Gate 1A topology in [Gate 1A trust,
+storage, and package topology](gate1a-trust-root.md). The companion [threat
+model](macos-identity-readonly-threat-model.md) is part of this proposed
+decision.
 
 ## Context
 
@@ -48,9 +51,33 @@ names, and release tags. It does not reuse `YouTrackAgent.app`, the
 write-capable approval-helper bundle ID or Keychain namespace, or portable
 release artifacts.
 
+### First developer-only build
+
+The first implementation milestone is available only as a Darwin+cgo
+developer build with the `macos_identity_readonly` tag. It is intentionally
+not publishable and exposes only:
+
+```text
+version
+contract
+profile list|show|validate|add|remove
+skills install|uninstall
+```
+
+It has no `auth` command, does not open a browser, does not access Keychain,
+does not make a network request, and does not read, move, or merge the normal
+source-build registry. Its non-secret registry is separately rooted at
+`$(os.UserConfigDir)/youtrack-agent-cli-identity-readonly/profiles.json`.
+Every loaded profile must satisfy the identity edition's exact read-only
+profile policy before any list, show, validation, replacement, or removal
+operation proceeds. A failed validation is a non-secret, fail-closed metadata
+error.
+
 ### Exact future CLI surface
 
-The future identity-only build may expose only:
+After a separate OAuth/Keychain design, migration spike, and security review,
+the future published identity-only build may extend that developer-only surface
+only with:
 
 ```text
 version

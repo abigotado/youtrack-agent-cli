@@ -1,6 +1,7 @@
-//go:build portable_readonly && !macos_identity_readonly
+//go:build darwin && cgo && macos_identity_readonly
 
-// Command youtrack-agent-cli is the portable Remote-MCP-only edition.
+// Command youtrack-agent-cli is the developer-only macOS identity metadata
+// edition. It contains no authentication, credential, REST, or mutation path.
 package main
 
 import (

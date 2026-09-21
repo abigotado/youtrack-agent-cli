@@ -1,4 +1,4 @@
-//go:build !portable_readonly
+//go:build !portable_readonly && !macos_identity_readonly
 
 // Command youtrack-agent-cli reads YouTrack Cloud through a stable machine
 // contract.

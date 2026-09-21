@@ -1,4 +1,4 @@
-//go:build portable_readonly
+//go:build portable_readonly && !macos_identity_readonly
 
 // Package assets contains the Remote-MCP-only skill shipped by the portable
 // read-only edition.

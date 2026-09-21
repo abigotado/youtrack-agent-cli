@@ -1,4 +1,4 @@
-//go:build portable_readonly && !macos_identity_readonly
+//go:build darwin && cgo && macos_identity_readonly
 
 package skills
 

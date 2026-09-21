@@ -8,6 +8,15 @@ This model applies only to the proposed `macos_identity_readonly` identity
 edition. It neither changes the portable `v0.1.0` release nor supplies any
 authority to the Gate 1A write-capable path.
 
+The first implementation milestone is a Darwin+cgo developer build with only
+`version`, `contract`, read-only profile metadata, and Skill installation. It
+has no OAuth, Keychain, network, signed artifact, or Cask surface. Its profile
+registry is isolated at
+`$(os.UserConfigDir)/youtrack-agent-cli-identity-readonly/profiles.json` and
+never reads, moves, or merges the source-build registry. The signed-app and
+credential controls below are activation requirements for a later published
+identity edition, not properties claimed by this developer build.
+
 ## Assets and trust boundaries
 
 | Asset or boundary | Required protection |
@@ -58,7 +67,9 @@ commands.
    its own login flow; permanent tokens and all source/legacy credentials are
    rejected rather than migrated. A later signed-old/signed-new migration may
    rebind only a prior identity-edition OAuth item. Least-privilege OAuth
-   client/account configuration remains an operator requirement.
+   client/account configuration remains an operator requirement. The
+   developer-only metadata build has no credential admission path and fails
+   closed when any loaded profile is outside this exact policy.
 5. A named instance/account remains explicit. No input, tool output, redirect,
    or profile field may silently switch the selected instance.
 6. Failure to prove signing, notarization, accepted release manifest, profile

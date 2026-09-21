@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	registryFilename = "profiles.json"
-	maxRegistryBytes = 1 << 20
-	maxProfiles      = 1024
+	registryFilename        = "profiles.json"
+	identityReadonlyDirname = "youtrack-agent-cli-identity-readonly"
+	maxRegistryBytes        = 1 << 20
+	maxProfiles             = 1024
 )
 
 // Registry persists profiles in a strict, non-secret JSON file.
@@ -38,6 +39,18 @@ func NewDefaultRegistry() (*Registry, error) {
 		return nil, fmt.Errorf("locate user config directory: %w", err)
 	}
 	return NewRegistry(filepath.Join(dir, "youtrack-agent-cli", registryFilename)), nil
+}
+
+// NewIdentityReadonlyRegistry creates the separate non-secret registry for
+// the macOS identity metadata edition. It must never share profiles with the
+// standard or portable editions because they can carry broader capability or
+// credential-generation metadata.
+func NewIdentityReadonlyRegistry() (*Registry, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("locate user config directory: %w", err)
+	}
+	return NewRegistry(filepath.Join(dir, identityReadonlyDirname, registryFilename)), nil
 }
 
 // Path returns the registry path.
@@ -145,6 +158,27 @@ func (r *Registry) Remove(ctx context.Context, name string) error {
 			}
 		}
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
+	})
+}
+
+// MutateValidated applies one registry mutation only after validate accepts
+// every currently stored profile while the registry lock is held. The
+// validator is observational and must not retain or mutate the supplied
+// profile values.
+func (r *Registry) MutateValidated(ctx context.Context, validate func(Profile) error, change func([]Profile) ([]Profile, error)) error {
+	if validate == nil {
+		return errors.New("profile registry validator is nil")
+	}
+	if change == nil {
+		return errors.New("profile registry change is nil")
+	}
+	return r.mutate(ctx, func(profiles []Profile) ([]Profile, error) {
+		for _, candidate := range profiles {
+			if err := validate(candidate); err != nil {
+				return nil, err
+			}
+		}
+		return change(profiles)
 	})
 }
 

@@ -44,6 +44,7 @@ type App struct {
 	stdout   io.Writer
 	stderr   io.Writer
 	profiles *profile.Registry
+	policy   EditionPolicy
 
 	profileName string
 	format      string
@@ -59,7 +60,7 @@ type App struct {
 // NewApp builds an app without reading local metadata, credentials, or the
 // network. Tests may inject a registry before Run.
 func NewApp() *App {
-	return &App{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr}
+	return &App{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, policy: editionPolicy()}
 }
 
 // NewRootCommand assembles the deliberately small portable surface.
@@ -117,7 +118,7 @@ func (a *App) setup(cmd *cobra.Command, _ []string) error {
 	a.cancels = append(a.cancels, cancel)
 	cmd.SetContext(ctx)
 	if a.profiles == nil {
-		registry, err := profile.NewDefaultRegistry()
+		registry, err := a.policy.newRegistry()
 		if err != nil {
 			return errx.Internal("initialize profile metadata safely: %v", err)
 		}
@@ -127,8 +128,8 @@ func (a *App) setup(cmd *cobra.Command, _ []string) error {
 }
 
 func (a *App) newVersionCommand() *cobra.Command {
-	return &cobra.Command{Use: "version", Short: "Print the portable edition version and provenance", Args: usageArgs(cobra.NoArgs), RunE: func(_ *cobra.Command, _ []string) error {
-		return a.out.Success(buildVersion(debug.ReadBuildInfo, releaseVersion, releaseCommit, releaseCommitTime))
+	return &cobra.Command{Use: "version", Short: a.policy.versionShort, Args: usageArgs(cobra.NoArgs), RunE: func(_ *cobra.Command, _ []string) error {
+		return a.out.Success(buildVersion(a.policy, debug.ReadBuildInfo, releaseVersion, releaseCommit, releaseCommitTime))
 	}}
 }
 
@@ -146,9 +147,9 @@ func (a *App) newProfileCommand() *cobra.Command {
 
 func (a *App) newProfileListCommand() *cobra.Command {
 	return &cobra.Command{Use: "list", Short: "List non-secret profiles without credentials", Args: usageArgs(cobra.NoArgs), RunE: func(cmd *cobra.Command, _ []string) error {
-		values, err := a.profiles.List(cmd.Context())
+		values, err := a.listProfiles(cmd.Context())
 		if err != nil {
-			return translate(err)
+			return a.translate(err)
 		}
 		views := make([]profileView, len(values))
 		for index, value := range values {
@@ -163,9 +164,9 @@ func (a *App) newProfileShowCommand() *cobra.Command {
 		if err := a.requireProfile(); err != nil {
 			return err
 		}
-		value, err := a.profiles.Get(cmd.Context(), a.profileName)
+		value, err := a.getProfile(cmd.Context(), a.profileName)
 		if err != nil {
-			return translate(err)
+			return a.translate(err)
 		}
 		return a.out.Success(newProfileView(value))
 	}}
@@ -180,11 +181,11 @@ func (a *App) newProfileValidateCommand() *cobra.Command {
 		if err := a.requireProfile(); err != nil {
 			return err
 		}
-		value, err := a.profiles.Get(cmd.Context(), a.profileName)
+		value, err := a.getProfile(cmd.Context(), a.profileName)
 		if err != nil {
-			return translate(err)
+			return a.translate(err)
 		}
-		if err := validatePortableProfile(value); err != nil {
+		if err := a.policy.validateAdmissionProfile(value); err != nil {
 			return err
 		}
 		view := newProfileView(value)
@@ -205,11 +206,16 @@ func (a *App) newProfileAddCommand() *cobra.Command {
 		if err != nil {
 			return errx.Usage("profile input failed bounded validation")
 		}
-		value, err := decodePortableProfile(raw, a.profileName)
+		value, err := decodePortableProfile(a.policy, raw, a.profileName)
 		if err != nil {
 			return err
 		}
 		if a.dryRun {
+			if a.policy.validateRegistryOnDryRun {
+				if _, err := a.listProfiles(cmd.Context()); err != nil {
+					return a.translate(err)
+				}
+			}
 			view := newProfileView(value)
 			view.State = "validated_not_applied"
 			return a.out.Success(view)
@@ -223,20 +229,22 @@ func (a *App) newProfileAddCommand() *cobra.Command {
 			return errx.ConfirmRequired("profile add")
 		}
 		err = a.profiles.WithProfileLock(cmd.Context(), value.Name, func() error {
-			existing, getErr := a.profiles.Get(cmd.Context(), value.Name)
-			if errors.Is(getErr, profile.ErrNotFound) {
-				return a.profiles.Add(cmd.Context(), value)
-			}
-			if getErr != nil {
-				return getErr
-			}
-			if existing.CredentialGeneration != "" {
-				return errx.Conflict("PROFILE_AUTHENTICATED", "profile %q has credential metadata and cannot be replaced by the portable edition", value.Name)
-			}
-			return a.profiles.Put(cmd.Context(), value)
+			return a.profiles.MutateValidated(cmd.Context(), a.policy.validateLoadedProfile, func(profiles []profile.Profile) ([]profile.Profile, error) {
+				for index, existing := range profiles {
+					if existing.Name != value.Name {
+						continue
+					}
+					if existing.CredentialGeneration != "" {
+						return nil, errx.Conflict("PROFILE_AUTHENTICATED", "profile %q has credential metadata and cannot be replaced by the %s", value.Name, a.policy.name)
+					}
+					profiles[index] = value
+					return profiles, nil
+				}
+				return append(profiles, value), nil
+			})
 		})
 		if err != nil {
-			return translate(err)
+			return a.translate(err)
 		}
 		return a.out.Success(view)
 	}}
@@ -250,6 +258,11 @@ func (a *App) newProfileRemoveCommand() *cobra.Command {
 			return err
 		}
 		if a.dryRun {
+			if a.policy.validateRegistryOnDryRun {
+				if _, err := a.listProfiles(cmd.Context()); err != nil {
+					return a.translate(err)
+				}
+			}
 			return a.out.Success(map[string]any{"profile": a.profileName, "dry_run": true, "removed": false})
 		}
 		result := map[string]any{"profile": a.profileName, "removed": true}
@@ -260,17 +273,21 @@ func (a *App) newProfileRemoveCommand() *cobra.Command {
 			return errx.ConfirmRequired("profile remove")
 		}
 		err := a.profiles.WithProfileLock(cmd.Context(), a.profileName, func() error {
-			value, err := a.profiles.Get(cmd.Context(), a.profileName)
-			if err != nil {
-				return err
-			}
-			if value.CredentialGeneration != "" {
-				return errx.Conflict("PROFILE_AUTHENTICATED", "profile %q has credential metadata and cannot be removed by the portable edition", a.profileName)
-			}
-			return a.profiles.Remove(cmd.Context(), a.profileName)
+			return a.profiles.MutateValidated(cmd.Context(), a.policy.validateLoadedProfile, func(profiles []profile.Profile) ([]profile.Profile, error) {
+				for index, value := range profiles {
+					if value.Name != a.profileName {
+						continue
+					}
+					if value.CredentialGeneration != "" {
+						return nil, errx.Conflict("PROFILE_AUTHENTICATED", "profile %q has credential metadata and cannot be removed by the %s", a.profileName, a.policy.name)
+					}
+					return append(profiles[:index:index], profiles[index+1:]...), nil
+				}
+				return nil, fmt.Errorf("%w: %s", profile.ErrNotFound, a.profileName)
+			})
 		})
 		if err != nil {
-			return translate(err)
+			return a.translate(err)
 		}
 		return a.out.Success(result)
 	}}
@@ -345,7 +362,7 @@ func (a *App) Run(ctx context.Context, root *cobra.Command, args []string) (code
 			}
 			a.out = &output.Writer{Format: format, Out: a.stdout, Err: a.stderr}
 		}
-		return a.out.Failure(translate(err))
+		return a.out.Failure(a.translate(err))
 	}
 	return errx.CodeOK
 }
@@ -405,11 +422,11 @@ func (view versionView) Fields() []output.Field {
 	}
 }
 
-func buildVersion(read func() (*debug.BuildInfo, bool), fallback, commit, commitTime string) versionView {
+func buildVersion(policy EditionPolicy, read func() (*debug.BuildInfo, bool), fallback, commit, commitTime string) versionView {
 	if fallback == "" {
 		fallback = devVersion
 	}
-	view := versionView{Edition: "portable-readonly", Version: fallback, Commit: commit, CommitTime: commitTime, Go: runtime.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH}
+	view := versionView{Edition: policy.id, Version: fallback, Commit: commit, CommitTime: commitTime, Go: runtime.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH}
 	if info, ok := read(); ok && info.GoVersion != "" {
 		view.Go = info.GoVersion
 	}
@@ -446,17 +463,33 @@ func (view profileView) Fields() []output.Field {
 	}
 }
 
-func validatePortableProfile(value profile.Profile) error {
-	if err := value.ValidateLoginIntent(); err != nil {
-		return errx.Usage("profile is invalid for the portable edition")
+func (a *App) listProfiles(ctx context.Context) ([]profile.Profile, error) {
+	values, err := a.profiles.List(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if len(value.Capabilities) != 1 || value.Capabilities[0] != profile.CapabilityRead {
-		return errx.Usage("portable profiles must declare exactly capabilities [read]")
+	for _, value := range values {
+		if err := a.policy.validateLoadedProfile(value); err != nil {
+			return nil, err
+		}
 	}
-	return nil
+	return values, nil
 }
 
-func decodePortableProfile(raw []byte, requestedName string) (profile.Profile, error) {
+func (a *App) getProfile(ctx context.Context, name string) (profile.Profile, error) {
+	values, err := a.listProfiles(ctx)
+	if err != nil {
+		return profile.Profile{}, err
+	}
+	for _, value := range values {
+		if value.Name == name {
+			return value, nil
+		}
+	}
+	return profile.Profile{}, fmt.Errorf("%w: %s", profile.ErrNotFound, name)
+}
+
+func decodePortableProfile(policy EditionPolicy, raw []byte, requestedName string) (profile.Profile, error) {
 	var value profile.Profile
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return profile.Profile{}, errx.Usage("profile JSON is invalid")
@@ -464,7 +497,7 @@ func decodePortableProfile(raw []byte, requestedName string) (profile.Profile, e
 	if requestedName != "" && requestedName != value.Name {
 		return profile.Profile{}, errx.Usage("--profile must match the profile file name")
 	}
-	if err := validatePortableProfile(value); err != nil {
+	if err := policy.validateAdmissionProfile(value); err != nil {
 		return profile.Profile{}, err
 	}
 	return value, nil
@@ -494,7 +527,7 @@ func readBoundedRegular(path string, maximum int) ([]byte, error) {
 	return data, nil
 }
 
-func translate(err error) error {
+func (a *App) translate(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -511,5 +544,5 @@ func translate(err error) error {
 	if errors.Is(err, profile.ErrInvalidProfile) || errors.Is(err, profile.ErrCorruptRegistry) || errors.Is(err, profile.ErrInsecurePermissions) {
 		return errx.Usage("profile metadata failed validation")
 	}
-	return errx.Internal("portable read-only operation failed safely")
+	return errx.Internal("%s", a.policy.failureMessage)
 }
