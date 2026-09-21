@@ -83,11 +83,11 @@ class VerifyPortableReadOnlyReleasePolicyTest < Minitest::Test
   end
 
   def test_rejects_homebrew_and_quarantine_workarounds
-    success, stderr = verify(CONFIG, "Formula/youtrack-agent-cli.rb" => "class YoutrackAgentCli < Formula; end\n")
+    success, stderr = verify(CONFIG, { "Formula/youtrack-agent-cli.rb" => "class YoutrackAgentCli < Formula; end\n" })
     refute success
     assert_includes stderr, "Homebrew Formula/Cask"
 
-    success, stderr = verify(CONFIG, "packaging/install.sh" => "xattr -dr com.apple.quarantine binary\n")
+    success, stderr = verify(CONFIG, { "packaging/install.sh" => "xattr -dr com.apple.quarantine binary\n" })
     refute success
     assert_includes stderr, "quarantine bypass"
   end
@@ -106,7 +106,7 @@ class VerifyPortableReadOnlyReleasePolicyTest < Minitest::Test
           steps:
             - run: gh release create v0.1.0
     YAML
-    success, stderr = verify(CONFIG, ".github/workflows/other.yaml" => workflow)
+    success, stderr = verify(CONFIG, { ".github/workflows/other.yaml" => workflow })
     refute success
     assert_includes stderr, "must set read-only permissions"
     assert_includes stderr, "publication action"
