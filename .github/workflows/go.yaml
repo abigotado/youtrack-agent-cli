@@ -85,6 +85,70 @@ jobs:
           CGO_ENABLED=0 go list -f '{{join .GoFiles "\n"}}' ./internal/auth \
             | grep -Fxq 'keychain_unsupported.go'
 
+      - name: macOS identity-only developer build modes
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          IDENTITY_TAG=macos_identity_readonly
+          IDENTITY_BINARY="${RUNNER_TEMP}/youtrack-agent-cli-identity"
+          CGO_ENABLED=1 go vet -tags "${IDENTITY_TAG}" \
+            ./cmd/youtrack-agent-cli ./internal/readonlycli ./internal/skills ./assets ./internal/profile
+          CGO_ENABLED=1 go test -race -tags "${IDENTITY_TAG}" \
+            ./cmd/youtrack-agent-cli ./internal/readonlycli ./internal/skills ./assets ./internal/profile
+          CGO_ENABLED=1 go build -tags "${IDENTITY_TAG}" -o "${IDENTITY_BINARY}" ./cmd/youtrack-agent-cli
+
+          EXPECTED_OWNED_DEPS='github.com/abigotado/youtrack-agent-cli/assets
+          github.com/abigotado/youtrack-agent-cli/cmd/youtrack-agent-cli
+          github.com/abigotado/youtrack-agent-cli/internal/endpoint
+          github.com/abigotado/youtrack-agent-cli/internal/errx
+          github.com/abigotado/youtrack-agent-cli/internal/lockfile
+          github.com/abigotado/youtrack-agent-cli/internal/output
+          github.com/abigotado/youtrack-agent-cli/internal/profile
+          github.com/abigotado/youtrack-agent-cli/internal/protocolvalue
+          github.com/abigotado/youtrack-agent-cli/internal/readonlycli
+          github.com/abigotado/youtrack-agent-cli/internal/skills'
+          ACTUAL_OWNED_DEPS=$(go list -tags "${IDENTITY_TAG}" -deps ./cmd/youtrack-agent-cli \
+            | grep '^github.com/abigotado/youtrack-agent-cli/' \
+            | sort)
+          if [ "${ACTUAL_OWNED_DEPS}" != "${EXPECTED_OWNED_DEPS}" ]; then
+            echo "::error::identity owned dependency closure changed"
+            printf 'expected:\n%s\nactual:\n%s\n' "${EXPECTED_OWNED_DEPS}" "${ACTUAL_OWNED_DEPS}"
+            exit 1
+          fi
+          # Cobra/pflag transitively imports net for optional IP flag types,
+          # even though this command never registers one. Forbid network
+          # imports at the owned-package boundary so no identity package can
+          # add transport capability through that dependency.
+          for OWNED_PACKAGE in ${EXPECTED_OWNED_DEPS}; do
+            for FORBIDDEN_IMPORT in net net/http crypto/tls; do
+              if go list -tags "${IDENTITY_TAG}" -f '{{join .Imports "\n"}}' "${OWNED_PACKAGE}" | grep -Fxq "${FORBIDDEN_IMPORT}"; then
+                echo "::error::identity package ${OWNED_PACKAGE} directly imports ${FORBIDDEN_IMPORT}"
+                exit 1
+              fi
+            done
+          done
+          if otool -L "${IDENTITY_BINARY}" | grep -Fq '/Security.framework/'; then
+            echo "::error::identity binary links Security.framework"
+            exit 1
+          fi
+          if CGO_ENABLED=0 go build -tags "${IDENTITY_TAG}" ./cmd/youtrack-agent-cli; then
+            echo "::error::identity tag built without Darwin cgo support"
+            exit 1
+          fi
+          if CGO_ENABLED=1 go build -tags 'portable_readonly macos_identity_readonly' ./cmd/youtrack-agent-cli; then
+            echo "::error::portable and identity tags built together"
+            exit 1
+          fi
+
+      - name: Linux rejects macOS identity-only edition
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          if CGO_ENABLED=1 go build -tags macos_identity_readonly ./cmd/youtrack-agent-cli; then
+            echo "::error::identity tag built on a non-Darwin runner"
+            exit 1
+          fi
+
       - name: Gate 1A cross-language protocol tests
         if: runner.os == 'macOS'
         run: swift test --package-path native/macos/ApprovalProtocol

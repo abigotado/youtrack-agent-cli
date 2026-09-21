@@ -200,7 +200,7 @@ func TestApprovalProtocolHasNoProductionTransportImports(t *testing.T) {
 			module+"/internal/errx", module+"/internal/intent", module+"/internal/protocolvalue",
 		),
 		module + "/internal/endpoint": imports(
-			"errors", "fmt", "net", "net/url", "sort", "strconv", "strings", module+"/internal/protocolvalue",
+			"errors", "fmt", "net/netip", "net/url", "sort", "strconv", "strings", module+"/internal/protocolvalue",
 		),
 		module + "/internal/errx": imports("context", "errors", "fmt", "strings", "time"),
 		module + "/internal/intent": imports(

@@ -1,11 +1,10 @@
-//go:build !portable_readonly
+//go:build !portable_readonly && !macos_identity_readonly
 
 package skills
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -721,14 +720,6 @@ func countApplied(files []FileResult) int {
 		}
 	}
 	return count
-}
-
-func assertReason(t *testing.T, err error, want string) {
-	t.Helper()
-	var typed *errx.Error
-	if !errors.As(err, &typed) || typed.Reason != want {
-		t.Fatalf("error = %v, want reason %s", err, want)
-	}
 }
 
 func seedManifest(t *testing.T, skillDir string, provider Provider, complete bool, files []manifestFile) {

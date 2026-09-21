@@ -5,7 +5,7 @@ package endpoint
 import (
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -177,8 +177,8 @@ func ValidateLoopbackRedirect(raw string) error {
 	if parsed.Scheme != "http" || parsed.Opaque != "" || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
 		return invalid("OAuth redirect URI must be an exact HTTP loopback URL without credentials, query, or fragment")
 	}
-	ip := net.ParseIP(parsed.Hostname())
-	if ip == nil || !ip.IsLoopback() {
+	ip, err := netip.ParseAddr(parsed.Hostname())
+	if err != nil || !ip.IsLoopback() {
 		return invalid("OAuth redirect URI host must be a numeric loopback address")
 	}
 	port, err := strconv.Atoi(parsed.Port())

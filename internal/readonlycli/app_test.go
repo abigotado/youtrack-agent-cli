@@ -126,7 +126,7 @@ func TestPortableProfileAddStoresOnlyReadMetadata(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if err := validatePortableProfile(parsed); err != nil {
+	if err := app.policy.validateAdmissionProfile(parsed); err != nil {
 		t.Fatal(err)
 	}
 	if code := runApp(app, "profile", "add", "--from", path, "--yes", "-o", "json"); code != errx.CodeOK {

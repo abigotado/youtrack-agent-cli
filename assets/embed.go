@@ -1,4 +1,4 @@
-//go:build !portable_readonly
+//go:build !portable_readonly && !macos_identity_readonly
 
 // Package assets contains the provider-neutral Agent Skill shipped by
 // youtrack-agent-cli.

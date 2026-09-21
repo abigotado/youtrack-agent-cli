@@ -15,7 +15,7 @@ static int youtrack_has_extended_acl(const char *path) {
 	acl_entry_t entry;
 	int result = acl_get_entry(value, ACL_FIRST_ENTRY, &entry);
 	acl_free(value);
-	return result == 1 ? 1 : 0;
+	return result == 0 ? 1 : result == 1 ? 0 : -1;
 }
 */
 import "C"
