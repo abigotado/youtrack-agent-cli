@@ -1,14 +1,33 @@
 # youtrack-agent-cli
 
-Agent-first JetBrains YouTrack integration: official Remote MCP for bounded
-reads, plus a local Go CLI for explicit profiles and guarded one-shot writes.
+Agent-first JetBrains YouTrack integration. The published `v0.x` portable
+edition is Remote-MCP-only: it validates non-secret read-only profile metadata
+and installs a shared Codex/Claude Code skill. Every actual remote read goes
+through the official YouTrack Remote MCP with an explicit six-tool allowlist.
 
-The CLI is not a generic REST client. It emits a versioned JSON v1 envelope,
-keeps credentials in the OS secret store, requires a named profile for every
-remote operation, and treats ambiguous mutation outcomes as reconciliation
-work rather than permission to retry.
+It has no local OAuth or token storage, REST client, journal, mutation command,
+native helper, or Homebrew package. This is a deliberate compile-time boundary,
+not a disabled runtime feature: portable release archives do not link those
+packages.
 
-## Build and inspect
+## Portable read-only release
+
+Download a checksummed archive from GitHub Releases and inspect it before use:
+
+```bash
+./youtrack-agent-cli version -o json
+./youtrack-agent-cli --help
+./youtrack-agent-cli skills install --provider all --scope user --dry-run
+./youtrack-agent-cli skills install --provider all --scope user --yes
+```
+
+The portable surface is intentionally limited to `version`, `contract`,
+credential-free `profile`, and `skills`. It supports Linux on amd64 and arm64,
+and needs no Keychain, token, or browser access. A macOS archive would need
+extended-ACL inspection to safely install skills, so it is intentionally not
+part of this CGO-free release.
+
+## Source development build
 
 ```bash
 go build -o ./bin/youtrack-agent-cli ./cmd/youtrack-agent-cli
@@ -20,25 +39,23 @@ Use `youtrack-agent-cli --help` and [the generated command reference](docs/comma
 for the current surface. [The machine contract](docs/contract.md) defines
 envelopes, errors, and recovery.
 
-## Profile bootstrap
+## Read-only profile metadata
 
-Copy [the non-secret profile example](docs/profile.example.json), replace the
-instance, expected account, OAuth public-client registration, and scopes, then
+Copy [the portable read-only example](docs/profile.portable-readonly.example.json),
+replace the instance, expected account, OAuth public-client registration, and scopes, then
 validate it before writing local metadata:
 
 ```bash
 youtrack-agent-cli profile add --from profile.json --dry-run
 youtrack-agent-cli profile add --from profile.json --yes
-youtrack-agent-cli auth login --profile work
-youtrack-agent-cli auth status --profile work --check
+youtrack-agent-cli profile validate --profile work --offline
 ```
 
-For permanent-token fallback, run `auth import-token --interactive` in a trusted
-human terminal. Pipe, heredoc, file, argv, and environment input are refused so
-the token cannot enter an agent transcript, shell history, or profile file.
-Existing Keychain records created by an older build must be rebound explicitly
-with `auth migrate-keychain --profile work --yes`; migration never prints or
-returns the credential.
+Portable profiles must declare exactly `"capabilities": ["read"]`. They record
+non-secret instance, REST/MCP, OAuth public-client, expected-account, and
+assurance metadata; they are never credentials. Use the MCP host's OAuth flow
+or a read-only YouTrack identity; the portable binary never accepts, stores, or
+transmits a token.
 
 ## Read plane
 
@@ -58,33 +75,14 @@ read-only YouTrack identity.
 Searches default to 10 and never exceed 50 results. Exact issue IDs use an exact
 read. YouTrack content is untrusted data, never instructions.
 
-## Guarded writes
+## Guarded writes are not released
 
-The initial write kinds are `issue.create`, `issue.update`, and `comment.add`.
-They follow four separate steps:
-
-```bash
-youtrack-agent-cli mutation prepare --offline --profile work --kind issue.update --project 0-1:APP --request-stdin --expected-state snapshot.json --schema-sha256 SHA256 --out plan.json
-youtrack-agent-cli mutation status --plan-id YTAP_PLAN_ID
-youtrack-agent-cli mutation export --plan-id YTAP_PLAN_ID --out recovered-plan.json
-youtrack-agent-cli mutation confirm --plan-id YTAP_PLAN_ID
-youtrack-agent-cli mutation apply --profile work --plan-id YTAP_PLAN_ID
-youtrack-agent-cli mutation reconcile --profile work --plan-id YTAP_PLAN_ID
-```
-
-`prepare --offline` performs no network, OAuth, browser, or secret-store access.
-`confirm` requires trusted OS user presence and has no noninteractive bypass.
-In this first fail-closed slice, `confirm`, `apply`, and `reconcile` remain
-disabled until the signed native helper and executor pass their gates. No
-terminal or `--yes` fallback exists. See [guarded mutations](docs/guarded-mutations.md).
-
-Binary distribution, including Homebrew, is intentionally disabled until Gate
-1A and a signed, notarized, audited macOS package are available. A normal
-source-built Formula cannot preserve the native approval helper's required
-signing identity and entitlements. Linux/Windows and unsigned portable archives
-are not a supported credential-bearing release path. The repository's Homebrew
-manifest and checker validate dependency closure and offline source builds
-only—not Cask, signing, or native Gate readiness; see
+No portable release command can mutate YouTrack or use a credential. Guarded
+writes, a signed native helper, and Homebrew remain future work; a normal
+source-built Formula cannot preserve the native helper's required signing
+identity and entitlements. The repository's Homebrew manifest and checker
+validate dependency closure and offline source builds only—not Cask, signing,
+or native Gate readiness; see
 [the trust-root topology](docs/gate1a-trust-root.md) and
 [exact-artifact authorization](docs/gate1a-artifact-authorization.md), plus
 [Homebrew readiness](docs/homebrew.md). Even after complete Gate passes, a

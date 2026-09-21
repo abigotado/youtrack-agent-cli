@@ -1,3 +1,5 @@
+//go:build !portable_readonly
+
 // Package assets contains the provider-neutral Agent Skill shipped by
 // youtrack-agent-cli.
 package assets

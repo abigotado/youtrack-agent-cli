@@ -1,12 +1,44 @@
-# Distribution is deliberately disabled until Gate 1A produces an audited,
-# signed macOS build with the native Keychain and LocalAuthentication helper.
-# Keeping a checked GoReleaser sentinel makes an accidental local invocation
-# fail closed instead of publishing portable binaries with no supported secret
-# store or approval path.
 version: 2
 
 project_name: youtrack-agent-cli
 
+# This is the only portable release shape. The build tag selects a separate
+# command tree that has no authentication, REST, journal, mutation, or native
+# approval dependencies. Do not add a second build here without a reviewed
+# product/security decision.
 builds:
-  - id: distribution-disabled
-    skip: true
+  - id: portable-readonly
+    main: ./cmd/youtrack-agent-cli
+    binary: youtrack-agent-cli
+    tags:
+      - portable_readonly
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/abigotado/youtrack-agent-cli/internal/readonlycli.releaseVersion={{ .Version }}
+      - -X github.com/abigotado/youtrack-agent-cli/internal/readonlycli.releaseCommit={{ .FullCommit }}
+      - -X github.com/abigotado/youtrack-agent-cli/internal/readonlycli.releaseCommitTime={{ .CommitDate }}
+
+archives:
+  - id: portable-readonly
+    ids:
+      - portable-readonly
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: abigotado
+    name: youtrack-agent-cli

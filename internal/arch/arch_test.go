@@ -107,6 +107,7 @@ func TestInternalDependencyDAGIsExplicit(t *testing.T) {
 		module + "/internal/output":        edges("errx"),
 		module + "/internal/profile":       edges("endpoint", "lockfile"),
 		module + "/internal/protocolvalue": {},
+		module + "/internal/readonlycli":   edges("errx", "output", "profile", "skills"),
 		module + "/internal/skills":        edges("errx", "lockfile"),
 		module + "/internal/writepolicy":   edges("lockfile", "profile"),
 		module + "/internal/youtrack":      edges("errx"),

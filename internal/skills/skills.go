@@ -300,7 +300,7 @@ func payload(provider Provider) (map[string][]byte, error) {
 	if provider != ProviderCodex && provider != ProviderClaude {
 		return nil, errx.Usage("embedded payload needs a concrete provider")
 	}
-	root := path.Join("skills", SkillName)
+	root := path.Clean(embeddedSkillRoot())
 	out := make(map[string][]byte)
 	err := fs.WalkDir(assets.FS, root, func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

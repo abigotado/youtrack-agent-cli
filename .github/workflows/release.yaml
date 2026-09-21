@@ -1,22 +1,95 @@
-name: release-disabled
+name: release-portable-readonly
 
 on:
   push:
     tags:
-      - "v*"
-  workflow_dispatch:
+      - "v0.*"
 
 permissions:
   contents: read
 
-# This workflow is intentionally a non-publishing guard. Enabling publication
-# requires an explicit architecture decision after Gate 1A and an audited,
-# signed macOS distribution path exist.
 jobs:
-  release-disabled:
-    name: Distribution remains disabled
+  verify-portable-readonly:
+    name: Verify portable Remote-MCP read-only release
     runs-on: ubuntu-latest
     steps:
-      - name: Refuse artifact publication
+      - name: Git checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify release tag is on main
         run: |
-          echo "Distribution is disabled until Gate 1A and signed macOS packaging pass review."
+          set -euo pipefail
+          test "${GITHUB_REF_TYPE}" = tag
+          printf '%s' "${GITHUB_REF_NAME}" | grep -Eq '^v0\.[0-9]+\.[0-9]+$'
+          release_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          git fetch origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "${release_commit}" origin/main
+          git tag --points-at "${release_commit}" | grep -Fxq "${GITHUB_REF_NAME}"
+
+      - name: Verify portable read-only boundary
+        run: |
+          set -euo pipefail
+          go test -race ./...
+          go test -tags portable_readonly ./...
+          test -z "$(go list -tags portable_readonly -deps ./cmd/youtrack-agent-cli | grep -E '/internal/(auth|application|journal|mutation|youtrack)$' || true)"
+          go build -tags portable_readonly -o portable-readonly ./cmd/youtrack-agent-cli
+          ./portable-readonly --help | grep -Fxq '  profile     Manage non-secret read-only Remote MCP profiles'
+          ! ./portable-readonly --help | grep -Eiq 'auth|inspect|mutation'
+
+      - name: Verify release policy and config
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          go install github.com/goreleaser/goreleaser/v2@v2.17.1
+          goreleaser check
+          ruby .github/scripts/verify-portable-release-policy_test.rb
+          ruby .github/scripts/verify-portable-release-policy.rb .goreleaser.yaml
+
+  publish-portable-readonly:
+    name: Publish checksummed portable read-only archives
+    needs: verify-portable-readonly
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Reverify release tag is on main
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_TYPE}" = tag
+          printf '%s' "${GITHUB_REF_NAME}" | grep -Eq '^v0\.[0-9]+\.[0-9]+$'
+          release_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          git fetch origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "${release_commit}" origin/main
+          git tag --points-at "${release_commit}" | grep -Fxq "${GITHUB_REF_NAME}"
+
+      - name: Install pinned GoReleaser
+        env:
+          GOTOOLCHAIN: auto
+        run: go install github.com/goreleaser/goreleaser/v2@v2.17.1
+
+      - name: Publish checksummed portable read-only archives
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: goreleaser release --clean --config .goreleaser.yaml
