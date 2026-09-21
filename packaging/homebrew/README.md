@@ -1,10 +1,10 @@
-# Homebrew offline-readiness inputs
+# Homebrew Formula inputs
 
-`modules.json` and `homebrewcheck` cover dependency-closure and offline
-source-build readiness only. They do not establish readiness for a Formula or
-Cask, signing, native Gate evidence, or publication. The accepted future
-distribution uses an immutable signed app delivered by Cask; it does not
-rebuild the approval helper from source.
+`modules.json` and `homebrewcheck` are inputs to the standard source-built
+Formula. They protect the complete Go dependency closure and rehearse an
+offline standard-CLI build with CGO enabled. They do not publish a Formula to
+the tap, validate a Formula, or establish signing, native Gate evidence, or
+write readiness.
 
 The manifest must match the complete `require` closure in `go.mod`. Each digest
 is for the corresponding Go proxy `.zip`, not for a VCS or GitHub archive.
@@ -17,7 +17,7 @@ Stage downloads with the standard Go proxy layout:
 <proxy-dir>/<module-path>/@v/<version>.zip
 ```
 
-Then run the network-free readiness check:
+Then run the network-free dependency-closure and standard-CLI build rehearsal:
 
 ```bash
 go run ./tools/homebrewcheck --proxy-dir <proxy-dir>
@@ -28,3 +28,8 @@ source tree, derives `vendor/` and `vendor/modules.txt` from the verified proxy
 zips, and builds with empty caches, `CGO_ENABLED=1`, `GOPROXY=off`,
 `GOSUMDB=off`, and `GOTOOLCHAIN=local`. It does not contact YouTrack or the
 Keychain.
+
+The tap PR remains the Formula validation boundary: it must pass `brew audit`,
+a source install from the pinned immutable release, and `brew test`. Passing
+this checker alone does not prove that the Formula is publishable, signed, or
+eligible to enable guarded writes.

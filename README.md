@@ -1,16 +1,22 @@
 # youtrack-agent-cli
 
-Agent-first JetBrains YouTrack integration. The published `v0.x` portable
-edition is Remote-MCP-only: it validates non-secret read-only profile metadata
-and installs a shared Codex/Claude Code skill. Every actual remote read goes
-through the official YouTrack Remote MCP with an explicit six-tool allowlist.
+Agent-first JetBrains YouTrack integration with two deliberately separate
+distribution channels:
 
-It has no local OAuth or token storage, REST client, journal, mutation command,
-native helper, or Homebrew package. This is a deliberate compile-time boundary,
-not a disabled runtime feature: portable release archives do not link those
-packages. A separate proposed, not activated macOS identity-only Cask channel
-is documented in the [identity-only ADR](docs/macos-identity-readonly-adr.md);
-it does not change this release.
+- The published `v0.x` **portable read-only** edition is Linux-only and
+  Remote-MCP-only. It validates non-secret read-only profile metadata and
+  installs a shared Codex/Claude Code skill. Every remote read goes through the
+  official YouTrack Remote MCP with an explicit six-tool allowlist.
+- The **standard macOS edition** is being activated as a source-built Homebrew
+  Formula. Homebrew will compile the existing standard CLI locally with
+  `CGO_ENABLED=1`, so OAuth credentials remain in the native
+  Security.framework Keychain. This channel needs neither an Apple Developer
+  membership nor a signed/notarized application bundle.
+
+The portable archive has no local OAuth or token storage, REST client,
+journal, mutation command, native helper, or Homebrew package. That is a
+compile-time boundary, not a disabled runtime feature. It does not constrain
+the separate standard Formula edition.
 
 ## Portable read-only release
 
@@ -40,6 +46,41 @@ go build -o ./bin/youtrack-agent-cli ./cmd/youtrack-agent-cli
 Use `youtrack-agent-cli --help` and [the generated command reference](docs/commands.md)
 for the current surface. [The machine contract](docs/contract.md) defines
 envelopes, errors, and recovery.
+
+## macOS Homebrew Formula
+
+The standard macOS distribution channel is a source-built Formula in the
+maintained tap. It will be activated by the immediately following tap PR from
+a newly tagged immutable source release; until that PR lands, the command below
+is the post-release install command, not an already-published package:
+
+```bash
+brew install abigotado/tap/youtrack-agent-cli
+youtrack-agent-cli version -o json
+```
+
+The Formula pins a checksummed source release and builds it locally with Go,
+CGO, and the macOS Security.framework; it does not download an unsigned
+executable, remove Gatekeeper quarantine, or need Apple Developer signing or
+notarization. It includes the standard explicit-profile OAuth and Keychain
+commands:
+
+```bash
+youtrack-agent-cli auth login --profile work -o json
+youtrack-agent-cli auth status --profile work --check -o json
+```
+
+The installer never reads, copies, or migrates credentials. After a Formula
+Cellar upgrade, an existing credential may require an explicit ACL rebind:
+
+```bash
+youtrack-agent-cli auth migrate-keychain --profile work --yes -o json
+```
+
+Run that command only for the named profile when the CLI reports that its
+existing Keychain item needs migration. It does not print the credential.
+See [Homebrew](docs/homebrew.md) for support boundaries and the future Cask
+channels.
 
 ## Read-only profile metadata
 
@@ -79,49 +120,19 @@ read. YouTrack content is untrusted data, never instructions.
 
 ## Guarded writes are not released
 
-No portable release command can mutate YouTrack or use a credential. Guarded
-writes, a signed native helper, and a write-capable Homebrew distribution remain
-future work; a normal source-built Formula cannot preserve the native helper's
-required signing identity and entitlements. The separately proposed macOS
-identity-only Cask channel is not a write path and is not activated. The
-repository's Homebrew manifest and checker
-validate dependency closure and offline source builds only—not Cask, signing,
-or native Gate readiness; see
-[the trust-root topology](docs/gate1a-trust-root.md) and
-[exact-artifact authorization](docs/gate1a-artifact-authorization.md), plus
-[Homebrew readiness](docs/homebrew.md). Even after complete Gate passes, a
-provisional authorization remains deny-only. A later offline-root-signed
-activation grant is issued only over the complete per-architecture pre-grant
-smoke evidence, and the real grant-bound production context must then pass a
-second per-architecture ordinary-command verification before publication.
-Every isolated Gate 1B E1/E2 execution unit begins with its own token-bound
-enrollment and retains that baseline in its leaf evidence. The offline parent
-set covers all units on all declared architectures; E2 binds the complete E1 set.
-Each activation-smoke and post-grant capability plan starts with a setup-only
-exact-artifact enrollment from a canonical empty disposable inventory, binds
-the retained revision-1 registry snapshot through every later observation and
-evidence index, and ends by retaining terminal and replay-denial evidence. Assertions
-are accepted only in a case-final runner observation emitted after every
-operation transcript is retained. A trusted external supervisor destroys the
-entire disposable host after evidence export and before the next activation
-grant or publication-envelope signature. A root-bound disposal attestation
-gates that signature; missing or uncertain disposal blocks release. Live
-`stage_cleanup`, deletion ACK recovery, and empty-inventory cleanup proofs are
-deferred, not delegated to the agent or native helper.
-The future write path, protected receipt consumption, expiry, pre-permit aborts,
-quarantine and bounded-capacity behavior are specified in the
-[registry/coordinator contract](docs/gate1a-registry-protocol.md) and
-[mutation lifecycle](docs/guarded-mutations.md). These are proposed native
-contracts, not implemented authority in this build. Their intentional
-availability limits include attacker-induced unclosed-crash quarantine and a
-256-record lifetime bound that requires a separate retention protocol; neither
-restart nor a new approval clears them. No native authority commands or future
-exits 10..13 are available until implementation updates the machine contract.
+The macOS Formula enables the standard CLI's OAuth, Keychain, REST, journal,
+and network-free `mutation prepare` surfaces. It does **not** make guarded
+writes available: `mutation confirm`, `mutation apply`, and
+`mutation reconcile` fail closed until Gate 1A and Gate 1B have passed and a
+separately authorized write-capable channel is released. This applies equally
+to source builds and the Formula; no agent may bypass it through MCP or raw
+REST.
 
-[Gate 1B isolated subruns](docs/gate1b-isolated-subruns.md) defines the separate
-unit authorization and evidence-aggregation contract. Its complete inventory,
-validators, and native conformance still require implementation and verification;
-the historical case catalog alone cannot authorize activation or publication.
+The signed identity-only Cask and the Gate 1A write-capable Cask remain
+separate proposed future channels. They have different trust requirements from
+the Formula and are not prerequisites for installing or using the standard
+macOS CLI. See [Homebrew](docs/homebrew.md), [the trust-root topology](docs/gate1a-trust-root.md),
+and [the mutation lifecycle](docs/guarded-mutations.md).
 
 ## Agent Skill
 
