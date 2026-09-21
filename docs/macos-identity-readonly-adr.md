@@ -60,7 +60,7 @@ auth login
 auth status
 auth whoami
 auth logout
-auth migrate-keychain
+auth migrate-keychain          # only a prior signed identity-edition item
 skills
 ```
 
@@ -68,23 +68,32 @@ skills
 subcommands are listed above and it must not become an alternate credential
 transport. Admission requires exactly `"capabilities": ["read"]`, the
 identity channel's exact Remote MCP allowlist, and an explicit expected
-instance/account binding. The build accepts only OAuth credentials obtained by
-its own login flow for a read-only YouTrack account; it rejects permanent-token
-credentials and does not migrate a source or legacy credential whose profile
-has any write capability. The build explicitly excludes `auth
+instance/account binding. The first identity edition accepts only OAuth
+credentials obtained by its own login flow: it never imports or migrates a
+source-build or legacy credential, including a permanent token or any profile
+with a write capability. A later `auth migrate-keychain` may rebind only an
+OAuth item produced by a prior signed identity edition after a signed-old to
+signed-new migration proof. The build explicitly excludes `auth
 import-token`, `auth allow-projects`, `inspect`, `mutation`, `journal`,
 `writepolicy`, every native helper surface, and every issue REST operation.
 It therefore cannot create, update, move, assign, comment on, or otherwise
 mutate a YouTrack issue.
 
+`skills` is available only in the cgo-enabled macOS identity build and must
+run the existing extended-ACL inspection for every Skill root and destination.
+If that inspection is unavailable or fails, installation fails closed; a Cask
+must not bypass the check or install the Skill itself.
+
 ### OAuth and read-plane separation
 
 The CLI OAuth credential is for local identity verification. It is **not
-inherently read-only**: the configured public client and the selected YouTrack
-account must receive the least privileges needed for identity verification.
-The credential stays in the reserved Keychain service, is never printed,
-exported, or bridged to an MCP client, and does not grant the CLI a REST issue
-operation.
+inherently read-only**: the binary can bind it to the configured expected
+account through exact `users/me` verification, but cannot infer every server
+permission from that response. The configured public client and selected
+YouTrack account are therefore an operator-controlled least-privilege
+requirement, not a runtime claim. The credential stays in the reserved Keychain
+service, is never printed, exported, or bridged to an MCP client, and does not
+grant the CLI a REST issue operation.
 
 Remote reads remain a separate MCP-host OAuth session against a named instance
 and account. Its only supported endpoint is the official Remote MCP endpoint
@@ -113,11 +122,13 @@ Specifically, Cask installation performs none of the following:
 - network access after artifact download; or
 - secret deletion.
 
-The operator must invoke login, Skill installation, logout, or a future
-`auth migrate-keychain` command explicitly after installation. Migration is
-not a Cask concern. Before it can exist, a signed-old/signed-new migration
-spike must cover first install, reinstall, upgrade, cancellation, interruption,
-rollback, uninstall/reinstall, and source-service collision without exposing a
+The operator must invoke login, Skill installation, or logout explicitly after
+installation. The first identity Cask has no migration from a source or legacy
+CLI. A future `auth migrate-keychain` is not a Cask concern and may only move a
+prior signed identity-edition OAuth item. Before it can exist, a
+signed-old/signed-new migration spike must cover first install, reinstall,
+upgrade, cancellation, interruption, rollback, uninstall/reinstall, and
+source-service collision as an explicit rejection without exposing a
 credential.
 
 ### Release prerequisites
@@ -129,11 +140,11 @@ identity-only command is published:
 2. the literal Apple Team ID supplied as a reviewed immutable release input
    (no placeholder, inferred value, wildcard, or fallback);
 3. notarization for the exact shipped application;
-4. an owned tap repository with controlled publish access; and
+4. an owned tap repository with controlled publish access;
 5. signing-capable, access-controlled CI that keeps signing material outside
    source and job logs;
 6. a versioned immutable application-archive URL and literal SHA-256 for each
-   supported architecture (never `sha256 :no_check`); and
+   supported architecture (never `sha256 :no_check`);
 7. a release-policy test that rejects Cask hooks, source builds, re-signing,
    alternate assets, unchecked hashes, OAuth/Keychain/Skill actions, and any
    publisher outside the reviewed final upload/tap job; and

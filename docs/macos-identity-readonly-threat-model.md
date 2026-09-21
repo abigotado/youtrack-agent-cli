@@ -16,7 +16,7 @@ authority to the Gate 1A write-capable path.
 | CLI OAuth identity credential | Keychain-only storage under `youtrack-agent-cli.identity-readonly.v1`; never stdout, logs, profiles, exports, or MCP configuration |
 | Non-secret profile metadata | Only `list`, `show`, `validate`, `add`, and `remove`; exact `capabilities:["read"]`, exact MCP allowlist, and explicit instance/account binding |
 | Remote MCP session | Independent MCP-host OAuth and exact six-tool URL allowlist; not shared with the CLI credential |
-| Skill installation | Explicit operator command after install; symlink-safe local installer, not a Cask hook |
+| Skill installation | Explicit operator command after install; cgo-enabled macOS extended-ACL inspection for every root/destination; not a Cask hook |
 | Write-capable trust root | Disjoint from this channel: no helper, approval key, receipt, journal, or mutation command |
 
 The attacker may control issue text, MCP tool descriptions and outputs, local
@@ -36,7 +36,7 @@ commands.
 | A source Formula rebuilds or replaces the executable | Ship only the completed signed/notarized app through a Cask; Cask links its contained CLI | Identity mismatch or missing notarization blocks publication/install; a source Formula is out of scope |
 | A Cask hook or alternate asset performs hidden login, migration, network work, or deletion | Install/link only; pin a versioned immutable per-architecture URL and literal SHA-256; policy tests reject hooks, source builds, re-signing, unchecked hashes, alternate assets, and extra publishers | Unsupported installer behavior is a release-policy failure |
 | A credential is leaked to an agent, log, or MCP client | Keychain-only storage; redacted diagnostics; never export, print, bridge, or configure it into MCP | Suspected exposure requires operator-led credential revocation; no automatic export/recovery path exists |
-| A privileged account makes the CLI accidentally write-capable | Exact CLI allowlist excludes REST issue operations and mutation surfaces; use least-privilege account/client | The token itself may have broader server rights, so profile/client review remains required |
+| A privileged account makes the CLI accidentally write-capable | Exact CLI allowlist excludes REST issue operations and mutation surfaces; operator configures a least-privilege account/client and exact expected-account binding | `users/me` cannot prove all server permissions; a broad account/client is a deployment-policy failure, not a runtime-detectable read-only claim |
 | A bare or mutation-capable MCP endpoint is used for reads | Independent MCP OAuth plus the exact six-tool `tools=` allowlist and host/read-only-account enforcement | `tools=` alone may not reject direct hidden calls; fail closed or use a read-only identity when host enforcement is absent |
 | A user assumes CLI OAuth logs in Codex/Claude | Document distinct OAuth sessions and prohibit credential bridging | Agent must start the MCP host's own OAuth flow |
 | Migration moves, deletes, or collides with an existing Keychain item | No installer migration; signed old/new spike with explicit operator command and source-collision cases | Any ambiguity, cancellation, interruption, or rollback fails closed without deletion |
@@ -54,14 +54,19 @@ commands.
 3. CLI OAuth and MCP OAuth never share a token, refresh credential, callback,
    or storage namespace.
 4. Identity-edition profiles admit only exact read capability and allowlisted
-   MCP metadata. Login accepts only its OAuth credential for a read-only
-   YouTrack account; permanent tokens and write-capability source/legacy items
-   are rejected rather than migrated.
+   MCP metadata. The first identity edition accepts OAuth credentials only from
+   its own login flow; permanent tokens and all source/legacy credentials are
+   rejected rather than migrated. A later signed-old/signed-new migration may
+   rebind only a prior identity-edition OAuth item. Least-privilege OAuth
+   client/account configuration remains an operator requirement.
 5. A named instance/account remains explicit. No input, tool output, redirect,
    or profile field may silently switch the selected instance.
 6. Failure to prove signing, notarization, accepted release manifest, profile
    binding, credential storage, or migration state denies the operation without
    emitting secret material.
+7. Skill installation requires cgo-enabled macOS extended-ACL inspection of
+   every root and destination. An unavailable or failed inspection denies the
+   operation; neither the Cask nor a fallback installer can bypass it.
 
 ## Deferred write requirements
 
