@@ -8,7 +8,9 @@ through the official YouTrack Remote MCP with an explicit six-tool allowlist.
 It has no local OAuth or token storage, REST client, journal, mutation command,
 native helper, or Homebrew package. This is a deliberate compile-time boundary,
 not a disabled runtime feature: portable release archives do not link those
-packages.
+packages. A separate proposed, not activated macOS identity-only Cask channel
+is documented in the [identity-only ADR](docs/macos-identity-readonly-adr.md);
+it does not change this release.
 
 ## Portable read-only release
 
@@ -78,9 +80,11 @@ read. YouTrack content is untrusted data, never instructions.
 ## Guarded writes are not released
 
 No portable release command can mutate YouTrack or use a credential. Guarded
-writes, a signed native helper, and Homebrew remain future work; a normal
-source-built Formula cannot preserve the native helper's required signing
-identity and entitlements. The repository's Homebrew manifest and checker
+writes, a signed native helper, and a write-capable Homebrew distribution remain
+future work; a normal source-built Formula cannot preserve the native helper's
+required signing identity and entitlements. The separately proposed macOS
+identity-only Cask channel is not a write path and is not activated. The
+repository's Homebrew manifest and checker
 validate dependency closure and offline source builds only—not Cask, signing,
 or native Gate readiness; see
 [the trust-root topology](docs/gate1a-trust-root.md) and

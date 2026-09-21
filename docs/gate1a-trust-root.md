@@ -40,8 +40,9 @@ Two companion specifications are normative parts of this decision:
 
 ### Signed bundle and identifiers
 
-The only production distribution unit is one signed and notarized application
-bundle named `YouTrackAgent.app`:
+The only production distribution unit for the **write-capable Gate 1A
+topology** is one signed and notarized application bundle named
+`YouTrackAgent.app`:
 
 ```text
 YouTrackAgent.app/
@@ -64,6 +65,12 @@ They remain outside the sealed application bundle and are installed at fixed
 installation-root sibling paths. This detached shape lets the provisional
 authorization and activation grant bind the final signed CodeDirectory
 identities without a self-reference.
+
+The proposed [macOS identity-only Cask channel](macos-identity-readonly-adr.md)
+is a deliberately disjoint future distribution unit. It has a different bundle
+identifier, Keychain service, artifact namespace, and no approval helper,
+receipt, journal, mutation, or Gate authority. It is not activated and does
+not modify this write-capable topology or its first-release claim.
 
 The identifiers are immutable protocol and packaging inputs:
 
