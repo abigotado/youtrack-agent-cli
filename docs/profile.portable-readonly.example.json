@@ -1,0 +1,19 @@
+{
+  "name": "work",
+  "service_url": "https://example.youtrack.cloud",
+  "rest_base_url": "https://example.youtrack.cloud/api",
+  "mcp_url": "https://example.youtrack.cloud/mcp?tools=get_current_user,search_issues,get_issue,get_issue_comments,get_project,get_issue_fields_schema&enableToolOutputSchema=true",
+  "oauth": {
+    "issuer_url": "https://example.myjetbrains.com",
+    "authorization_url": "https://example.myjetbrains.com/api/rest/oauth2/auth",
+    "token_url": "https://example.myjetbrains.com/api/rest/oauth2/token",
+    "client_id": "replace-with-public-client-id",
+    "scopes": ["YouTrack"],
+    "redirect_uri": "http://127.0.0.1:18987/oauth/callback"
+  },
+  "expected_account_id": "1-2",
+  "expected_login": "alice",
+  "capabilities": ["read"],
+  "executor": "rest-best-effort",
+  "assurance": "best-effort"
+}

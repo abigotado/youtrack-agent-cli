@@ -1,21 +1,20 @@
-//go:build !portable_readonly
+//go:build portable_readonly
 
-// Command youtrack-agent-cli reads YouTrack Cloud through a stable machine
-// contract.
+// Command youtrack-agent-cli is the portable Remote-MCP-only edition.
 package main
 
 import (
 	"io"
 	"os"
 
-	"github.com/abigotado/youtrack-agent-cli/internal/cli"
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/output"
+	"github.com/abigotado/youtrack-agent-cli/internal/readonlycli"
 )
 
 func main() {
 	os.Exit(int(runWithRecovery(
-		func() errx.Code { return cli.Execute(os.Args[1:]) },
+		func() errx.Code { return readonlycli.Execute(os.Args[1:]) },
 		os.Stdout,
 	)))
 }

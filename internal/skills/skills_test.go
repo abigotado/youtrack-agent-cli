@@ -1,3 +1,5 @@
+//go:build !portable_readonly
+
 package skills
 
 import (

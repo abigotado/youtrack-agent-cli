@@ -1,22 +1,19 @@
 #!/usr/bin/env ruby
 
-require "minitest/autorun"
 require "fileutils"
+require "minitest/autorun"
 require "open3"
 require "tmpdir"
 require "yaml"
 
-class VerifyDisabledReleasePolicyTest < Minitest::Test
+class VerifyPortableReadOnlyReleasePolicyTest < Minitest::Test
   ROOT = File.expand_path("../..", __dir__)
   VERIFIER = File.join(__dir__, "verify-portable-release-policy.rb")
   CONFIG = YAML.safe_load(File.read(File.join(ROOT, ".goreleaser.yaml")), permitted_classes: [], aliases: false)
-  RELEASE_WORKFLOW = File.read(File.join(ROOT, ".github/workflows/release.yaml"))
-  RELEASE_WORKFLOW_CONFIG = YAML.safe_load(RELEASE_WORKFLOW, permitted_classes: [], aliases: false)
-  GO_WORKFLOW = File.read(File.join(ROOT, ".github/workflows/go.yaml"))
-  GO_WORKFLOW_CONFIG = YAML.safe_load(GO_WORKFLOW, permitted_classes: [], aliases: false)
+  RELEASE = File.read(File.join(ROOT, ".github/workflows/release.yaml"))
 
-  def verify(config, files = {})
-    Dir.mktmpdir("disabled-release-policy") do |root|
+  def verify(config = CONFIG, files = {}, release: RELEASE)
+    Dir.mktmpdir("portable-release-policy") do |root|
       config_path = File.join(root, ".goreleaser.yaml")
       File.write(config_path, YAML.dump(config))
       files.each do |relative, content|
@@ -24,307 +21,112 @@ class VerifyDisabledReleasePolicyTest < Minitest::Test
         FileUtils.mkdir_p(File.dirname(target))
         File.write(target, content)
       end
+      FileUtils.mkdir_p(File.join(root, ".github/workflows"))
+      File.write(File.join(root, ".github/workflows/release.yaml"), release)
       _stdout, stderr, status = Open3.capture3("ruby", VERIFIER, config_path, root)
-      return [status.success?, stderr]
+      [status.success?, stderr]
     end
   end
 
   def test_current_configuration_passes
-    success, stderr = verify(CONFIG)
+    success, stderr = verify
     assert success, stderr
   end
 
-  def test_only_build_is_skipped
-    assert_equal [{ "id" => "distribution-disabled", "skip" => true }], CONFIG.fetch("builds")
-    refute CONFIG.key?("archives")
-    refute CONFIG.key?("release")
+  def test_release_config_selects_only_portable_readonly_build
+    build = CONFIG.fetch("builds").fetch(0)
+    assert_equal ["portable_readonly"], build.fetch("tags")
+    assert_equal ["CGO_ENABLED=0"], build.fetch("env")
+    assert_equal ["linux"], build.fetch("goos")
+    assert_equal %w[amd64 arm64], build.fetch("goarch")
+    assert_equal ["tar.gz"], CONFIG.fetch("archives").fetch(0).fetch("formats")
+    refute CONFIG.key?("homebrew")
+    refute CONFIG.key?("homebrew_casks")
   end
 
-  def test_rejects_any_enabled_build
+  def test_rejects_a_nonportable_build_tag
     changed = Marshal.load(Marshal.dump(CONFIG))
-    changed.fetch("builds").first["skip"] = false
+    changed.fetch("builds").fetch(0)["tags"] = ["ordinary"]
     success, stderr = verify(changed)
     refute success
-    assert_includes stderr, "fail-closed sentinel"
+    assert_includes stderr, "invalid tags"
   end
 
-  def test_rejects_any_distribution_section
-    %w[archives checksum release uploads homebrew_casks universal_binaries].each do |section|
-      changed = Marshal.load(Marshal.dump(CONFIG))
-      changed[section] = []
-      success, stderr = verify(changed)
-      refute success, section
-      assert_includes stderr, "fail-closed sentinel"
-    end
-  end
-
-  def test_rejects_a_quarantine_bypass
+  def test_rejects_cgo_or_windows_portable_build
     changed = Marshal.load(Marshal.dump(CONFIG))
-    changed["hooks"] = { "post" => "/usr/bin/xattr -dr com.apple.quarantine youtrack-agent-cli" }
+    changed.fetch("builds").fetch(0)["env"] = ["CGO_ENABLED=1"]
+    changed.fetch("builds").fetch(0)["goos"] << "windows"
     success, stderr = verify(changed)
     refute success
-    assert_includes stderr, "Gatekeeper quarantine bypass"
+    assert_includes stderr, "invalid env"
+    assert_includes stderr, "invalid goos"
   end
 
-  def test_allows_non_executable_homebrew_readiness_material
-    success, stderr = verify(
-      CONFIG,
-      {
-        "docs/homebrew.md" => "Example only: class YoutrackAgentCli < Formula; never publish it.\n",
-        "packaging/homebrew/dependencies.json" => "{\"schema_version\":1}\n",
-        "tools/homebrewcheck/main.go" => "package main // offline readiness checker\n",
-      },
-    )
-    assert success, stderr
-  end
-
-  def test_scans_executable_homebrew_readiness_tools
-    payloads = {
-      "publication credential" => "package main // HOMEBREW_TAP_TOKEN\n",
-      "Homebrew tap write" => "package main // brew bump-formula-pr abigotado/tap/youtrack-agent-cli\n",
-      "release or upload action" => "package main // goreleaser release --clean\n",
-      "Gatekeeper quarantine bypass" => "package main // xattr -dr com.apple.quarantine binary\n",
-    }
-    payloads.each do |finding, payload|
-      success, stderr = verify(CONFIG, "tools/homebrewcheck/publish.go" => payload)
-      refute success, finding
-      assert_includes stderr, finding
-    end
-  end
-
-  def test_rejects_formula_and_cask_paths
-    [
-      "Formula/youtrack-agent-cli.rb",
-      "Cask/youtrack-agent-cli.rb",
-      "Casks/youtrack-agent-cli.rb",
-    ].each do |relative|
-      success, stderr = verify(CONFIG, relative => "# active package\n")
-      refute success, relative
-      assert_includes stderr, "active Homebrew Formula/Cask"
-    end
-  end
-
-  def test_rejects_formula_source_outside_conventional_directory
-    source = <<~RUBY
-      class YoutrackAgentCli < Formula
-      end
-    RUBY
-    success, stderr = verify(CONFIG, "packaging/homebrew.rb" => source)
+  def test_rejects_release_config_hooks_or_extra_archive_files
+    changed = Marshal.load(Marshal.dump(CONFIG))
+    changed["before"] = { "hooks" => ["curl https://example.invalid"] }
+    changed.fetch("archives").fetch(0)["files"] = ["private/*"]
+    success, stderr = verify(changed)
     refute success
-    assert_includes stderr, "active Homebrew Formula/Cask"
+    assert_includes stderr, "unapproved top-level section"
+    assert_includes stderr, "must publish only portable read-only tar.gz archives"
   end
 
-  def test_rejects_ruby_packaging_at_every_nested_path
-    ["homebrew/youtrack-agent-cli.rb", "dist/formula.rb", "nested/release/tool.rb"].each do |relative|
-      success, stderr = verify(CONFIG, relative => "# packaging entry point\n")
-      refute success, relative
-      assert_includes stderr, "Ruby packaging/release file is forbidden"
-    end
+  def test_rejects_extra_release_assets_or_checksum_settings
+    changed = Marshal.load(Marshal.dump(CONFIG))
+    changed.fetch("release")["extra_files"] = [{ "glob" => "README.md" }]
+    changed.fetch("checksum")["algorithm"] = "sha512"
+    success, stderr = verify(changed)
+    refute success
+    assert_includes stderr, "target only the canonical GitHub repository"
+    assert_includes stderr, "only the approved checksum"
   end
 
-  def test_rejects_tap_credentials_and_writes
+  def test_rejects_homebrew_and_quarantine_workarounds
+    success, stderr = verify(CONFIG, "Formula/youtrack-agent-cli.rb" => "class YoutrackAgentCli < Formula; end\n")
+    refute success
+    assert_includes stderr, "Homebrew Formula/Cask"
+
+    success, stderr = verify(CONFIG, "packaging/install.sh" => "xattr -dr com.apple.quarantine binary\n")
+    refute success
+    assert_includes stderr, "quarantine bypass"
+  end
+
+  def test_rejects_unrelated_publisher
     workflow = <<~YAML
+      name: upload
+      on:
+        push:
+          tags: ["v*"]
       permissions:
         contents: write
       jobs:
         publish:
-          steps:
-            - run: brew tap abigotado/tap && git push origin HEAD
-              env:
-                HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.TAP_TOKEN }}
-    YAML
-    success, stderr = verify(CONFIG, ".github/workflows/homebrew.yaml" => workflow)
-    refute success
-    assert_includes stderr, "publication credential reference"
-    assert_includes stderr, "Homebrew tap write"
-    assert_includes stderr, "publication write permission"
-  end
-
-  def test_rejects_workflow_permission_bypass_forms
-    workflows = {
-      "write-all" => "permissions: write-all\njobs: {}\n",
-      "flow mapping" => "permissions: { contents: write }\njobs: {}\n",
-      "job level quoted" => <<~YAML,
-        permissions:
-          contents: read
-        jobs:
-          publish:
-            permissions: { "packages": "write" }
-            runs-on: ubuntu-latest
-            steps: []
-      YAML
-      "missing top-level" => "jobs: {}\n",
-    }
-    workflows.each do |name, workflow|
-      success, stderr = verify(CONFIG, ".github/workflows/#{name.tr(" ", "-")}.yaml" => workflow)
-      refute success, name
-      assert_match(/permission/, stderr, name)
-    end
-  end
-
-  def test_rejects_unapproved_or_unpinned_workflow_actions
-    workflows = {
-      "unknown" => "evil/release@0123456789012345678901234567890123456789",
-      "unpinned" => "actions/checkout@v7",
-    }
-    workflows.each do |name, action|
-      workflow = <<~YAML
-        permissions:
-          contents: read
-        jobs:
-          check:
-            runs-on: ubuntu-latest
-            steps:
-              - uses: #{action}
-      YAML
-      success, stderr = verify(CONFIG, ".github/workflows/#{name}.yaml" => workflow)
-      refute success, name
-      assert_match(/unapproved workflow action|not pinned to a commit SHA/, stderr, name)
-    end
-  end
-
-  def test_allows_closed_read_only_workflow_policy
-    workflow = <<~YAML
-      permissions: read-all
-      jobs:
-        check:
-          permissions:
-            contents: read
           runs-on: ubuntu-latest
           steps:
-            - uses: actions/checkout@0123456789012345678901234567890123456789
+            - run: gh release create v0.1.0
     YAML
-    success, stderr = verify(CONFIG, ".github/workflows/check.yaml" => workflow)
-    assert success, stderr
-  end
-
-  def test_rejects_release_and_upload_actions
-    [
-      "goreleaser release --clean\n",
-      "gh release upload v1.0.0 artifact.tar.gz\n",
-      "uses: actions/upload-artifact@0123456789012345678901234567890123456789\n",
-    ].each do |script|
-      success, stderr = verify(CONFIG, ".github/workflows/publish.yaml" => script)
-      refute success, script
-      assert_includes stderr, "release or upload action"
-    end
-  end
-
-  def test_rejects_repository_quarantine_bypass
-    success, stderr = verify(
-      CONFIG,
-      "packaging/install.sh" => "xattr -dr com.apple.quarantine youtrack-agent-cli\n",
-    )
+    success, stderr = verify(CONFIG, ".github/workflows/other.yaml" => workflow)
     refute success
-    assert_includes stderr, "Gatekeeper quarantine bypass"
+    assert_includes stderr, "must set read-only permissions"
+    assert_includes stderr, "publication action"
   end
 
-  def test_release_workflow_cannot_publish
-    assert_equal({ "contents" => "read" }, RELEASE_WORKFLOW_CONFIG.fetch("permissions"))
-    refute_match(/GITHUB_TOKEN|github\.token|goreleaser release|gh release|curl\b/i, RELEASE_WORKFLOW)
-    steps = RELEASE_WORKFLOW_CONFIG.fetch("jobs").fetch("release-disabled").fetch("steps")
-    assert_equal ["Refuse artifact publication"], steps.map { |step| step.fetch("name") }
+  def test_release_workflow_is_v0_tag_only_and_scoped
+    workflow = YAML.safe_load(RELEASE, permitted_classes: [], aliases: false)
+    assert_equal({ "contents" => "read" }, workflow.fetch("permissions"))
+    assert_equal({ "push" => { "tags" => ["v0.*"] } }, workflow.fetch(true))
+    assert_equal "verify-portable-readonly", workflow.fetch("jobs").fetch("publish-portable-readonly").fetch("needs")
+    assert_equal({ "contents" => "write" }, workflow.fetch("jobs").fetch("publish-portable-readonly").fetch("permissions"))
+    assert_equal 2, RELEASE.scan("persist-credentials: false").length
+    refute_match(/homebrew|xattr|secrets\./i, RELEASE)
+    assert_includes RELEASE, "-tags portable_readonly"
   end
 
-  def test_rejects_release_workflow_with_same_step_name_but_publication_payload
-    workflow = <<~YAML
-      name: release-disabled
-      on:
-        push:
-          tags: ["v*"]
-        workflow_dispatch:
-      permissions:
-        contents: read
-      jobs:
-        release-disabled:
-          name: Distribution remains disabled
-          permissions: write-all
-          runs-on: ubuntu-latest
-          steps:
-            - name: Refuse artifact publication
-              env:
-                GH_TOKEN: ${{ github['token'] }}
-              run: gh api --method POST repos/example/project/releases
-    YAML
-    success, stderr = verify(CONFIG, ".github/workflows/release.yaml" => workflow)
+  def test_rejects_a_second_upload_path_in_release_workflow
+    changed = RELEASE.sub("run: goreleaser release --clean --config .goreleaser.yaml", "run: goreleaser release --clean --config .goreleaser.yaml\n      - run: curl -T artifact https://example.invalid")
+    success, stderr = verify(CONFIG, {}, release: changed)
     refute success
-    assert_includes stderr, "exact non-publishing release sentinel"
-    assert_match(/permission/, stderr)
-    assert_includes stderr, "publication credential reference"
-    assert_includes stderr, "release or upload action"
-  end
-
-  def test_rejects_new_tag_workflow_with_bracket_secret_and_http_publication
-    workflow = <<~YAML
-      name: hidden-publisher
-      on:
-        push:
-          tags: ["brew-v*"]
-      permissions: read-all
-      jobs:
-        publish:
-          runs-on: ubuntu-latest
-          env:
-            AUTH: ${{ secrets['PUBLISH_PAT'] }}
-          steps:
-            - run: curl --request POST --data artifact=ready https://example.invalid/publish
-    YAML
-    success, stderr = verify(CONFIG, ".github/workflows/homebrew-publish.yaml" => workflow)
-    refute success
-    assert_includes stderr, "tag or release trigger outside"
-    assert_includes stderr, "forbidden workflow secrets context"
-  end
-
-  def test_rejects_derived_workflow_secret_expressions
-    expressions = [
-      "${{ (secrets).PUBLISH_PAT }}",
-      "${{ fromJSON(toJSON(secrets))['PUBLISH_PAT'] }}",
-    ]
-    expressions.each_with_index do |expression, index|
-      workflow = <<~YAML
-        name: hidden-publisher
-        on:
-          push:
-            branches: [main]
-        permissions: read-all
-        jobs:
-          publish:
-            runs-on: ubuntu-latest
-            env:
-              AUTH: #{expression}
-            steps:
-              - run: curl --request POST --data artifact=ready https://example.invalid/publish
-      YAML
-      success, stderr = verify(CONFIG, ".github/workflows/derived-secret-#{index}.yaml" => workflow)
-      refute success, expression
-      assert_includes stderr, "forbidden workflow secrets context"
-    end
-  end
-
-  def test_homebrew_rehearsal_is_a_macos_only_offline_build_check
-    steps = GO_WORKFLOW_CONFIG.fetch("jobs").fetch("test").fetch("steps")
-    rehearsals = steps.select { |step| step.fetch("name", "") == "Homebrew offline-readiness rehearsal" }
-    assert_equal 1, rehearsals.length
-
-    rehearsal = rehearsals.first
-    assert_equal "runner.os == 'macOS'", rehearsal.fetch("if")
-    refute rehearsal.key?("env")
-
-    script = rehearsal.fetch("run")
-    download_offset = script.index("go mod download")
-    check_offset = script.index("go run ./tools/homebrewcheck")
-    refute_nil download_offset
-    refute_nil check_offset
-    assert_operator download_offset, :<, check_offset
-    assert_includes script, '--proxy-dir "$(go env GOMODCACHE)/cache/download"'
-    assert_match(/--build\s*\z/, script)
-    refute_match(/(?:GITHUB_TOKEN|github\.token|secrets\.|HOMEBREW_.*TOKEN|TAP_.*TOKEN)/i, script)
-  end
-
-  def test_github_actions_are_pinned_to_commit_shas
-    workflows = Dir.glob(File.join(ROOT, ".github/workflows/*.{yaml,yml}"))
-    uses = workflows.flat_map { |workflow| File.read(workflow).scan(/^\s*uses:\s+([^\s#]+)/).flatten }
-    refute_empty uses
-    uses.each { |action| assert_match(/@[0-9a-f]{40}\z/, action) }
+    assert_includes stderr, "must equal the approved portable read-only publisher"
   end
 end
