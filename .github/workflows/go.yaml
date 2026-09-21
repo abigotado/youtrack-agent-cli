@@ -113,10 +113,18 @@ jobs:
             printf 'expected:\n%s\nactual:\n%s\n' "${EXPECTED_INTERNAL_DEPS}" "${ACTUAL_INTERNAL_DEPS}"
             exit 1
           fi
-          if go list -tags "${IDENTITY_TAG}" -deps ./cmd/youtrack-agent-cli | grep -Fxq 'net/http'; then
-            echo "::error::identity binary links net/http"
-            exit 1
-          fi
+          # Cobra/pflag transitively imports net for optional IP flag types,
+          # even though this command never registers one. Forbid network
+          # imports at the owned-package boundary so no identity package can
+          # add transport capability through that dependency.
+          for INTERNAL_PACKAGE in ${EXPECTED_INTERNAL_DEPS}; do
+            for FORBIDDEN_IMPORT in net net/http crypto/tls; do
+              if go list -tags "${IDENTITY_TAG}" -f '{{join .Imports "\n"}}' "${INTERNAL_PACKAGE}" | grep -Fxq "${FORBIDDEN_IMPORT}"; then
+                echo "::error::identity package ${INTERNAL_PACKAGE} directly imports ${FORBIDDEN_IMPORT}"
+                exit 1
+              fi
+            done
+          done
           if otool -L "${IDENTITY_BINARY}" | grep -Fq '/Security.framework/'; then
             echo "::error::identity binary links Security.framework"
             exit 1
