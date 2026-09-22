@@ -9,12 +9,15 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -44,6 +47,7 @@ const (
 	TokenRequestRejected
 	TokenResponseInvalid
 	TokenRedirectRefused
+	TokenTransportRejected
 )
 
 // TokenFailure carries only a fixed category and the HTTP status, when one
@@ -68,6 +72,8 @@ func (failure *TokenFailure) Error() string {
 		message = "OAuth token response invalid"
 	case TokenRedirectRefused:
 		message = "OAuth token redirect refused"
+	case TokenTransportRejected:
+		message = "OAuth token transport configuration rejected"
 	}
 	if failure.status != 0 {
 		return fmt.Sprintf("%s (HTTP %d)", message, failure.status)
@@ -226,8 +232,30 @@ func (client *Client) Refresh(ctx context.Context, current TokenSet) (TokenSet, 
 	if current.RefreshToken == "" || len(current.RefreshToken) > 8192 || !validGrantedScopes(current.Scopes, client.config.Scopes) {
 		return TokenSet{}, ErrTokenExchange
 	}
+	if err := ctx.Err(); err != nil {
+		return TokenSet{}, err
+	}
 	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {current.RefreshToken}, "client_id": {client.config.ClientID}}
-	return client.request(ctx, form, current.RefreshToken, current.Scopes)
+	tokens, err := client.request(ctx, form, current.RefreshToken, current.Scopes)
+	if err != nil {
+		// A failed refresh may already have rotated the server-side token. Keep
+		// the published non-retryable recovery until a durable refresh fence exists.
+		return TokenSet{}, ErrTokenExchange
+	}
+	return tokens, nil
+}
+
+func permanentTokenTransportError(err error) bool {
+	var verification *tls.CertificateVerificationError
+	var invalidCertificate x509.CertificateInvalidError
+	var unknownAuthority x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var systemRoots x509.SystemRootsError
+	var dns *net.DNSError
+	return errors.As(err, &verification) || errors.As(err, &invalidCertificate) ||
+		errors.As(err, &unknownAuthority) || errors.As(err, &hostname) ||
+		errors.As(err, &systemRoots) || (errors.As(err, &dns) && dns.IsNotFound) ||
+		errors.Is(err, http.ErrSchemeMismatch)
 }
 
 func (client *Client) request(ctx context.Context, form url.Values, previousRefresh string, allowedScopes []string) (TokenSet, error) {
@@ -248,6 +276,9 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 				status = response.StatusCode
 			}
 			return TokenSet{}, tokenFailure(TokenRedirectRefused, status)
+		}
+		if permanentTokenTransportError(err) {
+			return TokenSet{}, tokenFailure(TokenTransportRejected, 0)
 		}
 		return TokenSet{}, tokenFailure(TokenEndpointUnavailable, 0)
 	}

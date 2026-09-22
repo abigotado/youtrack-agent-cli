@@ -3,7 +3,9 @@
 ## Standard macOS Formula
 
 The standard macOS distribution channel for the existing CLI is a source-built
-Formula in the maintained tap:
+Formula in the maintained tap. A merged source change reaches Homebrew only
+after its own release tag and a merged tap update; check `version` before
+relying on newly documented behavior:
 
 ```bash
 brew install abigotado/tap/youtrack-agent-cli
@@ -29,22 +31,33 @@ its SHA-256. A Formula update never builds from a mutable branch.
 ### OAuth error-code transition in v0.2.0
 
 The `v0.2.0` standard CLI changes the machine recovery classification for
-OAuth token exchange and refresh failures. The JSON envelope remains `v:1`,
+authorization-code token exchange failures. The JSON envelope remains `v:1`,
 but callers that branch on the published `OAUTH_TOKEN_EXCHANGE_FAILED` code
 must handle these cases explicitly. Previously all of them exited with 5:
 
 | Token failure | `error.code` in v0.2.0 | Exit |
 | --- | --- | --- |
-| Network interruption, HTTP 408/429/5xx, or interrupted HTTP 200 body | `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 (retryable) |
+| Network interruption, HTTP 408/429/5xx, or interrupted HTTP 200 body | `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 (restart login with a fresh code) |
+| Invalid TLS trust, missing DNS name, or scheme mismatch | `OAUTH_TOKEN_TRANSPORT_REJECTED` | 5 (check endpoint and trust) |
 | Other HTTP 4xx rejection | `OAUTH_TOKEN_REQUEST_REJECTED` | 5 (auth) |
 | Malformed HTTP 200, unexpected 1xx, or non-200 2xx | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 (auth) |
 | HTTP 3xx redirect | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 (auth) |
-| Invalid local exchange/refresh input | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 (auth) |
+| Refresh request failure after possible dispatch, or invalid local exchange input | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 (auth) |
+
+Refresh request failures after possible dispatch keep the published
+`OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5 recovery in this release. A cancellation
+detected before dispatch remains a normal cancellation. Do not automatically
+retry an ambiguous refresh:
+the server may have rotated the old token before the response was lost.
+A durable refresh fence across CLI processes is required before changing that
+behavior; this release does not provide one. Start a fresh login if refresh
+fails. The exchange-specific failure codes are also listed in the
+[machine-error reference](oauth-errors.md).
 
 Only the fixed category and numeric HTTP status appear in an error. The token
 endpoint response, OAuth code, verifier, and tokens remain private. Do not
 retry a rejected or invalid-response request unchanged. A failed first login
-stores no new credential; retrying a login starts a fresh browser authorization.
+stores no new credential; restarting login starts a fresh browser authorization.
 
 ### Authentication and upgrades
 

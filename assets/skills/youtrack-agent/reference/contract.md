@@ -23,6 +23,28 @@ prompts, warnings, and logs go to stderr. `error.code` is a stable
 `SCREAMING_SNAKE_CASE` value; add error detail there before considering a new
 process status.
 
+## OAuth token errors (standard macOS CLI, v0.2.0)
+
+Authorization-code exchange failures previously used
+`OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5. The JSON envelope remains v1, but
+the following recovery codes are a deliberate breaking change.
+
+| `error.code` | Exit | Recovery |
+| --- | ---: | --- |
+| `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 | Back off, then restart login for a fresh authorization code. |
+| `OAUTH_TOKEN_TRANSPORT_REJECTED` | 5 | Check endpoint, DNS, and TLS trust; do not retry unchanged. |
+| `OAUTH_TOKEN_REQUEST_REJECTED` | 5 | Check the OAuth client and profile, then start a new login. |
+| `OAUTH_TOKEN_RESPONSE_INVALID` | 5 | Report a token-response compatibility problem; do not retry unchanged. |
+| `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 | Check the pinned token endpoint; never follow the redirect. |
+| `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Invalid local exchange input or a refresh request failure after possible dispatch; start a new login. |
+
+Refresh request failures after possible dispatch keep the published code
+and exit in v0.2.0. Cancellation detected before dispatch retains normal
+cancellation recovery. A failed
+refresh must not be retried automatically: the server may have rotated
+the token before its response was lost. A durable cross-process refresh
+fence is deferred. See the [detailed OAuth recovery guide](https://github.com/abigotado/youtrack-agent-cli/blob/main/docs/oauth-errors.md).
+
 ## JSON response recovery
 
 Apply this grammar in order:

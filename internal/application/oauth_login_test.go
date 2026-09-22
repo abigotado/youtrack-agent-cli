@@ -231,3 +231,30 @@ func TestRefreshPersistsScopeWithoutReExpansion(t *testing.T) {
 		})
 	}
 }
+
+func TestFailedRefreshKeepsStoredCredentialAndRequiresLogin(t *testing.T) {
+	selected := oauthApplicationProfile(t, true)
+	bound, err := auth.BindCredential(auth.Credential{
+		Kind: auth.CredentialOAuth, AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer",
+		AccessTokenExpiresAt: time.Unix(1_700_000_000, 0).UTC(), OAuthScopes: []string{"beta"},
+	}, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &oauthCredentialStore{value: bound, exists: true}
+	requests := 0
+	transport := oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader("server-secret-sentinel")), Header: make(http.Header)}, nil
+	})
+	service := oauthApplicationService(t, selected, store, transport)
+	service.Now = func() time.Time { return time.Unix(1_700_000_100, 0).UTC() }
+
+	_, err = service.AuthStatus(t.Context(), selected.Name, true)
+	if err != oauth.ErrTokenExchange {
+		t.Fatalf("refresh error=%v, want re-login requirement", err)
+	}
+	if requests != 1 || store.saveCalls != 0 || store.value.RefreshToken != "old-refresh" {
+		t.Fatalf("refresh requests=%d saves=%d credential changed=%t", requests, store.saveCalls, store.value.RefreshToken != "old-refresh")
+	}
+}

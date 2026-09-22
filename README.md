@@ -50,7 +50,9 @@ envelopes, errors, and recovery.
 ## macOS Homebrew Formula
 
 The standard macOS distribution channel is a source-built Formula in the
-maintained tap:
+maintained tap. A merged source change reaches Homebrew only after its own
+release tag and a merged tap update; check `version` before relying on newly
+documented behavior:
 
 ```bash
 brew install abigotado/tap/youtrack-agent-cli

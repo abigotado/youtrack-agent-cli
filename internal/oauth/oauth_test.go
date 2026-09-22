@@ -2,11 +2,14 @@ package oauth
 
 import (
 	"bytes"
+	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -229,7 +232,7 @@ func tokenGrantError(t *testing.T, refresh bool, transport http.RoundTripper) er
 	return err
 }
 
-func TestTokenFailuresClassifyBothGrantsWithoutLeakingResponse(t *testing.T) {
+func TestTokenFailuresClassifyExchangeAndKeepRefreshNonRetryable(t *testing.T) {
 	const sentinel = "server-secret-sentinel"
 	tests := []struct {
 		name       string
@@ -237,11 +240,14 @@ func TestTokenFailuresClassifyBothGrantsWithoutLeakingResponse(t *testing.T) {
 		body       string
 		location   string
 		bodyError  bool
-		transport  bool
+		transport  error
 		want       TokenFailureCategory
 		wantStatus int
 	}{
-		{name: "transport", transport: true, want: TokenEndpointUnavailable},
+		{name: "transport", transport: errors.New("transport-secret-sentinel"), want: TokenEndpointUnavailable},
+		{name: "unknown authority", transport: x509.UnknownAuthorityError{}, want: TokenTransportRejected},
+		{name: "DNS name not found", transport: &net.DNSError{Name: "dns-secret-sentinel", IsNotFound: true}, want: TokenTransportRejected},
+		{name: "scheme mismatch", transport: http.ErrSchemeMismatch, want: TokenTransportRejected},
 		{name: "timeout status", status: http.StatusRequestTimeout, body: sentinel, want: TokenEndpointUnavailable, wantStatus: http.StatusRequestTimeout},
 		{name: "rate limit", status: http.StatusTooManyRequests, body: sentinel, want: TokenEndpointUnavailable, wantStatus: http.StatusTooManyRequests},
 		{name: "server error", status: http.StatusServiceUnavailable, body: sentinel, want: TokenEndpointUnavailable, wantStatus: http.StatusServiceUnavailable},
@@ -268,8 +274,8 @@ func TestTokenFailuresClassifyBothGrantsWithoutLeakingResponse(t *testing.T) {
 					calls := 0
 					transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
 						calls++
-						if test.transport {
-							return nil, errors.New("transport-secret-sentinel")
+						if test.transport != nil {
+							return nil, test.transport
 						}
 						var body io.ReadCloser = io.NopCloser(strings.NewReader(test.body))
 						if test.bodyError {
@@ -286,7 +292,11 @@ func TestTokenFailuresClassifyBothGrantsWithoutLeakingResponse(t *testing.T) {
 						t.Fatalf("error does not preserve ErrTokenExchange: %v", err)
 					}
 					var failure *TokenFailure
-					if !errors.As(err, &failure) || failure.Category() != test.want || failure.HTTPStatus() != test.wantStatus {
+					if grant.refresh {
+						if errors.As(err, &failure) || err != ErrTokenExchange {
+							t.Fatalf("refresh failure=%v, want legacy non-retryable sentinel", err)
+						}
+					} else if !errors.As(err, &failure) || failure.Category() != test.want || failure.HTTPStatus() != test.wantStatus {
 						t.Fatalf("failure=%#v, want category=%v status=%d", failure, test.want, test.wantStatus)
 					}
 					if calls != 1 {
@@ -328,13 +338,34 @@ func TestTokenResponseReadBoundAppliesToBothGrants(t *testing.T) {
 			})
 			err := tokenGrantError(t, refresh, transport)
 			var failure *TokenFailure
-			if !errors.As(err, &failure) || failure.Category() != TokenResponseInvalid || failure.HTTPStatus() != http.StatusOK {
+			if refresh {
+				if err != ErrTokenExchange || errors.As(err, &failure) {
+					t.Fatalf("refresh failure=%v, want legacy non-retryable sentinel", err)
+				}
+			} else if !errors.As(err, &failure) || failure.Category() != TokenResponseInvalid || failure.HTTPStatus() != http.StatusOK {
 				t.Fatalf("failure=%#v", failure)
 			}
 			if body.read != maxTokenResponseBytes+1 {
 				t.Fatalf("read %d bytes, want bounded read of %d", body.read, maxTokenResponseBytes+1)
 			}
 		})
+	}
+}
+
+func TestRefreshCancellationBeforeDispatchKeepsCancellation(t *testing.T) {
+	calls := 0
+	client, err := NewClient(testConfig(), roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("unexpected refresh dispatch")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = client.Refresh(ctx, TokenSet{RefreshToken: "refresh", Scopes: []string{"YouTrack"}})
+	if !errors.Is(err, context.Canceled) || calls != 0 {
+		t.Fatalf("pre-dispatch cancellation error=%v requests=%d", err, calls)
 	}
 }
 
