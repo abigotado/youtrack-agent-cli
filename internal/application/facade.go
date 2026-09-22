@@ -340,6 +340,7 @@ func TranslateError(err error, name string) error {
 	if errors.As(err, &typed) {
 		return err
 	}
+	var tokenFailure *oauth.TokenFailure
 	switch {
 	case errors.Is(err, auth.ErrLogoutIncomplete):
 		return errx.Conflict("LOGOUT_INCOMPLETE", "credential removal succeeded but profile %q metadata could not be removed", name).
@@ -388,6 +389,22 @@ func TranslateError(err error, name string) error {
 		return errx.Auth("OAUTH_CALLBACK_INVALID", "OAuth callback validation failed")
 	case errors.Is(err, oauth.ErrAuthorizationDenied):
 		return errx.Auth("OAUTH_AUTHORIZATION_DENIED", "YouTrack authorization was denied")
+	case errors.As(err, &tokenFailure):
+		switch tokenFailure.Category() {
+		case oauth.TokenEndpointUnavailable:
+			return errx.Retryable("OAUTH_TOKEN_ENDPOINT_UNAVAILABLE", 0, "%s", tokenFailure.Error()).
+				WithHint("back off and retry OAuth login or refresh")
+		case oauth.TokenRequestRejected:
+			return errx.Auth("OAUTH_TOKEN_REQUEST_REJECTED", "%s", tokenFailure.Error()).
+				WithHint("check OAuth client settings and profile, then start a new login")
+		case oauth.TokenResponseInvalid:
+			return errx.Auth("OAUTH_TOKEN_RESPONSE_INVALID", "%s", tokenFailure.Error()).
+				WithHint("check YouTrack OAuth token response compatibility; do not retry unchanged")
+		case oauth.TokenRedirectRefused:
+			return errx.Auth("OAUTH_TOKEN_REDIRECT_REFUSED", "%s", tokenFailure.Error()).
+				WithHint("check the OAuth token endpoint in the profile; do not follow redirects")
+		}
+		return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "YouTrack OAuth token exchange failed")
 	case errors.Is(err, oauth.ErrTokenExchange):
 		return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "YouTrack OAuth token exchange failed")
 	case errors.Is(err, oauth.ErrInvalidConfig):

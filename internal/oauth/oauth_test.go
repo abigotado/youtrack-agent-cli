@@ -1,10 +1,12 @@
 package oauth
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -188,6 +190,151 @@ func TestTokenResponseIsBoundedAndErrorsAreRedacted(t *testing.T) {
 	_, err = client.Exchange(t.Context(), "code", session.Verifier)
 	if !errors.Is(err, ErrTokenExchange) || strings.Contains(err.Error(), sentinel) {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+type failingTokenBody struct{}
+
+func (failingTokenBody) Read([]byte) (int, error) { return 0, errors.New("body-secret-sentinel") }
+func (failingTokenBody) Close() error             { return nil }
+
+type countedTokenBody struct {
+	reader io.Reader
+	read   int
+}
+
+func (body *countedTokenBody) Read(buffer []byte) (int, error) {
+	count, err := body.reader.Read(buffer)
+	body.read += count
+	return count, err
+}
+
+func (*countedTokenBody) Close() error { return nil }
+
+func tokenGrantError(t *testing.T, refresh bool, transport http.RoundTripper) error {
+	t.Helper()
+	client, err := NewClient(testConfig(), transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refresh {
+		_, err = client.Refresh(t.Context(), TokenSet{AccessToken: "access-secret-sentinel", RefreshToken: "refresh-secret-sentinel", TokenType: "Bearer", Scopes: []string{"YouTrack"}})
+		return err
+	}
+	session, err := NewSession(strings.NewReader(strings.Repeat("v", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Exchange(t.Context(), "code-secret-sentinel", session.Verifier)
+	return err
+}
+
+func TestTokenFailuresClassifyBothGrantsWithoutLeakingResponse(t *testing.T) {
+	const sentinel = "server-secret-sentinel"
+	tests := []struct {
+		name       string
+		status     int
+		body       string
+		location   string
+		bodyError  bool
+		transport  bool
+		want       TokenFailureCategory
+		wantStatus int
+	}{
+		{name: "transport", transport: true, want: TokenEndpointUnavailable},
+		{name: "timeout status", status: http.StatusRequestTimeout, body: sentinel, want: TokenEndpointUnavailable, wantStatus: http.StatusRequestTimeout},
+		{name: "rate limit", status: http.StatusTooManyRequests, body: sentinel, want: TokenEndpointUnavailable, wantStatus: http.StatusTooManyRequests},
+		{name: "server error", status: http.StatusServiceUnavailable, body: sentinel, want: TokenEndpointUnavailable, wantStatus: http.StatusServiceUnavailable},
+		{name: "rejected", status: http.StatusBadRequest, body: sentinel, want: TokenRequestRejected, wantStatus: http.StatusBadRequest},
+		{name: "unauthorized", status: http.StatusUnauthorized, body: sentinel, want: TokenRequestRejected, wantStatus: http.StatusUnauthorized},
+		{name: "forbidden", status: http.StatusForbidden, body: sentinel, want: TokenRequestRejected, wantStatus: http.StatusForbidden},
+		{name: "redirect", status: http.StatusFound, body: sentinel, location: "https://other.example.test/secret-sentinel", want: TokenRedirectRefused, wantStatus: http.StatusFound},
+		{name: "unexpected informational", status: http.StatusProcessing, body: sentinel, want: TokenResponseInvalid, wantStatus: http.StatusProcessing},
+		{name: "unexpected success", status: http.StatusCreated, body: sentinel, want: TokenResponseInvalid, wantStatus: http.StatusCreated},
+		{name: "malformed JSON", status: http.StatusOK, body: `{"access_token":"` + sentinel + `"`, want: TokenResponseInvalid, wantStatus: http.StatusOK},
+		{name: "untrusted expiry", status: http.StatusOK, body: `{"access_token":"access","refresh_token":"refresh","token_type":"Bearer","expires_in":"` + sentinel + `"}`, want: TokenResponseInvalid, wantStatus: http.StatusOK},
+		{name: "missing access", status: http.StatusOK, body: `{"refresh_token":"refresh","token_type":"Bearer","expires_in":3600}`, want: TokenResponseInvalid, wantStatus: http.StatusOK},
+		{name: "body read error", status: http.StatusOK, bodyError: true, want: TokenEndpointUnavailable, wantStatus: http.StatusOK},
+		{name: "known rejection beats body error", status: http.StatusBadRequest, bodyError: true, want: TokenRequestRejected, wantStatus: http.StatusBadRequest},
+		{name: "known retryable beats body error", status: http.StatusTooManyRequests, bodyError: true, want: TokenEndpointUnavailable, wantStatus: http.StatusTooManyRequests},
+	}
+	for _, grant := range []struct {
+		name    string
+		refresh bool
+	}{{name: "exchange"}, {name: "refresh", refresh: true}} {
+		t.Run(grant.name, func(t *testing.T) {
+			for _, test := range tests {
+				t.Run(test.name, func(t *testing.T) {
+					calls := 0
+					transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+						calls++
+						if test.transport {
+							return nil, errors.New("transport-secret-sentinel")
+						}
+						var body io.ReadCloser = io.NopCloser(strings.NewReader(test.body))
+						if test.bodyError {
+							body = failingTokenBody{}
+						}
+						header := make(http.Header)
+						if test.location != "" {
+							header.Set("Location", test.location)
+						}
+						return &http.Response{StatusCode: test.status, Body: body, Header: header}, nil
+					})
+					err := tokenGrantError(t, grant.refresh, transport)
+					if !errors.Is(err, ErrTokenExchange) {
+						t.Fatalf("error does not preserve ErrTokenExchange: %v", err)
+					}
+					var failure *TokenFailure
+					if !errors.As(err, &failure) || failure.Category() != test.want || failure.HTTPStatus() != test.wantStatus {
+						t.Fatalf("failure=%#v, want category=%v status=%d", failure, test.want, test.wantStatus)
+					}
+					if calls != 1 {
+						t.Fatalf("token requests=%d, want one fixed-origin request", calls)
+					}
+					for _, representation := range []string{err.Error(), fmt.Sprintf("%v", err), fmt.Sprintf("%+v", err)} {
+						if strings.Contains(representation, "secret-sentinel") || strings.Contains(representation, "other.example.test") {
+							t.Fatalf("OAuth failure leaked untrusted content: %q", representation)
+						}
+						if test.wantStatus == 0 && strings.Contains(representation, "HTTP 0") {
+							t.Fatalf("OAuth failure invented an HTTP status: %q", representation)
+						}
+					}
+					encoded, encodeErr := json.Marshal(err)
+					if encodeErr != nil || strings.Contains(string(encoded), "secret-sentinel") {
+						t.Fatalf("OAuth failure JSON=%s, err=%v", encoded, encodeErr)
+					}
+					var logline bytes.Buffer
+					slog.New(slog.NewJSONHandler(&logline, nil)).Error("OAuth token failure", "error", err)
+					if strings.Contains(logline.String(), "secret-sentinel") || strings.Contains(logline.String(), "other.example.test") {
+						t.Fatalf("OAuth failure log leaked untrusted content: %q", logline.String())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTokenResponseReadBoundAppliesToBothGrants(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		name := "exchange"
+		if refresh {
+			name = "refresh"
+		}
+		t.Run(name, func(t *testing.T) {
+			body := &countedTokenBody{reader: strings.NewReader(strings.Repeat("x", maxTokenResponseBytes*4))}
+			transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: body, Header: make(http.Header)}, nil
+			})
+			err := tokenGrantError(t, refresh, transport)
+			var failure *TokenFailure
+			if !errors.As(err, &failure) || failure.Category() != TokenResponseInvalid || failure.HTTPStatus() != http.StatusOK {
+				t.Fatalf("failure=%#v", failure)
+			}
+			if body.read != maxTokenResponseBytes+1 {
+				t.Fatalf("read %d bytes, want bounded read of %d", body.read, maxTokenResponseBytes+1)
+			}
+		})
 	}
 }
 

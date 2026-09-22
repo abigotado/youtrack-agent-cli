@@ -7,8 +7,8 @@ distribution channels:
   Remote-MCP-only. It validates non-secret read-only profile metadata and
   installs a shared Codex/Claude Code skill. Every remote read goes through the
   official YouTrack Remote MCP with an explicit six-tool allowlist.
-- The **standard macOS edition** is being activated as a source-built Homebrew
-  Formula. Homebrew will compile the existing standard CLI locally with
+- The **standard macOS edition** is available as a source-built Homebrew
+  Formula. Homebrew compiles the standard CLI locally with
   `CGO_ENABLED=1`, so OAuth credentials remain in the native
   Security.framework Keychain. This channel needs neither an Apple Developer
   membership nor a signed/notarized application bundle.
@@ -50,9 +50,7 @@ envelopes, errors, and recovery.
 ## macOS Homebrew Formula
 
 The standard macOS distribution channel is a source-built Formula in the
-maintained tap. It will be activated by the immediately following tap PR from
-a newly tagged immutable source release; until that PR lands, the command below
-is the post-release install command, not an already-published package:
+maintained tap:
 
 ```bash
 brew install abigotado/tap/youtrack-agent-cli

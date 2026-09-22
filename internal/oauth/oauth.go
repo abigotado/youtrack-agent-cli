@@ -32,7 +32,52 @@ var (
 	ErrInvalidCallback     = errors.New("invalid OAuth callback")
 	ErrAuthorizationDenied = errors.New("OAuth authorization was denied")
 	ErrTokenExchange       = errors.New("OAuth token exchange failed")
+	errRedirectRefused     = errors.New("OAuth token redirect refused")
 )
+
+// TokenFailureCategory identifies a safe, fixed recovery path for a token
+// request. It does not retain the server response or the underlying error.
+type TokenFailureCategory uint8
+
+const (
+	TokenEndpointUnavailable TokenFailureCategory = iota + 1
+	TokenRequestRejected
+	TokenResponseInvalid
+	TokenRedirectRefused
+)
+
+// TokenFailure carries only a fixed category and the HTTP status, when one
+// exists. In particular, it never retains a response body, URL, or token.
+type TokenFailure struct {
+	category TokenFailureCategory
+	status   int
+}
+
+func (failure *TokenFailure) Category() TokenFailureCategory { return failure.category }
+func (failure *TokenFailure) HTTPStatus() int                { return failure.status }
+func (failure *TokenFailure) Unwrap() error                  { return ErrTokenExchange }
+
+func (failure *TokenFailure) Error() string {
+	message := "OAuth token exchange failed"
+	switch failure.category {
+	case TokenEndpointUnavailable:
+		message = "OAuth token endpoint unavailable"
+	case TokenRequestRejected:
+		message = "OAuth token request rejected"
+	case TokenResponseInvalid:
+		message = "OAuth token response invalid"
+	case TokenRedirectRefused:
+		message = "OAuth token redirect refused"
+	}
+	if failure.status != 0 {
+		return fmt.Sprintf("%s (HTTP %d)", message, failure.status)
+	}
+	return message
+}
+
+func tokenFailure(category TokenFailureCategory, status int) error {
+	return &TokenFailure{category: category, status: status}
+}
 
 type Config struct {
 	IssuerURL        string
@@ -161,7 +206,7 @@ func NewClient(config Config, transport http.RoundTripper) (*Client, error) {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	return &Client{config: config, http: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("OAuth redirect refused") }}, now: time.Now}, nil
+	return &Client{config: config, http: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errRedirectRefused }}, now: time.Now}, nil
 }
 
 func (client *Client) Exchange(ctx context.Context, code, verifier string) (TokenSet, error) {
@@ -197,12 +242,37 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 		if ctx.Err() != nil {
 			return TokenSet{}, ctx.Err()
 		}
-		return TokenSet{}, ErrTokenExchange
+		if errors.Is(err, errRedirectRefused) {
+			status := 0
+			if response != nil {
+				status = response.StatusCode
+			}
+			return TokenSet{}, tokenFailure(TokenRedirectRefused, status)
+		}
+		return TokenSet{}, tokenFailure(TokenEndpointUnavailable, 0)
 	}
 	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		switch {
+		case response.StatusCode >= 300 && response.StatusCode < 400:
+			return TokenSet{}, tokenFailure(TokenRedirectRefused, response.StatusCode)
+		case response.StatusCode == http.StatusRequestTimeout, response.StatusCode == http.StatusTooManyRequests, response.StatusCode >= 500 && response.StatusCode < 600:
+			return TokenSet{}, tokenFailure(TokenEndpointUnavailable, response.StatusCode)
+		case response.StatusCode >= 400 && response.StatusCode < 500:
+			return TokenSet{}, tokenFailure(TokenRequestRejected, response.StatusCode)
+		default:
+			return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
+		}
+	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxTokenResponseBytes+1))
-	if err != nil || len(raw) > maxTokenResponseBytes || response.StatusCode != http.StatusOK {
-		return TokenSet{}, ErrTokenExchange
+	if err != nil {
+		if ctx.Err() != nil {
+			return TokenSet{}, ctx.Err()
+		}
+		return TokenSet{}, tokenFailure(TokenEndpointUnavailable, response.StatusCode)
+	}
+	if len(raw) > maxTokenResponseBytes {
+		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	var wire struct {
 		AccessToken  string          `json:"access_token"`
@@ -214,26 +284,26 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(&wire); err != nil {
-		return TokenSet{}, ErrTokenExchange
+		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	var extra json.RawMessage
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return TokenSet{}, ErrTokenExchange
+		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	seconds, err := strconv.ParseInt(string(wire.ExpiresIn), 10, 64)
 	if err != nil || seconds <= 0 || seconds > int64((365*24*time.Hour)/time.Second) || wire.AccessToken == "" || len(wire.AccessToken) > 8192 || !strings.EqualFold(wire.TokenType, "Bearer") {
-		return TokenSet{}, ErrTokenExchange
+		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	refresh := wire.RefreshToken
 	if refresh == "" {
 		refresh = previousRefresh
 	}
 	if refresh == "" || len(refresh) > 8192 {
-		return TokenSet{}, ErrTokenExchange
+		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	grantedScopes, err := grantedScopes(wire.Scope, allowedScopes)
 	if err != nil {
-		return TokenSet{}, ErrTokenExchange
+		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	return TokenSet{AccessToken: wire.AccessToken, RefreshToken: refresh, TokenType: "Bearer", ExpiresAt: client.now().Add(time.Duration(seconds) * time.Second).UTC(), Scopes: grantedScopes}, nil
 }
