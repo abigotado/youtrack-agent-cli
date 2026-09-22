@@ -16,6 +16,7 @@ import (
 
 	"github.com/abigotado/youtrack-agent-cli/internal/auth"
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
+	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/oauth"
 	"github.com/abigotado/youtrack-agent-cli/internal/profile"
 )
@@ -256,5 +257,28 @@ func TestFailedRefreshKeepsStoredCredentialAndRequiresLogin(t *testing.T) {
 	}
 	if requests != 1 || store.saveCalls != 0 || store.value.RefreshToken != "old-refresh" {
 		t.Fatalf("refresh requests=%d saves=%d credential changed=%t", requests, store.saveCalls, store.value.RefreshToken != "old-refresh")
+	}
+}
+
+func TestLoginOAuthClassifiesRejectedTokenExchange(t *testing.T) {
+	selected := oauthApplicationProfile(t, false)
+	store := &oauthCredentialStore{}
+	requests := 0
+	transport := oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(strings.NewReader("server-secret-sentinel")), Header: make(http.Header)}, nil
+	})
+	service := oauthApplicationService(t, selected, store, transport)
+	_, err := service.LoginOAuth(t.Context(), selected.Name, false, callbackBrowser{})
+	if !errors.Is(err, oauth.ErrTokenExchange) {
+		t.Fatalf("login error=%v, want classified exchange failure", err)
+	}
+	translated := TranslateError(err, selected.Name)
+	var contract *errx.Error
+	if !errors.As(translated, &contract) || contract.Reason != "OAUTH_TOKEN_REQUEST_REJECTED" || contract.Code != errx.CodeAuth {
+		t.Fatalf("login recovery=%v, want rejected token request", translated)
+	}
+	if requests != 1 || store.saveCalls != 0 || store.exists {
+		t.Fatalf("token requests=%d credential saves=%d exists=%t", requests, store.saveCalls, store.exists)
 	}
 }

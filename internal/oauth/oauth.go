@@ -66,6 +66,9 @@ func (failure *TokenFailure) Error() string {
 	switch failure.category {
 	case TokenEndpointUnavailable:
 		message = "OAuth token endpoint unavailable"
+		if failure.status == http.StatusOK {
+			message = "OAuth token response interrupted"
+		}
 	case TokenRequestRejected:
 		message = "OAuth token request rejected"
 	case TokenResponseInvalid:
@@ -219,6 +222,9 @@ func (client *Client) Exchange(ctx context.Context, code, verifier string) (Toke
 	if code == "" || len(code) > 8192 || !validVerifier(verifier) {
 		return TokenSet{}, ErrTokenExchange
 	}
+	if err := ctx.Err(); err != nil {
+		return TokenSet{}, err
+	}
 	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {client.config.RedirectURI}, "client_id": {client.config.ClientID}, "code_verifier": {verifier}}
 	return client.request(ctx, form, "", client.config.Scopes)
 }
@@ -267,9 +273,6 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	response, err := client.http.Do(request)
 	if err != nil {
-		if ctx.Err() != nil {
-			return TokenSet{}, ctx.Err()
-		}
 		if errors.Is(err, errRedirectRefused) {
 			status := 0
 			if response != nil {
@@ -297,9 +300,6 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxTokenResponseBytes+1))
 	if err != nil {
-		if ctx.Err() != nil {
-			return TokenSet{}, ctx.Err()
-		}
 		return TokenSet{}, tokenFailure(TokenEndpointUnavailable, response.StatusCode)
 	}
 	if len(raw) > maxTokenResponseBytes {

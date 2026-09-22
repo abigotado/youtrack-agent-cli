@@ -2,6 +2,7 @@ package application
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,14 @@ type oauthDiagnosticTransport func(*http.Request) (*http.Response, error)
 func (transport oauthDiagnosticTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	return transport(request)
 }
+
+type oauthCanceledBody struct{ cancel context.CancelFunc }
+
+func (body oauthCanceledBody) Read([]byte) (int, error) {
+	body.cancel()
+	return 0, context.Canceled
+}
+func (oauthCanceledBody) Close() error { return nil }
 
 func TestOAuthTokenDiagnosticsKeepV1EnvelopeAndRecoveryExit(t *testing.T) {
 	const sentinel = "server-secret-sentinel"
@@ -147,5 +156,30 @@ func TestRefreshFailureKeepsLegacyNonRetryableEnvelope(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "server-secret-sentinel") {
 		t.Fatalf("refresh envelope leaked untrusted response: %q", stdout.String())
+	}
+}
+
+func TestCanceledInflightRefreshKeepsLegacyNonRetryableEnvelope(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	issuer := "https://hub.example.test"
+	client, err := oauth.NewClient(oauth.Config{
+		IssuerURL: issuer, AuthorizationURL: issuer + endpoint.OAuthAuthorizationPath,
+		TokenURL: issuer + endpoint.OAuthTokenPath, ClientID: "client", Scopes: []string{"YouTrack"},
+		RedirectURI: "http://127.0.0.1:18987/oauth/callback",
+	}, oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: oauthCanceledBody{cancel: cancel}, Header: make(http.Header)}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Refresh(ctx, oauth.TokenSet{RefreshToken: "old-refresh", Scopes: []string{"YouTrack"}})
+	if err != oauth.ErrTokenExchange {
+		t.Fatalf("in-flight refresh error=%v, want non-retryable legacy sentinel", err)
+	}
+	translated := TranslateError(err, "work")
+	var typed *errx.Error
+	if !errors.As(translated, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || typed.RetryAfter != 0 || strings.Contains(strings.ToLower(typed.Hint), "retry") {
+		t.Fatalf("in-flight refresh recovery=%#v, want auth/5 with re-login hint", typed)
 	}
 }

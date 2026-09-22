@@ -43,7 +43,9 @@ and exit in v0.2.0. Cancellation detected before dispatch retains normal
 cancellation recovery. A failed
 refresh must not be retried automatically: the server may have rotated
 the token before its response was lost. A durable cross-process refresh
-fence is deferred. See the [detailed OAuth recovery guide](https://github.com/abigotado/youtrack-agent-cli/blob/main/docs/oauth-errors.md).
+fence is deferred. OAuth token errors do not publish `error.retry_after`;
+for endpoint unavailability, use caller-bounded backoff and a fresh login.
+See the [detailed OAuth recovery guide](https://github.com/abigotado/youtrack-agent-cli/blob/main/docs/oauth-errors.md).
 
 ## JSON response recovery
 

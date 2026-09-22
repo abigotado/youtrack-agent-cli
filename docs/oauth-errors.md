@@ -18,6 +18,11 @@ Before `v0.2.0`, all of these failures used
 `OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5. This is a deliberate breaking
 machine-recovery change while the JSON envelope shape remains `v:1`.
 
+These OAuth errors do not include `error.retry_after`. For
+`OAUTH_TOKEN_ENDPOINT_UNAVAILABLE`, the caller applies its own bounded backoff
+before starting a fresh login; the CLI does not forward the server's
+`Retry-After` header or authorize replay of the old token request.
+
 Cancellation detected before a refresh request is sent keeps the normal
 `CANCELED` recovery. Refresh-token rotation makes a lost or malformed response ambiguous:
 the server may have consumed the old token even when this CLI cannot save the

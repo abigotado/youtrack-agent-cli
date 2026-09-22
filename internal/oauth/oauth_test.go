@@ -201,6 +201,14 @@ type failingTokenBody struct{}
 func (failingTokenBody) Read([]byte) (int, error) { return 0, errors.New("body-secret-sentinel") }
 func (failingTokenBody) Close() error             { return nil }
 
+type cancelingTokenBody struct{ cancel context.CancelFunc }
+
+func (body cancelingTokenBody) Read([]byte) (int, error) {
+	body.cancel()
+	return 0, context.Canceled
+}
+func (cancelingTokenBody) Close() error { return nil }
+
 type countedTokenBody struct {
 	reader io.Reader
 	read   int
@@ -366,6 +374,65 @@ func TestRefreshCancellationBeforeDispatchKeepsCancellation(t *testing.T) {
 	_, err = client.Refresh(ctx, TokenSet{RefreshToken: "refresh", Scopes: []string{"YouTrack"}})
 	if !errors.Is(err, context.Canceled) || calls != 0 {
 		t.Fatalf("pre-dispatch cancellation error=%v requests=%d", err, calls)
+	}
+}
+
+func TestExchangeCancellationAfterDispatchRequiresFreshLogin(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	client, err := NewClient(testConfig(), roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: cancelingTokenBody{cancel: cancel}, Header: make(http.Header)}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := NewSession(strings.NewReader(strings.Repeat("v", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Exchange(ctx, "code", session.Verifier)
+	var failure *TokenFailure
+	if !errors.As(err, &failure) || failure.Category() != TokenEndpointUnavailable || failure.HTTPStatus() != http.StatusOK {
+		t.Fatalf("post-dispatch exchange cancellation=%v, want response-interrupted recovery", err)
+	}
+	if !strings.Contains(err.Error(), "response interrupted") || strings.Contains(err.Error(), "endpoint unavailable (HTTP 200)") {
+		t.Fatalf("misleading interrupted-response error=%q", err.Error())
+	}
+}
+
+func TestExchangeCancellationBeforeDispatchKeepsCancellation(t *testing.T) {
+	calls := 0
+	client, err := NewClient(testConfig(), roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("unexpected exchange dispatch")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := NewSession(strings.NewReader(strings.Repeat("v", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = client.Exchange(ctx, "code", session.Verifier)
+	if !errors.Is(err, context.Canceled) || calls != 0 {
+		t.Fatalf("pre-dispatch exchange cancellation error=%v requests=%d", err, calls)
+	}
+}
+
+func TestRefreshCancellationAfterDispatchKeepsLegacyAuthRecovery(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	client, err := NewClient(testConfig(), roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: cancelingTokenBody{cancel: cancel}, Header: make(http.Header)}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Refresh(ctx, TokenSet{RefreshToken: "refresh", Scopes: []string{"YouTrack"}})
+	if err != ErrTokenExchange {
+		t.Fatalf("post-dispatch refresh cancellation=%v, want legacy auth recovery", err)
 	}
 }
 
