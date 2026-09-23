@@ -23,6 +23,58 @@ prompts, warnings, and logs go to stderr. `error.code` is a stable
 `SCREAMING_SNAKE_CASE` value; add error detail there before considering a new
 process status.
 
+## OAuth token errors (standard macOS CLI; planned v0.2.0)
+
+These codes are planned for the tagged v0.2.0 Formula. An untagged source checkout
+reports `devel`; merged source alone is not a Homebrew release. Check the
+installed binary's version before relying on this table.
+
+Authorization-code exchange failures previously used
+`OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5. The JSON envelope remains v1, but
+the following recovery codes are a deliberate breaking change.
+
+| `error.code` | Exit | Recovery |
+| --- | ---: | --- |
+| `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 | Back off, then restart login for a fresh authorization code. Never replay the previous token POST. |
+| `OAUTH_TOKEN_TRANSPORT_REJECTED` | 5 | Check the endpoint, DNS name, and TLS trust; do not retry unchanged. |
+| `OAUTH_TOKEN_REQUEST_REJECTED` | 5 | Check the OAuth client and profile, then start a new login. |
+| `OAUTH_TOKEN_RESPONSE_INVALID` | 5 | Check token-response compatibility, then start a fresh interactive login for a new authorization code; never replay the previous token POST. |
+| `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 | Check the pinned token endpoint; never follow the redirect. |
+| `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 | An attempted authorization-code request or HTTP 200 response read was interrupted; start a fresh login and never replay the token POST. |
+| `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Invalid local exchange input, refresh request failure, post-refresh binding rejection, or persistence uncertainty; use the applicable recovery. |
+
+Cancellation or deadline detected before a token request attempt retains
+normal cancellation/timeout recovery. Once an attempt begins, dispatch
+may be uncertain: interrupted code exchange requires a fresh login, and
+refresh failures keep the published code and exit in v0.2.0, including
+DNS/TLS failures and local failure after successful refresh. Local binding
+rejection happens before Save and leaves the old credential in place; a
+Save error leaves persisted credential state unknown. The server
+may have rotated the old refresh token before its response was lost.
+Public recovery hints identify fixed local repair for binding or token validation
+and for Keychain interaction, ACL, cancellation, timeout, availability, or other
+store failures; they never expose raw errors or OSStatus. An HTTP 200 token-body
+read error is non-retryable after authorization-code exchange because the code
+may already have been consumed.
+For refresh, local binding or token validation failures, Keychain interaction,
+ACL or status failures, context cancellation or deadline, and unknown local
+store failures all collapse to `OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5.
+Hints describe an applicable local repair in prose; their wording is not a
+stable machine ID. Consumers branch on `error.code` and exit, not hint text.
+Malformed or oversized HTTP 200 and unexpected 1xx or non-200 2xx responses
+also do not prove the old authorization code remains usable. Always obtain a
+new code in a fresh interactive login; never replay that token POST.
+The CLI makes no repeat attempt within
+one invocation. Failed token requests leave the old credential in place.
+A later auth-dependent invocation, including `auth status --check` or a
+read, may automatically retry the old token. Agents must avoid those commands
+until a fresh interactive login. The operator must explicitly approve
+replacement if the old credential remains (`auth login --profile NAME --yes`);
+agents must not add `--yes` automatically. A durable cross-process refresh fence
+is deferred. OAuth token errors do not publish `error.retry_after`;
+for endpoint unavailability, use caller-bounded backoff and a fresh login.
+See the [detailed OAuth recovery guide](https://github.com/abigotado/youtrack-agent-cli/blob/main/docs/oauth-errors.md).
+
 ## JSON response recovery
 
 Apply this grammar in order:
