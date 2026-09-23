@@ -399,7 +399,7 @@ func TranslateError(err error, name string) error {
 				WithHint("check OAuth client settings and profile, then start a new login")
 		case oauth.TokenResponseInvalid:
 			return errx.Auth("OAUTH_TOKEN_RESPONSE_INVALID", "%s", tokenFailure.Error()).
-				WithHint("check YouTrack OAuth token response compatibility; do not retry unchanged")
+				WithHint("check YouTrack OAuth token response compatibility; start a fresh interactive auth login for a new authorization code; do not replay the previous token POST")
 		case oauth.TokenRedirectRefused:
 			return errx.Auth("OAUTH_TOKEN_REDIRECT_REFUSED", "%s", tokenFailure.Error()).
 				WithHint("check the OAuth token endpoint in the profile; do not follow redirects")

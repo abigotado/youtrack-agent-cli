@@ -41,12 +41,12 @@ Previously all of the following failures exited with 5:
 
 | Token failure | `error.code` in v0.2.0 | Exit |
 | --- | --- | --- |
-| Transport failure, HTTP 408/429/5xx, or interrupted HTTP 200 body other than cancellation/deadline | `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 (bounded backoff, then restart login with a fresh code) |
+| Transport failure or HTTP 408/429/5xx | `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 (bounded backoff, then restart login with a fresh code) |
 | Invalid TLS trust, missing DNS name, or scheme mismatch | `OAUTH_TOKEN_TRANSPORT_REJECTED` | 5 (check endpoint and trust) |
 | Other HTTP 4xx rejection | `OAUTH_TOKEN_REQUEST_REJECTED` | 5 (auth) |
-| Malformed HTTP 200, unexpected 1xx, or non-200 2xx | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 (auth) |
+| Malformed or oversized HTTP 200, unexpected 1xx, or non-200 2xx | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 (check compatibility, then fresh interactive login with a new code; never replay the old POST) |
 | HTTP 3xx redirect | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 (auth) |
-| Cancellation or deadline after authorization-code token request attempt begins | `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 (fresh login; never replay the POST) |
+| Cancellation or deadline after authorization-code token request attempt begins, or any HTTP 200 token-body read error | `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 (fresh login; never replay the POST) |
 | Refresh request failure, post-refresh binding rejection or persistence uncertainty, or invalid local exchange input | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 (auth) |
 
 Refresh request failures after an attempt begins keep the published
@@ -56,11 +56,17 @@ deadline detected before an attempt remains a normal `CANCELED` or `TIMEOUT`.
 The post-attempt category is conservative because dispatch cannot always be
 established. Agents must not trigger another refresh after an ambiguous result:
 the server may have rotated the old token before the response was lost.
+An HTTP 200 token-body read error is also non-retryable for authorization-code
+exchange because the server may already have consumed the code.
 A durable refresh fence across CLI processes is required before changing that
 behavior; this release does not provide one. The CLI makes no repeat attempt
 within the same invocation. A failed token request or pre-Save binding
 rejection leaves the old credential in place; after a local save error, the
 persisted credential state is unknown.
+The fixed public hint identifies local repair for each pre-Save validation or
+Save failure category: profile/credential binding, token validation, Keychain
+interaction or ACL, canceled/interrupted/timed-out save, Keychain availability,
+or another local store failure. It never includes the raw cause or OSStatus.
 A later auth-dependent invocation, including `auth status --check` or a read,
 may automatically retry the old token. Agents should avoid those commands after
 failure and start a fresh interactive login instead.
@@ -72,8 +78,11 @@ failure codes are also listed in the
 
 Only the fixed category and numeric HTTP status appear in an error. The token
 endpoint response, OAuth code, verifier, and tokens remain private. Do not
-retry a rejected or invalid-response request unchanged. A failed first login
-stores no new credential; restarting login starts a fresh browser authorization.
+retry a rejected request unchanged. Never replay an invalid-response token
+POST, regardless of subsequent configuration changes: check compatibility,
+then start a fresh interactive login for a new authorization code. A failed
+first login stores no new credential; restarting login starts a fresh browser
+authorization.
 
 ### Authentication and upgrades
 

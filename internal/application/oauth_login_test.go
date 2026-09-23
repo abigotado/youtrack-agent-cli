@@ -438,10 +438,11 @@ func TestRefreshPreSaveBindingFailureIsFixedAndRedacted(t *testing.T) {
 		name     string
 		cause    error
 		category string
+		action   string
 	}{
-		{name: "invalid token", cause: fmt.Errorf("%w: %s", auth.ErrInvalidToken, secret), category: "invalid_credential"},
-		{name: "binding mismatch", cause: fmt.Errorf("%w: %s", auth.ErrCredentialBindingMismatch, secret), category: "binding_mismatch"},
-		{name: "other", cause: errors.New(secret), category: "other"},
+		{name: "invalid token", cause: fmt.Errorf("%w: %s", auth.ErrInvalidToken, secret), category: "invalid_credential", action: "inspect local token validation and OAuth client configuration"},
+		{name: "binding mismatch", cause: fmt.Errorf("%w: %s", auth.ErrCredentialBindingMismatch, secret), category: "binding_mismatch", action: "inspect and repair local profile/credential binding"},
+		{name: "other", cause: errors.New(secret), category: "other", action: "inspect local post-refresh binding validation"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var logs bytes.Buffer
@@ -451,12 +452,22 @@ func TestRefreshPreSaveBindingFailureIsFixedAndRedacted(t *testing.T) {
 				t.Fatalf("pre-save binding failure=%#v, want fixed auth/5 before-persistence diagnosis", failure)
 			}
 			assertRefreshRecoveryHint(t, failure.Hint)
+			if !strings.Contains(failure.Hint, test.action) {
+				t.Fatalf("pre-save recovery %q missing safe action %q", failure.Hint, test.action)
+			}
 			if !strings.Contains(logs.String(), "binding rejected before persistence") || !strings.Contains(logs.String(), test.category) {
 				t.Fatalf("pre-save log=%q, want fixed category %q", logs.String(), test.category)
 			}
 			var stdout bytes.Buffer
 			if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(failure); exit != errx.CodeAuth {
 				t.Fatalf("pre-save binding exit=%d, want auth/5", exit)
+			}
+			var envelope output.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Error.RetryAfter != "" || !strings.Contains(envelope.Hint, test.action) || bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
+				t.Fatalf("pre-save binding envelope=%+v, want safe action %q", envelope, test.action)
 			}
 			if strings.Contains(logs.String(), secret) || strings.Contains(stdout.String(), secret) || strings.Contains(failure.Error(), secret) {
 				t.Fatalf("pre-save binding leaked private cause: log=%q output=%q", logs.String(), stdout.String())
@@ -471,14 +482,15 @@ func TestRotatedRefreshSaveFailureRequiresOperatorRecovery(t *testing.T) {
 		name     string
 		saveErr  error
 		category string
+		action   string
 	}{
-		{name: "interaction blocked", saveErr: fmt.Errorf("%s: %w", private, auth.ErrInteractionNotAllowed), category: "interaction_blocked"},
-		{name: "migration required", saveErr: fmt.Errorf("%s: %w", private, auth.ErrKeychainMigrationRequired), category: "migration_required"},
-		{name: "migration canceled", saveErr: fmt.Errorf("%s: %w", private, auth.ErrKeychainMigrationCanceled), category: "user_canceled"},
-		{name: "context canceled", saveErr: fmt.Errorf("%s: %w", private, context.Canceled), category: "context_canceled"},
-		{name: "deadline exceeded", saveErr: fmt.Errorf("%s: %w", private, context.DeadlineExceeded), category: "deadline_exceeded"},
-		{name: "keychain status", saveErr: fmt.Errorf("%s: %w", private, &auth.StatusError{Operation: "private-operation-sentinel", Status: -25293}), category: "keychain_status_failure"},
-		{name: "other", saveErr: errors.New(private), category: "other"},
+		{name: "interaction blocked", saveErr: fmt.Errorf("%s: %w", private, auth.ErrInteractionNotAllowed), category: "interaction_blocked", action: "restore interactive Keychain access"},
+		{name: "migration required", saveErr: fmt.Errorf("%s: %w", private, auth.ErrKeychainMigrationRequired), category: "migration_required", action: "inspect Keychain ACL and perform operator-approved migration if required"},
+		{name: "migration canceled", saveErr: fmt.Errorf("%s: %w", private, auth.ErrKeychainMigrationCanceled), category: "user_canceled", action: "resolve canceled Keychain authorization"},
+		{name: "context canceled", saveErr: fmt.Errorf("%s: %w", private, context.Canceled), category: "context_canceled", action: "inspect interrupted credential-store save"},
+		{name: "deadline exceeded", saveErr: fmt.Errorf("%s: %w", private, context.DeadlineExceeded), category: "deadline_exceeded", action: "inspect timed-out credential-store save"},
+		{name: "keychain status", saveErr: fmt.Errorf("%s: %w", private, &auth.StatusError{Operation: "private-operation-sentinel", Status: -25293}), category: "keychain_status_failure", action: "inspect Keychain availability and permissions"},
+		{name: "other", saveErr: errors.New(private), category: "other", action: "inspect local credential-store save failure"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			selected := oauthApplicationProfile(t, true)
@@ -523,6 +535,9 @@ func TestRotatedRefreshSaveFailureRequiresOperatorRecovery(t *testing.T) {
 				t.Fatalf("post-save failure must disclose persistence uncertainty: %q", typed.Message)
 			}
 			assertRefreshRecoveryHint(t, typed.Hint)
+			if !strings.Contains(typed.Hint, test.action) {
+				t.Fatalf("persistence hint %q missing safe action %q", typed.Hint, test.action)
+			}
 			if !strings.Contains(logs.String(), "OAuth refresh credential persistence is uncertain") || !strings.Contains(logs.String(), "category="+test.category) {
 				t.Fatalf("refresh persistence log=%q, want fixed category %q", logs.String(), test.category)
 			}
@@ -538,6 +553,9 @@ func TestRotatedRefreshSaveFailureRequiresOperatorRecovery(t *testing.T) {
 				t.Fatalf("unsafe OAuth failure envelope: %+v", envelope)
 			}
 			assertRefreshRecoveryHint(t, envelope.Hint)
+			if !strings.Contains(envelope.Hint, test.action) {
+				t.Fatalf("persistence envelope hint %q missing safe action %q", envelope.Hint, test.action)
+			}
 			for _, secret := range []string{private, "private-operation-sentinel", "-25293", "new-access-private-sentinel", "new-refresh-private-sentinel", "old-access", "old-refresh", selected.Name} {
 				if strings.Contains(stdout.String(), secret) || strings.Contains(logs.String(), secret) {
 					t.Fatalf("OAuth failure envelope or log leaked private data %q", secret)

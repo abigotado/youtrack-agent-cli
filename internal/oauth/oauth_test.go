@@ -276,7 +276,7 @@ func TestTokenFailuresClassifyExchangeAndKeepRefreshNonRetryable(t *testing.T) {
 		{name: "malformed JSON", status: http.StatusOK, body: `{"access_token":"` + sentinel + `"`, want: TokenResponseInvalid, wantStatus: http.StatusOK},
 		{name: "untrusted expiry", status: http.StatusOK, body: `{"access_token":"access","refresh_token":"refresh","token_type":"Bearer","expires_in":"` + sentinel + `"}`, want: TokenResponseInvalid, wantStatus: http.StatusOK},
 		{name: "missing access", status: http.StatusOK, body: `{"refresh_token":"refresh","token_type":"Bearer","expires_in":3600}`, want: TokenResponseInvalid, wantStatus: http.StatusOK},
-		{name: "body read error", status: http.StatusOK, bodyError: true, want: TokenEndpointUnavailable, wantStatus: http.StatusOK},
+		{name: "body read error", status: http.StatusOK, bodyError: true, want: TokenRequestInterrupted, wantStatus: http.StatusOK},
 		{name: "known rejection beats body error", status: http.StatusBadRequest, bodyError: true, want: TokenRequestRejected, wantStatus: http.StatusBadRequest},
 		{name: "known retryable beats body error", status: http.StatusTooManyRequests, bodyError: true, want: TokenEndpointUnavailable, wantStatus: http.StatusTooManyRequests},
 	}

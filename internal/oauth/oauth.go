@@ -81,7 +81,7 @@ func (failure *TokenFailure) Error() string {
 	case TokenRequestInterrupted:
 		message = "OAuth token request interrupted"
 		if failure.status == http.StatusOK {
-			message = "OAuth token response interrupted by cancellation"
+			message = "OAuth token response interrupted"
 		}
 	}
 	if failure.status != 0 {
@@ -338,10 +338,10 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxTokenResponseBytes+1))
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return TokenSet{}, tokenFailure(TokenRequestInterrupted, response.StatusCode)
-		}
-		return TokenSet{}, tokenFailure(TokenEndpointUnavailable, response.StatusCode)
+		// After HTTP 200, an unreadable response leaves one-time token
+		// consumption uncertain regardless of the local read error. Never
+		// advertise retry of that POST.
+		return TokenSet{}, tokenFailure(TokenRequestInterrupted, response.StatusCode)
 	}
 	if len(raw) > maxTokenResponseBytes {
 		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)

@@ -592,18 +592,21 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 // the first credential-store write. Never retain the rejected credential or
 // the underlying validation error in logs or the user-facing error.
 func refreshPreSaveBindingFailure(err error, logger *slog.Logger) *errx.Error {
+	category := "other"
+	localRepair := "inspect local post-refresh binding validation and repair the local configuration"
+	switch {
+	case errors.Is(err, auth.ErrCredentialBindingMismatch):
+		category = "binding_mismatch"
+		localRepair = "inspect and repair local profile/credential binding"
+	case errors.Is(err, auth.ErrInvalidToken):
+		category = "invalid_credential"
+		localRepair = "inspect local token validation and OAuth client configuration"
+	}
 	if logger != nil {
-		category := "other"
-		switch {
-		case errors.Is(err, auth.ErrCredentialBindingMismatch):
-			category = "binding_mismatch"
-		case errors.Is(err, auth.ErrInvalidToken):
-			category = "invalid_credential"
-		}
 		logger.Warn("OAuth refresh binding rejected before persistence", "category", category)
 	}
 	return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "refreshed OAuth credential local binding rejected before persistence").
-		WithHint(refreshRecoveryHint)
+		WithHint("%s; %s", localRepair, refreshRecoveryHint)
 }
 
 // refreshPersistenceUncertain intentionally drops the local cause. The server
@@ -611,27 +614,34 @@ func refreshPreSaveBindingFailure(err error, logger *slog.Logger) *errx.Error {
 // the replacement credential was persisted. In particular, a canceled save
 // must not become the ordinary retryable CANCELED recovery.
 func refreshPersistenceUncertain(err error, logger *slog.Logger) *errx.Error {
+	category := "other"
+	localRepair := "inspect local credential-store save failure"
+	var status *auth.StatusError
+	switch {
+	case errors.Is(err, auth.ErrInteractionNotAllowed):
+		category = "interaction_blocked"
+		localRepair = "restore interactive Keychain access"
+	case errors.Is(err, auth.ErrKeychainMigrationRequired):
+		category = "migration_required"
+		localRepair = "inspect Keychain ACL and perform operator-approved migration if required"
+	case errors.Is(err, auth.ErrKeychainMigrationCanceled):
+		category = "user_canceled"
+		localRepair = "resolve canceled Keychain authorization"
+	case errors.Is(err, context.Canceled):
+		category = "context_canceled"
+		localRepair = "inspect interrupted credential-store save"
+	case errors.Is(err, context.DeadlineExceeded):
+		category = "deadline_exceeded"
+		localRepair = "inspect timed-out credential-store save"
+	case errors.As(err, &status):
+		category = "keychain_status_failure"
+		localRepair = "inspect Keychain availability and permissions"
+	}
 	if logger != nil {
-		category := "other"
-		var status *auth.StatusError
-		switch {
-		case errors.Is(err, auth.ErrInteractionNotAllowed):
-			category = "interaction_blocked"
-		case errors.Is(err, auth.ErrKeychainMigrationRequired):
-			category = "migration_required"
-		case errors.Is(err, auth.ErrKeychainMigrationCanceled):
-			category = "user_canceled"
-		case errors.Is(err, context.Canceled):
-			category = "context_canceled"
-		case errors.Is(err, context.DeadlineExceeded):
-			category = "deadline_exceeded"
-		case errors.As(err, &status):
-			category = "keychain_status_failure"
-		}
 		logger.Warn("OAuth refresh credential persistence is uncertain", "category", category)
 	}
 	return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "rotated OAuth credential persistence is uncertain").
-		WithHint(refreshRecoveryHint)
+		WithHint("%s; persisted state is unknown; %s", localRepair, refreshRecoveryHint)
 }
 
 func oauthConfig(value profile.Profile) oauth.Config {

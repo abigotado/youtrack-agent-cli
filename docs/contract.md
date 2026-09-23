@@ -36,9 +36,9 @@ the following recovery codes are a deliberate breaking change.
 | `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 | Back off, then restart login for a fresh authorization code. |
 | `OAUTH_TOKEN_TRANSPORT_REJECTED` | 5 | Check endpoint, DNS, and TLS trust; do not retry unchanged. |
 | `OAUTH_TOKEN_REQUEST_REJECTED` | 5 | Check the OAuth client and profile, then start a new login. |
-| `OAUTH_TOKEN_RESPONSE_INVALID` | 5 | Report a token-response compatibility problem; do not retry unchanged. |
+| `OAUTH_TOKEN_RESPONSE_INVALID` | 5 | Check token-response compatibility, then start a fresh interactive login for a new authorization code; never replay the previous token POST. |
 | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 | Check the pinned token endpoint; never follow the redirect. |
-| `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 | Cancellation or deadline after an authorization-code token request attempt; start a fresh login, never replay the POST. |
+| `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 | Cancellation or deadline after an authorization-code token request attempt, or any HTTP 200 body-read error; start a fresh login, never replay the POST. |
 | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Invalid local exchange input, refresh request failure, post-refresh binding rejection, or persistence uncertainty; use the applicable recovery. |
 
 Cancellation or deadline detected before a token request attempt retains
@@ -49,6 +49,14 @@ DNS/TLS failures and local failure after successful refresh. Local binding
 rejection happens before Save and leaves the old credential in place; a
 Save error leaves persisted credential state unknown. The server
 may have rotated the old refresh token before its response was lost.
+Public recovery hints identify fixed local repair for binding or token validation
+and for Keychain interaction, ACL, cancellation, timeout, availability, or other
+store failures; they never expose raw errors or OSStatus. An HTTP 200 token-body
+read error is non-retryable after authorization-code exchange because the code
+may already have been consumed.
+Malformed or oversized HTTP 200 and unexpected 1xx or non-200 2xx responses
+also do not prove the old authorization code remains usable. Always obtain a
+new code in a fresh interactive login; never replay that token POST.
 The CLI makes no repeat attempt within
 one invocation. Failed token requests leave the old credential in place.
 A later auth-dependent invocation, including `auth status --check` or a
