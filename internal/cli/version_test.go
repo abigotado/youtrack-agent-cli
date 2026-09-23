@@ -124,3 +124,30 @@ func TestVersionCommandRejectsPartialInjectedProvenance(t *testing.T) {
 		t.Fatalf("stdout=%s", stdout.String())
 	}
 }
+
+func TestVersionCommandDistinguishesDevelopmentFromInjectedV020(t *testing.T) {
+	previousVersion, previousCommit, previousCommitTime := releaseVersion, releaseCommit, releaseCommitTime
+	t.Cleanup(func() {
+		releaseVersion, releaseCommit, releaseCommitTime = previousVersion, previousCommit, previousCommitTime
+	})
+	for _, test := range []struct {
+		name    string
+		version string
+		want    string
+	}{
+		{name: "development", version: devVersion, want: devVersion},
+		{name: "injected release", version: "v0.2.0", want: "v0.2.0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			releaseVersion, releaseCommit, releaseCommitTime = test.version, "", ""
+			app, _, _, _, stdout, stderr := testApp(t)
+			if code := runApp(app, "version", "-o", "json"); code != errx.CodeOK {
+				t.Fatalf("version exit=%d stderr=%q", code, stderr.String())
+			}
+			data, ok := decode(t, stdout)["data"].(map[string]any)
+			if !ok || data["version"] != test.want {
+				t.Fatalf("version data=%v, want %q", data, test.want)
+			}
+		})
+	}
+}

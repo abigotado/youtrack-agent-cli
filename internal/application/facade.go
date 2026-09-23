@@ -12,6 +12,7 @@ import (
 	"github.com/abigotado/youtrack-agent-cli/internal/intent"
 	"github.com/abigotado/youtrack-agent-cli/internal/journal"
 	"github.com/abigotado/youtrack-agent-cli/internal/oauth"
+	"github.com/abigotado/youtrack-agent-cli/internal/oauthrecovery"
 	"github.com/abigotado/youtrack-agent-cli/internal/profile"
 	"github.com/abigotado/youtrack-agent-cli/internal/skills"
 	"github.com/abigotado/youtrack-agent-cli/internal/writepolicy"
@@ -389,37 +390,26 @@ func TranslateError(err error, name string) error {
 		return errx.Auth("OAUTH_CALLBACK_INVALID", "OAuth callback validation failed")
 	case errors.Is(err, oauth.ErrAuthorizationDenied):
 		return errx.Auth("OAUTH_AUTHORIZATION_DENIED", "YouTrack authorization was denied")
-	case errors.As(err, &tokenFailure):
-		switch tokenFailure.Category() {
-		case oauth.TokenEndpointUnavailable:
-			return errx.Retryable("OAUTH_TOKEN_ENDPOINT_UNAVAILABLE", 0, "%s", tokenFailure.Error()).
-				WithHint("back off, then restart auth login for a fresh authorization code")
-		case oauth.TokenRequestRejected:
-			return errx.Auth("OAUTH_TOKEN_REQUEST_REJECTED", "%s", tokenFailure.Error()).
-				WithHint("check OAuth client settings and profile, then start a new login")
-		case oauth.TokenResponseInvalid:
-			return errx.Auth("OAUTH_TOKEN_RESPONSE_INVALID", "%s", tokenFailure.Error()).
-				WithHint("check YouTrack OAuth token response compatibility; start a fresh interactive auth login for a new authorization code; do not replay the previous token POST")
-		case oauth.TokenRedirectRefused:
-			return errx.Auth("OAUTH_TOKEN_REDIRECT_REFUSED", "%s", tokenFailure.Error()).
-				WithHint("check the OAuth token endpoint in the profile; do not follow redirects")
-		case oauth.TokenTransportRejected:
-			return errx.Auth("OAUTH_TOKEN_TRANSPORT_REJECTED", "%s", tokenFailure.Error()).
-				WithHint("check the OAuth endpoint, DNS, and TLS trust; do not retry unchanged")
-		case oauth.TokenRequestInterrupted:
-			return errx.Auth("OAUTH_TOKEN_REQUEST_INTERRUPTED", "%s", tokenFailure.Error()).
-				WithHint("start auth login again for a fresh authorization code; do not replay the request")
+	case errors.As(err, &tokenFailure) && tokenFailure != nil:
+		if descriptor, known := oauthrecovery.Lookup(tokenFailure.Category()); known {
+			return oauthRecoveryError(descriptor, tokenFailure.Error())
 		}
-		return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "YouTrack OAuth token exchange failed").
-			WithHint(refreshRecoveryHint + "; do not replay the token request")
+		descriptor := oauthrecovery.Legacy()
+		return oauthRecoveryError(descriptor, "YouTrack OAuth token exchange failed").
+			WithHint("%s; do not replay the token request", descriptor.Hint)
 	case errors.Is(err, oauth.ErrTokenExchange):
-		return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "YouTrack OAuth token exchange failed").
-			WithHint("correct invalid local exchange input; if refresh was attempted, " + refreshRecoveryHint)
+		descriptor := oauthrecovery.Legacy()
+		return oauthRecoveryError(descriptor, "YouTrack OAuth token exchange failed").
+			WithHint("correct invalid local exchange input; if refresh was attempted, %s", descriptor.Hint)
 	case errors.Is(err, oauth.ErrInvalidConfig):
 		return errx.Usage("OAuth profile configuration is invalid")
 	default:
 		return errx.Internal("operation failed without exposing sensitive details")
 	}
+}
+
+func oauthRecoveryError(descriptor oauthrecovery.Descriptor, message string) *errx.Error {
+	return &errx.Error{Code: descriptor.Exit, Reason: descriptor.Reason, Message: message, Hint: descriptor.Hint}
 }
 
 func profileInfo(value profile.Profile) ProfileInfo {

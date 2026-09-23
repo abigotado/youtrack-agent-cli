@@ -9,19 +9,23 @@ A merged source change reaches Homebrew only after its own release tag and a
 merged tap update; check `version` before
 relying on newly documented behavior:
 
+An untagged source checkout reports `devel`. A `devel` build can be used for
+development, but it is not the tagged `v0.2.0` Formula; no Formula containing
+the planned OAuth classifications has been published yet.
+
 ```bash
 brew install abigotado/tap/youtrack-agent-cli
 youtrack-agent-cli version -o json
 ```
 
-Like the Jira, Slack, and Confluence CLI Formulae, this Formula pins a
-checksummed immutable source release and has Homebrew build it locally with Go
-and `CGO_ENABLED=1`. The resulting binary links the native macOS
-Security.framework Keychain backend. This is a Formula, not a downloaded
-binary Cask: it does not require an Apple Developer membership, Developer ID
+Like the Jira, Slack, and Confluence CLI Formulae, the planned Formula will
+pin a checksummed immutable source release and have Homebrew build it locally
+with Go and `CGO_ENABLED=1`. The resulting binary will link the native macOS
+Security.framework Keychain backend. This Formula will not be a downloaded
+binary Cask: it will need neither Apple Developer membership nor Developer ID
 signing, notarization, or an installer that removes Gatekeeper quarantine.
 
-The Formula carries the standard CLI, including explicit-profile OAuth,
+The Formula will carry the standard CLI, including explicit-profile OAuth,
 Keychain credential storage, REST reads, local journal operations, and the
 Agent Skill installer. The Linux portable Remote-MCP-only release is unchanged:
 it remains credential-free and does not gain a macOS archive from this Formula.
@@ -32,22 +36,17 @@ its SHA-256. A Formula update never builds from a mutable branch.
 
 ### OAuth error-code transition in v0.2.0
 
-The `v0.2.0` standard CLI changes the machine recovery classification for
+The planned tagged `v0.2.0` standard CLI changes machine recovery for
 authorization-code token exchange failures. The JSON envelope remains `v:1`,
-but callers that branch on the published `OAUTH_TOKEN_EXCHANGE_FAILED` code
-must handle these cases explicitly. The published Formula may still be an
-earlier version; check `version` before relying on these v0.2.0 codes.
-Previously all of the following failures exited with 5:
-
-| Token failure | `error.code` in v0.2.0 | Exit |
-| --- | --- | --- |
-| Transport failure or HTTP 408/429/5xx | `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 (bounded backoff, then restart login with a fresh code) |
-| Invalid TLS trust, missing DNS name, or scheme mismatch | `OAUTH_TOKEN_TRANSPORT_REJECTED` | 5 (check endpoint and trust) |
-| Other HTTP 4xx rejection | `OAUTH_TOKEN_REQUEST_REJECTED` | 5 (auth) |
-| Malformed or oversized HTTP 200, unexpected 1xx, or non-200 2xx | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 (check compatibility, then fresh interactive login with a new code; never replay the old POST) |
-| HTTP 3xx redirect | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 (auth) |
-| Cancellation or deadline after authorization-code token request attempt begins, or any HTTP 200 token-body read error | `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 (fresh login; never replay the POST) |
-| Refresh request failure, post-refresh binding rejection or persistence uncertainty, or invalid local exchange input | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 (auth) |
+but callers branching on the published `OAUTH_TOKEN_EXCHANGE_FAILED` code
+must handle six new categories. Before this classification, the affected
+authorization-code exchange failures used that code and exit 5. This is not
+true of every *local post-refresh* failure: binding, invalid-token, Keychain,
+context, and unknown-store errors formerly crossed different translation
+paths. The planned `v0.2.0` CLI collapses them to
+`OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5. See the compact old-to-new local mapping
+in the [OAuth recovery guide](oauth-errors.md) and the seven canonical
+code/exit/recovery rows in the generated [machine contract](contract.md#oauth-token-errors-standard-macos-cli-planned-v020).
 
 Refresh request failures after an attempt begins keep the published
 `OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5 recovery in this release, including
@@ -67,6 +66,7 @@ The fixed public hint identifies local repair for each pre-Save validation or
 Save failure category: profile/credential binding, token validation, Keychain
 interaction or ACL, canceled/interrupted/timed-out save, Keychain availability,
 or another local store failure. It never includes the raw cause or OSStatus.
+Hints are repair prose, not stable machine IDs; branch on `error.code` and exit.
 A later auth-dependent invocation, including `auth status --check` or a read,
 may automatically retry the old token. Agents should avoid those commands after
 failure and start a fresh interactive login instead.

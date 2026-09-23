@@ -18,6 +18,7 @@ import (
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/oauth"
+	"github.com/abigotado/youtrack-agent-cli/internal/oauthrecovery"
 	"github.com/abigotado/youtrack-agent-cli/internal/output"
 )
 
@@ -205,25 +206,28 @@ func TestOAuthTokenContractTableMatchesRenderedDiagnostics(t *testing.T) {
 		exitField int
 	}{
 		{path: "../../docs/contract.md", codeField: 1, exitField: 2},
-		{path: "../../docs/oauth-errors.md", codeField: 1, exitField: 2},
-		{path: "../../docs/homebrew.md", codeField: 2, exitField: 3},
+		{path: "../../assets/skills/youtrack-agent/reference/contract.md", codeField: 1, exitField: 2},
 	}
-	documented := make(map[string]errx.Code)
+	catalog := make(map[string]oauthrecovery.Descriptor)
+	for _, descriptor := range oauthrecovery.Catalog() {
+		if _, duplicate := catalog[descriptor.Reason]; duplicate {
+			t.Fatalf("duplicate recovery code %q", descriptor.Reason)
+		}
+		catalog[descriptor.Reason] = descriptor
+	}
 	for _, document := range documentation {
 		raw, err := os.ReadFile(document.path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		section := string(raw)
-		if document.path == "../../docs/contract.md" {
-			var found bool
-			_, section, found = strings.Cut(section, "## OAuth token errors")
-			if !found {
-				t.Fatal("generated contract has no OAuth token errors section")
-			}
-			if next := strings.Index(section, "\n## "); next >= 0 {
-				section = section[:next]
-			}
+		var found bool
+		_, section, found = strings.Cut(section, "## OAuth token errors")
+		if !found {
+			t.Fatal("generated contract has no OAuth token errors section")
+		}
+		if next := strings.Index(section, "\n## "); next >= 0 {
+			section = section[:next]
 		}
 		rows := make(map[string]errx.Code)
 		for _, line := range strings.Split(section, "\n") {
@@ -249,18 +253,48 @@ func TestOAuthTokenContractTableMatchesRenderedDiagnostics(t *testing.T) {
 			if err != nil {
 				t.Fatalf("invalid OAuth exit for %q in %s: %v", code, document.path, err)
 			}
+			descriptor, found := catalog[code]
+			if !found || strings.TrimSpace(fields[3]) != descriptor.Recovery {
+				t.Fatalf("generated OAuth recovery for %q in %s differs from catalog", code, document.path)
+			}
 			rows[code] = errx.Code(exit)
 		}
-		if len(rows) != 7 {
-			t.Fatalf("OAuth rows in %s=%d, want 7", document.path, len(rows))
+		if len(rows) != len(catalog) {
+			t.Fatalf("OAuth rows in %s=%d, want %d", document.path, len(rows), len(catalog))
 		}
-		if len(documented) == 0 {
-			documented = rows
-			continue
+		for code, descriptor := range catalog {
+			if got, exists := rows[code]; !exists || got != descriptor.Exit {
+				t.Fatalf("OAuth code %s in %s: exit=%d exists=%v, want %d", code, document.path, got, exists, descriptor.Exit)
+			}
 		}
-		for code, want := range documented {
-			if got, exists := rows[code]; !exists || got != want {
-				t.Fatalf("OAuth code %s in %s: exit=%d exists=%v, want %d", code, document.path, got, exists, want)
+	}
+	for _, path := range []string{"../../docs/oauth-errors.md", "../../docs/homebrew.md"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(raw, []byte("contract.md#oauth-token-errors-standard-macos-cli-planned-v020")) {
+			t.Fatalf("%s does not link canonical generated OAuth recovery table", path)
+		}
+		if !bytes.Contains(raw, []byte("`devel`")) || !bytes.Contains(raw, []byte("`v0.2.0`")) {
+			t.Fatalf("%s does not distinguish source checkout from planned tagged release", path)
+		}
+		if path == "../../docs/oauth-errors.md" {
+			oldCodes := []string{
+				"CREDENTIAL_BINDING_MISMATCH", "USAGE", "KEYCHAIN_INTERACTION_REQUIRED",
+				"CONFIRMATION_REQUIRED", "INTERNAL", "CANCELED",
+			}
+			for _, oldCode := range oldCodes {
+				found := false
+				for _, line := range strings.Split(string(raw), "\n") {
+					if strings.HasPrefix(line, "| ") && strings.Contains(line, "`"+oldCode+"`") && strings.Contains(line, "`"+oauthrecovery.Legacy().Reason+"` / 5") {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("%s omits old-to-new refresh mapping for %s", path, oldCode)
+				}
 			}
 		}
 	}
@@ -320,9 +354,16 @@ func TestOAuthTokenContractTableMatchesRenderedDiagnostics(t *testing.T) {
 			if envelope.Error == nil || envelope.Error.Code != test.code {
 				t.Fatalf("OAuth envelope=%+v, want code %q", envelope, test.code)
 			}
-			wantExit, found := documented[envelope.Error.Code]
-			if !found || exit != wantExit || errx.ExitCode(translated) != wantExit {
-				t.Fatalf("OAuth code=%q exit=%d translated exit=%d contract exit=%d found=%v", envelope.Error.Code, exit, errx.ExitCode(translated), wantExit, found)
+			descriptor, found := catalog[envelope.Error.Code]
+			if !found || exit != descriptor.Exit || errx.ExitCode(translated) != descriptor.Exit {
+				t.Fatalf("OAuth code=%q exit=%d translated exit=%d catalog exit=%d found=%v", envelope.Error.Code, exit, errx.ExitCode(translated), descriptor.Exit, found)
+			}
+			if test.refresh {
+				if !strings.Contains(envelope.Hint, descriptor.Hint) {
+					t.Fatalf("OAuth refresh hint does not include legacy descriptor recovery: %q", envelope.Hint)
+				}
+			} else if envelope.Hint != descriptor.Hint {
+				t.Fatalf("OAuth code=%q hint=%q, want catalog hint=%q", envelope.Error.Code, envelope.Hint, descriptor.Hint)
 			}
 			if seen[envelope.Error.Code] {
 				t.Fatalf("runtime scenario duplicated OAuth code %q", envelope.Error.Code)
@@ -330,8 +371,8 @@ func TestOAuthTokenContractTableMatchesRenderedDiagnostics(t *testing.T) {
 			seen[envelope.Error.Code] = true
 		})
 	}
-	if len(documented) != len(tests) || len(seen) != len(tests) {
-		t.Fatalf("OAuth contract rows=%d runtime codes=%d, want exactly %d each", len(documented), len(seen), len(tests))
+	if len(catalog) != len(tests) || len(seen) != len(tests) {
+		t.Fatalf("OAuth catalog rows=%d runtime codes=%d, want exactly %d each", len(catalog), len(seen), len(tests))
 	}
 }
 
@@ -511,6 +552,18 @@ func TestBareOAuthTokenFailureKeepsSafeNonemptyMachineHint(t *testing.T) {
 	assertRefreshRecoveryHint(t, envelope.Hint)
 	if strings.Contains(stdout.String(), "--yes") || strings.Contains(stdout.String(), "work") {
 		t.Fatalf("bare token failure leaked unsafe recovery or profile: %q", stdout.String())
+	}
+}
+
+func TestTypedNilOAuthTokenFailureUsesSafeLegacyRecovery(t *testing.T) {
+	var failure *oauth.TokenFailure
+	translated := TranslateError(failure, "work")
+	var typed *errx.Error
+	if !errors.As(translated, &typed) || typed.Reason != oauthrecovery.Legacy().Reason || typed.Code != oauthrecovery.Legacy().Exit {
+		t.Fatalf("typed-nil token failure translated as %#v", typed)
+	}
+	if !strings.Contains(typed.Hint, oauthrecovery.Legacy().Hint) {
+		t.Fatalf("typed-nil token failure lost safe operator recovery: %q", typed.Hint)
 	}
 }
 

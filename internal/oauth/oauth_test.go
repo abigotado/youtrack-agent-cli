@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
 )
@@ -392,6 +393,54 @@ func TestTokenResponsesRejectEscapedControlCharactersInCredentials(t *testing.T)
 								t.Fatalf("token failure leaked credential: %q", err.Error())
 							}
 						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTokenResponsesRejectRawInvalidUTF8BeforeJSONDecoding(t *testing.T) {
+	for _, grant := range []struct {
+		name    string
+		refresh bool
+	}{{name: "exchange"}, {name: "refresh", refresh: true}} {
+		t.Run(grant.name, func(t *testing.T) {
+			for _, field := range []string{"access_token", "refresh_token"} {
+				t.Run(field, func(t *testing.T) {
+					// Build raw response bytes directly: json.Marshal would replace or
+					// escape the invalid byte and stop testing the wire boundary.
+					prefix := `{"access_token":"valid-access","refresh_token":"valid-refresh","token_type":"Bearer","expires_in":3600}`
+					marker := `valid-access`
+					if field == "refresh_token" {
+						marker = `valid-refresh`
+					}
+					broken := append([]byte("private-sentinel"), 0xff)
+					body := bytes.Replace([]byte(prefix), []byte(marker), broken, 1)
+					if utf8.Valid(body) {
+						t.Fatal("fixture must contain raw invalid UTF-8")
+					}
+					calls := 0
+					transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+						calls++
+						return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
+					})
+					err := tokenGrantError(t, grant.refresh, transport)
+					if calls != 1 {
+						t.Fatalf("token requests=%d, want one", calls)
+					}
+					if grant.refresh {
+						if err != ErrTokenExchange {
+							t.Fatalf("refresh error=%v, want non-retryable legacy sentinel", err)
+						}
+					} else {
+						var failure *TokenFailure
+						if !errors.As(err, &failure) || failure.Category() != TokenResponseInvalid || failure.HTTPStatus() != http.StatusOK {
+							t.Fatalf("exchange error=%v, want invalid HTTP 200 response", err)
+						}
+					}
+					if strings.Contains(err.Error(), "private-sentinel") || strings.ContainsRune(err.Error(), '\ufffd') || strings.Contains(err.Error(), "\\xff") || bytes.Contains([]byte(err.Error()), []byte{0xff}) {
+						t.Fatalf("invalid token bytes leaked into error: %q", err.Error())
 					}
 				})
 			}

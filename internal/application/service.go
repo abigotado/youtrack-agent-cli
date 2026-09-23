@@ -22,6 +22,7 @@ import (
 	"github.com/abigotado/youtrack-agent-cli/internal/journal"
 	"github.com/abigotado/youtrack-agent-cli/internal/mutation"
 	"github.com/abigotado/youtrack-agent-cli/internal/oauth"
+	"github.com/abigotado/youtrack-agent-cli/internal/oauthrecovery"
 	"github.com/abigotado/youtrack-agent-cli/internal/profile"
 	"github.com/abigotado/youtrack-agent-cli/internal/skills"
 	"github.com/abigotado/youtrack-agent-cli/internal/writepolicy"
@@ -30,7 +31,18 @@ import (
 
 const refreshSkew = 30 * time.Second
 
-const refreshRecoveryHint = "stop auth-dependent commands; ask an operator to start a fresh interactive auth login for the selected profile; if an existing credential would be replaced, obtain explicit operator approval; do not retry refresh"
+const (
+	refreshRepairBindingMismatch   = "inspect and repair local profile/credential binding"
+	refreshRepairInvalidCredential = "inspect local token validation and OAuth client configuration"
+	refreshRepairBindingOther      = "inspect local post-refresh binding validation and repair the local configuration"
+	refreshRepairInteraction       = "restore interactive Keychain access"
+	refreshRepairMigration         = "inspect Keychain ACL and perform operator-approved migration if required"
+	refreshRepairCanceledMigration = "resolve canceled Keychain authorization"
+	refreshRepairCanceledSave      = "inspect interrupted credential-store save"
+	refreshRepairTimedOutSave      = "inspect timed-out credential-store save"
+	refreshRepairKeychainStatus    = "inspect Keychain availability and permissions"
+	refreshRepairSaveOther         = "inspect local credential-store save failure"
+)
 
 // Service owns the profile, policy, credential, intent, and journal boundary.
 type Service struct {
@@ -569,8 +581,7 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 	})
 	if err != nil {
 		if errors.Is(err, oauth.ErrTokenExchange) {
-			return auth.Credential{}, errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "OAuth refresh failed").
-				WithHint(refreshRecoveryHint)
+			return auth.Credential{}, oauthRecoveryError(oauthrecovery.Legacy(), "OAuth refresh failed")
 		}
 		return auth.Credential{}, err
 	}
@@ -593,20 +604,21 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 // the underlying validation error in logs or the user-facing error.
 func refreshPreSaveBindingFailure(err error, logger *slog.Logger) *errx.Error {
 	category := "other"
-	localRepair := "inspect local post-refresh binding validation and repair the local configuration"
+	localRepair := refreshRepairBindingOther
 	switch {
 	case errors.Is(err, auth.ErrCredentialBindingMismatch):
 		category = "binding_mismatch"
-		localRepair = "inspect and repair local profile/credential binding"
+		localRepair = refreshRepairBindingMismatch
 	case errors.Is(err, auth.ErrInvalidToken):
 		category = "invalid_credential"
-		localRepair = "inspect local token validation and OAuth client configuration"
+		localRepair = refreshRepairInvalidCredential
 	}
 	if logger != nil {
 		logger.Warn("OAuth refresh binding rejected before persistence", "category", category)
 	}
-	return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "refreshed OAuth credential local binding rejected before persistence").
-		WithHint("%s; %s", localRepair, refreshRecoveryHint)
+	descriptor := oauthrecovery.Legacy()
+	return oauthRecoveryError(descriptor, "refreshed OAuth credential local binding rejected before persistence").
+		WithHint("%s; %s", localRepair, descriptor.Hint)
 }
 
 // refreshPersistenceUncertain intentionally drops the local cause. The server
@@ -615,33 +627,34 @@ func refreshPreSaveBindingFailure(err error, logger *slog.Logger) *errx.Error {
 // must not become the ordinary retryable CANCELED recovery.
 func refreshPersistenceUncertain(err error, logger *slog.Logger) *errx.Error {
 	category := "other"
-	localRepair := "inspect local credential-store save failure"
+	localRepair := refreshRepairSaveOther
 	var status *auth.StatusError
 	switch {
 	case errors.Is(err, auth.ErrInteractionNotAllowed):
 		category = "interaction_blocked"
-		localRepair = "restore interactive Keychain access"
+		localRepair = refreshRepairInteraction
 	case errors.Is(err, auth.ErrKeychainMigrationRequired):
 		category = "migration_required"
-		localRepair = "inspect Keychain ACL and perform operator-approved migration if required"
+		localRepair = refreshRepairMigration
 	case errors.Is(err, auth.ErrKeychainMigrationCanceled):
 		category = "user_canceled"
-		localRepair = "resolve canceled Keychain authorization"
+		localRepair = refreshRepairCanceledMigration
 	case errors.Is(err, context.Canceled):
 		category = "context_canceled"
-		localRepair = "inspect interrupted credential-store save"
+		localRepair = refreshRepairCanceledSave
 	case errors.Is(err, context.DeadlineExceeded):
 		category = "deadline_exceeded"
-		localRepair = "inspect timed-out credential-store save"
+		localRepair = refreshRepairTimedOutSave
 	case errors.As(err, &status):
 		category = "keychain_status_failure"
-		localRepair = "inspect Keychain availability and permissions"
+		localRepair = refreshRepairKeychainStatus
 	}
 	if logger != nil {
 		logger.Warn("OAuth refresh credential persistence is uncertain", "category", category)
 	}
-	return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "rotated OAuth credential persistence is uncertain").
-		WithHint("%s; persisted state is unknown; %s", localRepair, refreshRecoveryHint)
+	descriptor := oauthrecovery.Legacy()
+	return oauthRecoveryError(descriptor, "rotated OAuth credential persistence is uncertain").
+		WithHint("%s; persisted state is unknown; %s", localRepair, descriptor.Hint)
 }
 
 func oauthConfig(value profile.Profile) oauth.Config {

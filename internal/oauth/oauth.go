@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
 )
@@ -49,6 +50,7 @@ const (
 	TokenRedirectRefused
 	TokenTransportRejected
 	TokenRequestInterrupted
+	TokenFailureCategoryCount
 )
 
 // TokenFailure carries only a fixed category and the HTTP status, when one
@@ -67,9 +69,6 @@ func (failure *TokenFailure) Error() string {
 	switch failure.category {
 	case TokenEndpointUnavailable:
 		message = "OAuth token endpoint unavailable"
-		if failure.status == http.StatusOK {
-			message = "OAuth token response unavailable"
-		}
 	case TokenRequestRejected:
 		message = "OAuth token request rejected"
 	case TokenResponseInvalid:
@@ -343,7 +342,7 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 		// advertise retry of that POST.
 		return TokenSet{}, tokenFailure(TokenRequestInterrupted, response.StatusCode)
 	}
-	if len(raw) > maxTokenResponseBytes {
+	if len(raw) > maxTokenResponseBytes || !utf8.Valid(raw) {
 		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	var wire struct {
@@ -383,7 +382,7 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 // Match auth.ValidateToken before handing a response to the credential store,
 // without making the network-only OAuth package depend on credential storage.
 func validTokenValue(token string) bool {
-	return token != "" && len(token) <= 8192 && !strings.ContainsAny(token, "\x00\r\n")
+	return token != "" && len(token) <= 8192 && utf8.ValidString(token) && !strings.ContainsAny(token, "\x00\r\n")
 }
 
 func grantedScopes(raw json.RawMessage, allowed []string) ([]string, error) {

@@ -91,7 +91,7 @@ func imports(names ...string) map[string]bool {
 
 func TestInternalDependencyDAGIsExplicit(t *testing.T) {
 	allowed := map[string]map[string]bool{
-		module + "/internal/application":   edges("approval", "auth", "endpoint", "errx", "intent", "journal", "mutation", "oauth", "profile", "skills", "writepolicy", "youtrack"),
+		module + "/internal/application":   edges("approval", "auth", "endpoint", "errx", "intent", "journal", "mutation", "oauth", "oauthrecovery", "profile", "skills", "writepolicy", "youtrack"),
 		module + "/internal/approval":      edges("errx", "intent", "protocolvalue"),
 		module + "/internal/arch":          {},
 		module + "/internal/auth":          edges("profile"),
@@ -104,6 +104,7 @@ func TestInternalDependencyDAGIsExplicit(t *testing.T) {
 		module + "/internal/lockfile":      {},
 		module + "/internal/mutation":      edges("errx", "intent"),
 		module + "/internal/oauth":         edges("endpoint"),
+		module + "/internal/oauthrecovery": edges("errx", "oauth"),
 		module + "/internal/output":        edges("errx"),
 		module + "/internal/profile":       edges("endpoint", "lockfile"),
 		module + "/internal/protocolvalue": {},
