@@ -110,6 +110,9 @@ func TestOAuthTokenDiagnosticsKeepV1EnvelopeAndRecoveryExit(t *testing.T) {
 			if envelope.OK || envelope.V != 1 || envelope.Error == nil || envelope.Error.Code != test.code || envelope.Error.Message == "" || envelope.Hint == "" {
 				t.Fatalf("envelope=%+v", envelope)
 			}
+			if strings.Contains(envelope.Hint, "--yes") {
+				t.Fatalf("machine hint bypasses explicit replacement approval: %q", envelope.Hint)
+			}
 			if test.code == "OAUTH_TOKEN_ENDPOINT_UNAVAILABLE" && bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
 				t.Fatalf("endpoint-unavailable envelope advertised a replay delay: %q", stdout.String())
 			}
@@ -400,10 +403,45 @@ func TestUntypedOAuthFailureRetainsPublishedRecovery(t *testing.T) {
 
 func assertRefreshRecoveryHint(t *testing.T, hint string) {
 	t.Helper()
-	for _, required := range []string{"stop auth-dependent commands", "operator", "auth login --profile NAME --yes", "do not retry refresh"} {
+	for _, required := range []string{"stop auth-dependent commands", "operator", "login", "do not retry refresh"} {
 		if !strings.Contains(hint, required) {
 			t.Fatalf("refresh hint %q missing %q", hint, required)
 		}
+	}
+	if !strings.Contains(hint, "approv") && !strings.Contains(hint, "consent") {
+		t.Fatalf("refresh hint must require operator approval for credential replacement: %q", hint)
+	}
+	if strings.Contains(hint, "--yes") {
+		t.Fatalf("refresh hint must not suggest unattended credential replacement: %q", hint)
+	}
+}
+
+func TestBareOAuthTokenFailureKeepsSafeNonemptyMachineHint(t *testing.T) {
+	translated := TranslateError(&oauth.TokenFailure{}, "work")
+	if errx.ExitCode(translated) != errx.CodeAuth {
+		t.Fatalf("bare token failure exit=%d, want auth/5", errx.ExitCode(translated))
+	}
+	var stdout bytes.Buffer
+	if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(translated); exit != errx.CodeAuth {
+		t.Fatalf("bare token failure rendered exit=%d, want auth/5", exit)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(stdout.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := fields["hint"]; !present {
+		t.Fatalf("bare token failure omitted machine hint: %q", stdout.String())
+	}
+	var envelope output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.OK || envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Hint == "" || envelope.Error.RetryAfter != "" || bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
+		t.Fatalf("bare token failure envelope=%+v", envelope)
+	}
+	assertRefreshRecoveryHint(t, envelope.Hint)
+	if strings.Contains(stdout.String(), "--yes") || strings.Contains(stdout.String(), "work") {
+		t.Fatalf("bare token failure leaked unsafe recovery or profile: %q", stdout.String())
 	}
 }
 

@@ -30,7 +30,7 @@ import (
 
 const refreshSkew = 30 * time.Second
 
-const refreshRecoveryHint = "stop auth-dependent commands; ask an operator to run 'youtrack-agent-cli auth login --profile NAME --yes'; do not retry refresh"
+const refreshRecoveryHint = "stop auth-dependent commands; ask an operator to start a fresh interactive auth login for the selected profile; if an existing credential would be replaced, obtain explicit operator approval; do not retry refresh"
 
 // Service owns the profile, policy, credential, intent, and journal boundary.
 type Service struct {
@@ -583,7 +583,7 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 		return auth.Credential{}, refreshPreSaveBindingFailure(err, s.Logger)
 	}
 	if err := s.Credentials.Save(ctx, selected.Name, credential); err != nil {
-		return auth.Credential{}, refreshPersistenceUncertain()
+		return auth.Credential{}, refreshPersistenceUncertain(err, s.Logger)
 	}
 	return credential, nil
 }
@@ -610,7 +610,26 @@ func refreshPreSaveBindingFailure(err error, logger *slog.Logger) *errx.Error {
 // may have rotated the refresh token, and a failed save does not prove whether
 // the replacement credential was persisted. In particular, a canceled save
 // must not become the ordinary retryable CANCELED recovery.
-func refreshPersistenceUncertain() *errx.Error {
+func refreshPersistenceUncertain(err error, logger *slog.Logger) *errx.Error {
+	if logger != nil {
+		category := "other"
+		var status *auth.StatusError
+		switch {
+		case errors.Is(err, auth.ErrInteractionNotAllowed):
+			category = "interaction_blocked"
+		case errors.Is(err, auth.ErrKeychainMigrationRequired):
+			category = "migration_required"
+		case errors.Is(err, auth.ErrKeychainMigrationCanceled):
+			category = "user_canceled"
+		case errors.Is(err, context.Canceled):
+			category = "context_canceled"
+		case errors.Is(err, context.DeadlineExceeded):
+			category = "deadline_exceeded"
+		case errors.As(err, &status):
+			category = "keychain_status_failure"
+		}
+		logger.Warn("OAuth refresh credential persistence is uncertain", "category", category)
+	}
 	return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "rotated OAuth credential persistence is uncertain").
 		WithHint(refreshRecoveryHint)
 }

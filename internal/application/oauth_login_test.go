@@ -466,12 +466,19 @@ func TestRefreshPreSaveBindingFailureIsFixedAndRedacted(t *testing.T) {
 }
 
 func TestRotatedRefreshSaveFailureRequiresOperatorRecovery(t *testing.T) {
+	const private = "keychain-private-sentinel"
 	for _, test := range []struct {
-		name    string
-		saveErr error
+		name     string
+		saveErr  error
+		category string
 	}{
-		{name: "store failure", saveErr: errors.New("keychain-private-sentinel")},
-		{name: "canceled store failure", saveErr: fmt.Errorf("keychain-private-sentinel: %w", context.Canceled)},
+		{name: "interaction blocked", saveErr: fmt.Errorf("%s: %w", private, auth.ErrInteractionNotAllowed), category: "interaction_blocked"},
+		{name: "migration required", saveErr: fmt.Errorf("%s: %w", private, auth.ErrKeychainMigrationRequired), category: "migration_required"},
+		{name: "migration canceled", saveErr: fmt.Errorf("%s: %w", private, auth.ErrKeychainMigrationCanceled), category: "user_canceled"},
+		{name: "context canceled", saveErr: fmt.Errorf("%s: %w", private, context.Canceled), category: "context_canceled"},
+		{name: "deadline exceeded", saveErr: fmt.Errorf("%s: %w", private, context.DeadlineExceeded), category: "deadline_exceeded"},
+		{name: "keychain status", saveErr: fmt.Errorf("%s: %w", private, &auth.StatusError{Operation: "private-operation-sentinel", Status: -25293}), category: "keychain_status_failure"},
+		{name: "other", saveErr: errors.New(private), category: "other"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			selected := oauthApplicationProfile(t, true)
@@ -497,6 +504,8 @@ func TestRotatedRefreshSaveFailureRequiresOperatorRecovery(t *testing.T) {
 			})
 			service := oauthApplicationService(t, selected, store, transport)
 			service.Now = func() time.Time { return time.Unix(1_700_000_100, 0).UTC() }
+			var logs bytes.Buffer
+			service.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 
 			_, err = service.AuthStatus(t.Context(), selected.Name, true)
 			if err == nil {
@@ -514,6 +523,9 @@ func TestRotatedRefreshSaveFailureRequiresOperatorRecovery(t *testing.T) {
 				t.Fatalf("post-save failure must disclose persistence uncertainty: %q", typed.Message)
 			}
 			assertRefreshRecoveryHint(t, typed.Hint)
+			if !strings.Contains(logs.String(), "OAuth refresh credential persistence is uncertain") || !strings.Contains(logs.String(), "category="+test.category) {
+				t.Fatalf("refresh persistence log=%q, want fixed category %q", logs.String(), test.category)
+			}
 			var stdout bytes.Buffer
 			if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(translated); exit != errx.CodeAuth {
 				t.Fatalf("rendered exit=%d, want auth/5", exit)
@@ -522,12 +534,18 @@ func TestRotatedRefreshSaveFailureRequiresOperatorRecovery(t *testing.T) {
 			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 				t.Fatal(err)
 			}
-			if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Error.RetryAfter != "" {
+			if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Error.RetryAfter != "" || bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
 				t.Fatalf("unsafe OAuth failure envelope: %+v", envelope)
 			}
-			for _, secret := range []string{"keychain-private-sentinel", "new-access-private-sentinel", "new-refresh-private-sentinel"} {
-				if strings.Contains(stdout.String(), secret) {
-					t.Fatalf("OAuth failure envelope leaked private data: %q", secret)
+			assertRefreshRecoveryHint(t, envelope.Hint)
+			for _, secret := range []string{private, "private-operation-sentinel", "-25293", "new-access-private-sentinel", "new-refresh-private-sentinel", "old-access", "old-refresh", selected.Name} {
+				if strings.Contains(stdout.String(), secret) || strings.Contains(logs.String(), secret) {
+					t.Fatalf("OAuth failure envelope or log leaked private data %q", secret)
+				}
+			}
+			for _, key := range []string{"cause=", "status=", "profile=", "token="} {
+				if strings.Contains(logs.String(), key) {
+					t.Fatalf("OAuth persistence log contains unsafe attribute %q: %q", key, logs.String())
 				}
 			}
 		})

@@ -410,10 +410,11 @@ func TranslateError(err error, name string) error {
 			return errx.Auth("OAUTH_TOKEN_REQUEST_INTERRUPTED", "%s", tokenFailure.Error()).
 				WithHint("start auth login again for a fresh authorization code; do not replay the request")
 		}
-		return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "YouTrack OAuth token exchange failed")
+		return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "YouTrack OAuth token exchange failed").
+			WithHint(refreshRecoveryHint + "; do not replay the token request")
 	case errors.Is(err, oauth.ErrTokenExchange):
 		return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "YouTrack OAuth token exchange failed").
-			WithHint("correct invalid local exchange input; if refresh was attempted, stop auth-dependent commands and ask an operator to run 'youtrack-agent-cli auth login --profile NAME --yes'; do not retry refresh")
+			WithHint("correct invalid local exchange input; if refresh was attempted, " + refreshRecoveryHint)
 	case errors.Is(err, oauth.ErrInvalidConfig):
 		return errx.Usage("OAuth profile configuration is invalid")
 	default:
