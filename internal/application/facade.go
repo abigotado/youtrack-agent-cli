@@ -406,6 +406,9 @@ func TranslateError(err error, name string) error {
 		case oauth.TokenTransportRejected:
 			return errx.Auth("OAUTH_TOKEN_TRANSPORT_REJECTED", "%s", tokenFailure.Error()).
 				WithHint("check the OAuth endpoint, DNS, and TLS trust; do not retry unchanged")
+		case oauth.TokenRequestInterrupted:
+			return errx.Auth("OAUTH_TOKEN_REQUEST_INTERRUPTED", "%s", tokenFailure.Error()).
+				WithHint("start auth login again for a fresh authorization code; do not replay the request")
 		}
 		return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "YouTrack OAuth token exchange failed")
 	case errors.Is(err, oauth.ErrTokenExchange):

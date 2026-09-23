@@ -36,11 +36,14 @@ the following recovery codes are a deliberate breaking change.
 | `OAUTH_TOKEN_REQUEST_REJECTED` | 5 | Check the OAuth client and profile, then start a new login. |
 | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 | Report a token-response compatibility problem; do not retry unchanged. |
 | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 | Check the pinned token endpoint; never follow the redirect. |
+| `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 | Cancellation or deadline after an authorization-code token request attempt; start a fresh login, never replay the POST. |
 | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Invalid local exchange input or a refresh request failure after possible dispatch; start a new login. |
 
-Refresh request failures after possible dispatch keep the published code
-and exit in v0.2.0. Cancellation detected before dispatch retains normal
-cancellation recovery. A failed
+Cancellation or deadline detected before a token request attempt retains
+normal cancellation/timeout recovery. Once an attempt begins, dispatch
+may be uncertain: interrupted code exchange requires a fresh login, and
+refresh failures keep the published code and exit in v0.2.0, including
+DNS/TLS failures. A failed
 refresh must not be retried automatically: the server may have rotated
 the token before its response was lost. A durable cross-process refresh
 fence is deferred. OAuth token errors do not publish `error.retry_after`;

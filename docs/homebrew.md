@@ -37,16 +37,20 @@ must handle these cases explicitly. Previously all of them exited with 5:
 
 | Token failure | `error.code` in v0.2.0 | Exit |
 | --- | --- | --- |
-| Network interruption, HTTP 408/429/5xx, or interrupted HTTP 200 body | `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 (restart login with a fresh code) |
+| Transport failure, HTTP 408/429/5xx, or interrupted HTTP 200 body other than cancellation/deadline | `OAUTH_TOKEN_ENDPOINT_UNAVAILABLE` | 6 (bounded backoff, then restart login with a fresh code) |
 | Invalid TLS trust, missing DNS name, or scheme mismatch | `OAUTH_TOKEN_TRANSPORT_REJECTED` | 5 (check endpoint and trust) |
 | Other HTTP 4xx rejection | `OAUTH_TOKEN_REQUEST_REJECTED` | 5 (auth) |
 | Malformed HTTP 200, unexpected 1xx, or non-200 2xx | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 (auth) |
 | HTTP 3xx redirect | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 (auth) |
+| Cancellation or deadline after authorization-code token request attempt begins | `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 (fresh login; never replay the POST) |
 | Refresh request failure after possible dispatch, or invalid local exchange input | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 (auth) |
 
-Refresh request failures after possible dispatch keep the published
-`OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5 recovery in this release. A cancellation
-detected before dispatch remains a normal cancellation. Do not automatically
+Refresh request failures after an attempt begins keep the published
+`OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5 recovery in this release, including
+DNS/TLS failures even if they occurred before wire dispatch. A cancellation or
+deadline detected before an attempt remains a normal `CANCELED` or `TIMEOUT`.
+The post-attempt category is conservative because dispatch cannot always be
+established. Do not automatically
 retry an ambiguous refresh:
 the server may have rotated the old token before the response was lost.
 A durable refresh fence across CLI processes is required before changing that

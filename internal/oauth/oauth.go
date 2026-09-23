@@ -48,6 +48,7 @@ const (
 	TokenResponseInvalid
 	TokenRedirectRefused
 	TokenTransportRejected
+	TokenRequestInterrupted
 )
 
 // TokenFailure carries only a fixed category and the HTTP status, when one
@@ -77,6 +78,11 @@ func (failure *TokenFailure) Error() string {
 		message = "OAuth token redirect refused"
 	case TokenTransportRejected:
 		message = "OAuth token transport configuration rejected"
+	case TokenRequestInterrupted:
+		message = "OAuth token request interrupted"
+		if failure.status == http.StatusOK {
+			message = "OAuth token response interrupted"
+		}
 	}
 	if failure.status != 0 {
 		return fmt.Sprintf("%s (HTTP %d)", message, failure.status)
@@ -208,6 +214,33 @@ type Client struct {
 	now    func() time.Time
 }
 
+// tokenTransport prevents http.Client from parsing or following an untrusted
+// Location, including malformed values that fail before CheckRedirect runs.
+type tokenTransport struct{ base http.RoundTripper }
+
+func (transport tokenTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := transport.base.RoundTrip(request)
+	if err != nil {
+		if response != nil && response.Body != nil {
+			// A response accompanied by an error cannot be used. Closing it here
+			// avoids retaining a token response body; a close failure is not useful.
+			_ = response.Body.Close()
+		}
+		return nil, err
+	}
+	if response == nil || response.StatusCode < 300 || response.StatusCode >= 400 {
+		return response, nil
+	}
+	safeResponse := *response
+	safeResponse.Header = response.Header.Clone()
+	for key := range safeResponse.Header {
+		if strings.EqualFold(key, "Location") {
+			delete(safeResponse.Header, key)
+		}
+	}
+	return &safeResponse, nil
+}
+
 func NewClient(config Config, transport http.RoundTripper) (*Client, error) {
 	if err := validateConfig(config); err != nil {
 		return nil, err
@@ -215,7 +248,7 @@ func NewClient(config Config, transport http.RoundTripper) (*Client, error) {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	return &Client{config: config, http: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errRedirectRefused }}, now: time.Now}, nil
+	return &Client{config: config, http: &http.Client{Transport: tokenTransport{base: transport}, CheckRedirect: func(*http.Request, []*http.Request) error { return errRedirectRefused }}, now: time.Now}, nil
 }
 
 func (client *Client) Exchange(ctx context.Context, code, verifier string) (TokenSet, error) {
@@ -280,6 +313,9 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 			}
 			return TokenSet{}, tokenFailure(TokenRedirectRefused, status)
 		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return TokenSet{}, tokenFailure(TokenRequestInterrupted, 0)
+		}
 		if permanentTokenTransportError(err) {
 			return TokenSet{}, tokenFailure(TokenTransportRejected, 0)
 		}
@@ -300,6 +336,9 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxTokenResponseBytes+1))
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return TokenSet{}, tokenFailure(TokenRequestInterrupted, response.StatusCode)
+		}
 		return TokenSet{}, tokenFailure(TokenEndpointUnavailable, response.StatusCode)
 	}
 	if len(raw) > maxTokenResponseBytes {

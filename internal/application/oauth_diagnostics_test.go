@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
@@ -49,6 +50,8 @@ func TestOAuthTokenDiagnosticsKeepV1EnvelopeAndRecoveryExit(t *testing.T) {
 		{name: "rejected", status: http.StatusBadRequest, body: sentinel, code: "OAUTH_TOKEN_REQUEST_REJECTED", exit: errx.CodeAuth},
 		{name: "invalid response", status: http.StatusOK, body: `{"access_token":"` + sentinel + `"`, code: "OAUTH_TOKEN_RESPONSE_INVALID", exit: errx.CodeAuth},
 		{name: "redirect refused", status: http.StatusFound, body: sentinel, location: "https://other.example.test/secret-sentinel", code: "OAUTH_TOKEN_REDIRECT_REFUSED", exit: errx.CodeAuth},
+		{name: "malformed redirect refused", status: http.StatusFound, body: sentinel, location: "http://[secret-sentinel", code: "OAUTH_TOKEN_REDIRECT_REFUSED", exit: errx.CodeAuth},
+		{name: "redirect without location refused", status: http.StatusFound, body: sentinel, code: "OAUTH_TOKEN_REDIRECT_REFUSED", exit: errx.CodeAuth},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -102,6 +105,9 @@ func TestOAuthTokenDiagnosticsKeepV1EnvelopeAndRecoveryExit(t *testing.T) {
 			if envelope.OK || envelope.V != 1 || envelope.Error == nil || envelope.Error.Code != test.code || envelope.Error.Message == "" || envelope.Hint == "" {
 				t.Fatalf("envelope=%+v", envelope)
 			}
+			if test.code == "OAUTH_TOKEN_ENDPOINT_UNAVAILABLE" && bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
+				t.Fatalf("endpoint-unavailable envelope advertised a replay delay: %q", stdout.String())
+			}
 			if test.status != 0 && !strings.Contains(envelope.Error.Message, fmt.Sprintf("HTTP %d", test.status)) {
 				t.Fatalf("status missing from safe message: %q", envelope.Error.Message)
 			}
@@ -110,6 +116,129 @@ func TestOAuthTokenDiagnosticsKeepV1EnvelopeAndRecoveryExit(t *testing.T) {
 			}
 			if strings.Contains(stdout.String(), "secret-sentinel") || strings.Contains(stdout.String(), "other.example.test") {
 				t.Fatalf("v1 envelope leaked untrusted OAuth content: %q", stdout.String())
+			}
+		})
+	}
+}
+
+type oauthFailingBody struct{ err error }
+
+func (body oauthFailingBody) Read([]byte) (int, error) { return 0, body.err }
+func (oauthFailingBody) Close() error                  { return nil }
+
+func TestOAuthCancellationBeforeRequestAttemptKeepsGenericError(t *testing.T) {
+	for _, grant := range []struct {
+		name    string
+		refresh bool
+	}{{name: "exchange"}, {name: "refresh", refresh: true}} {
+		t.Run(grant.name, func(t *testing.T) {
+			for _, cause := range []struct {
+				name string
+				make func(context.Context) (context.Context, context.CancelFunc)
+				code string
+			}{
+				{name: "canceled", make: context.WithCancel, code: "CANCELED"},
+				{name: "deadline", make: func(parent context.Context) (context.Context, context.CancelFunc) {
+					return context.WithDeadline(parent, time.Now().Add(-time.Second))
+				}, code: "TIMEOUT"},
+			} {
+				t.Run(cause.name, func(t *testing.T) {
+					calls := 0
+					issuer := "https://hub.example.test"
+					client, err := oauth.NewClient(oauth.Config{
+						IssuerURL: issuer, AuthorizationURL: issuer + endpoint.OAuthAuthorizationPath,
+						TokenURL: issuer + endpoint.OAuthTokenPath, ClientID: "client", Scopes: []string{"YouTrack"},
+						RedirectURI: "http://127.0.0.1:18987/oauth/callback",
+					}, oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+						calls++
+						return nil, errors.New("unexpected token request")
+					}))
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx, cancel := cause.make(t.Context())
+					cancel()
+					if grant.refresh {
+						_, err = client.Refresh(ctx, oauth.TokenSet{RefreshToken: "old-refresh", Scopes: []string{"YouTrack"}})
+					} else {
+						session, sessionErr := oauth.NewSession(strings.NewReader(strings.Repeat("v", 64)))
+						if sessionErr != nil {
+							t.Fatal(sessionErr)
+						}
+						_, err = client.Exchange(ctx, "authorization-code", session.Verifier)
+					}
+					if calls != 0 {
+						t.Fatalf("pre-attempt cancellation made %d requests", calls)
+					}
+					translated := TranslateError(err, "work")
+					if errx.ExitCode(translated) != errx.CodeRetryable {
+						t.Fatalf("pre-attempt cancellation exit=%d", errx.ExitCode(translated))
+					}
+					var stdout bytes.Buffer
+					if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(translated); exit != errx.CodeRetryable {
+						t.Fatalf("rendered exit=%d", exit)
+					}
+					var envelope output.Envelope
+					if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+						t.Fatal(err)
+					}
+					if envelope.Error == nil || envelope.Error.Code != cause.code {
+						t.Fatalf("pre-attempt envelope=%+v, want %s", envelope, cause.code)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestOAuthExchangeCancellationAfterRequestAttemptRequiresFreshLogin(t *testing.T) {
+	for _, stage := range []string{"round trip", "response body"} {
+		t.Run(stage, func(t *testing.T) {
+			for _, cause := range []struct {
+				name string
+				err  error
+			}{{name: "canceled", err: context.Canceled}, {name: "deadline", err: context.DeadlineExceeded}} {
+				t.Run(cause.name, func(t *testing.T) {
+					issuer := "https://hub.example.test"
+					calls := 0
+					client, err := oauth.NewClient(oauth.Config{
+						IssuerURL: issuer, AuthorizationURL: issuer + endpoint.OAuthAuthorizationPath,
+						TokenURL: issuer + endpoint.OAuthTokenPath, ClientID: "client", Scopes: []string{"YouTrack"},
+						RedirectURI: "http://127.0.0.1:18987/oauth/callback",
+					}, oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+						calls++
+						if stage == "round trip" {
+							return nil, cause.err
+						}
+						return &http.Response{StatusCode: http.StatusOK, Body: oauthFailingBody{err: cause.err}, Header: make(http.Header)}, nil
+					}))
+					if err != nil {
+						t.Fatal(err)
+					}
+					session, err := oauth.NewSession(strings.NewReader(strings.Repeat("v", 64)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = client.Exchange(t.Context(), "authorization-code", session.Verifier)
+					if calls != 1 || errors.Is(err, cause.err) {
+						t.Fatalf("requests=%d OAuth failure=%v, want a safe one-attempt result", calls, err)
+					}
+					translated := TranslateError(err, "work")
+					if errx.ExitCode(translated) != errx.CodeAuth {
+						t.Fatalf("post-attempt exit=%d, want auth/5", errx.ExitCode(translated))
+					}
+					var stdout bytes.Buffer
+					if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(translated); exit != errx.CodeAuth {
+						t.Fatalf("rendered exit=%d, want auth/5", exit)
+					}
+					var envelope output.Envelope
+					if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+						t.Fatal(err)
+					}
+					if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_REQUEST_INTERRUPTED" || envelope.Error.RetryAfter != "" || !strings.Contains(envelope.Hint, "fresh authorization code") || !strings.Contains(envelope.Hint, "do not replay") || bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
+						t.Fatalf("post-attempt envelope=%+v", envelope)
+					}
+				})
 			}
 		})
 	}

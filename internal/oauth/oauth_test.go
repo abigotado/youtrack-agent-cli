@@ -263,6 +263,8 @@ func TestTokenFailuresClassifyExchangeAndKeepRefreshNonRetryable(t *testing.T) {
 		{name: "unauthorized", status: http.StatusUnauthorized, body: sentinel, want: TokenRequestRejected, wantStatus: http.StatusUnauthorized},
 		{name: "forbidden", status: http.StatusForbidden, body: sentinel, want: TokenRequestRejected, wantStatus: http.StatusForbidden},
 		{name: "redirect", status: http.StatusFound, body: sentinel, location: "https://other.example.test/secret-sentinel", want: TokenRedirectRefused, wantStatus: http.StatusFound},
+		{name: "redirect with malformed location", status: http.StatusFound, body: sentinel, location: "http://[secret-sentinel", want: TokenRedirectRefused, wantStatus: http.StatusFound},
+		{name: "redirect without location", status: http.StatusFound, body: sentinel, want: TokenRedirectRefused, wantStatus: http.StatusFound},
 		{name: "unexpected informational", status: http.StatusProcessing, body: sentinel, want: TokenResponseInvalid, wantStatus: http.StatusProcessing},
 		{name: "unexpected success", status: http.StatusCreated, body: sentinel, want: TokenResponseInvalid, wantStatus: http.StatusCreated},
 		{name: "malformed JSON", status: http.StatusOK, body: `{"access_token":"` + sentinel + `"`, want: TokenResponseInvalid, wantStatus: http.StatusOK},
@@ -333,6 +335,127 @@ func TestTokenFailuresClassifyExchangeAndKeepRefreshNonRetryable(t *testing.T) {
 	}
 }
 
+type closingTokenBody struct {
+	io.Reader
+	closes int
+}
+
+func (body *closingTokenBody) Close() error {
+	body.closes++
+	return nil
+}
+
+func TestTokenRedirectResponsesAreClosedWithoutFollowing(t *testing.T) {
+	for _, grant := range []struct {
+		name    string
+		refresh bool
+	}{{name: "exchange"}, {name: "refresh", refresh: true}} {
+		t.Run(grant.name, func(t *testing.T) {
+			for _, location := range []struct {
+				name  string
+				value string
+			}{
+				{name: "valid location", value: "https://other.example.test/secret-sentinel"},
+				{name: "malformed location", value: "http://[secret-sentinel"},
+				{name: "missing location"},
+			} {
+				t.Run(location.name, func(t *testing.T) {
+					body := &closingTokenBody{Reader: strings.NewReader("response-secret-sentinel")}
+					calls := 0
+					transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+						calls++
+						if request.URL.Host != "hub.example.test" {
+							t.Fatalf("OAuth request escaped fixed origin: %q", request.URL.Host)
+						}
+						header := make(http.Header)
+						if location.value != "" {
+							header.Set("Location", location.value)
+						}
+						return &http.Response{StatusCode: http.StatusFound, Body: body, Header: header}, nil
+					})
+					err := tokenGrantError(t, grant.refresh, transport)
+					if calls != 1 || body.closes != 1 {
+						t.Fatalf("token requests=%d response closes=%d, want exactly one each", calls, body.closes)
+					}
+					if grant.refresh {
+						if err != ErrTokenExchange {
+							t.Fatalf("refresh failure=%v, want legacy sentinel", err)
+						}
+					} else {
+						var failure *TokenFailure
+						if !errors.As(err, &failure) || failure.Category() != TokenRedirectRefused || failure.HTTPStatus() != http.StatusFound {
+							t.Fatalf("exchange failure=%v, want redirect refusal with HTTP 302", err)
+						}
+					}
+					if strings.Contains(err.Error(), "secret-sentinel") || strings.Contains(err.Error(), "other.example.test") {
+						t.Fatalf("redirect failure leaked untrusted content: %q", err.Error())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTokenTransportClosesResponseWhenReturningError(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		name := "exchange"
+		if refresh {
+			name = "refresh"
+		}
+		t.Run(name, func(t *testing.T) {
+			body := &closingTokenBody{Reader: strings.NewReader("response-secret-sentinel")}
+			calls := 0
+			transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: http.StatusFound, Body: body, Header: http.Header{"Location": {"http://[secret-sentinel"}}}, errors.New("transport-secret-sentinel")
+			})
+			err := tokenGrantError(t, refresh, transport)
+			if calls != 1 || body.closes != 1 {
+				t.Fatalf("token requests=%d response closes=%d, want exactly one each", calls, body.closes)
+			}
+			if !errors.Is(err, ErrTokenExchange) || strings.Contains(err.Error(), "secret-sentinel") {
+				t.Fatalf("OAuth failure=%v", err)
+			}
+		})
+	}
+}
+
+func TestTokenRequestAttemptCancellationDoesNotExposeContextError(t *testing.T) {
+	for _, grant := range []struct {
+		name    string
+		refresh bool
+	}{{name: "exchange"}, {name: "refresh", refresh: true}} {
+		t.Run(grant.name, func(t *testing.T) {
+			for _, cause := range []struct {
+				name string
+				err  error
+			}{{name: "canceled", err: context.Canceled}, {name: "deadline", err: context.DeadlineExceeded}} {
+				t.Run(cause.name, func(t *testing.T) {
+					calls := 0
+					transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+						calls++
+						return nil, cause.err
+					})
+					err := tokenGrantError(t, grant.refresh, transport)
+					if calls != 1 || !errors.Is(err, ErrTokenExchange) || errors.Is(err, cause.err) {
+						t.Fatalf("token requests=%d failure=%v, want one attempt and safe OAuth recovery", calls, err)
+					}
+					if grant.refresh {
+						if err != ErrTokenExchange {
+							t.Fatalf("refresh failure=%v, want legacy sentinel", err)
+						}
+					} else {
+						var failure *TokenFailure
+						if !errors.As(err, &failure) || failure.Category() != TokenRequestInterrupted || failure.HTTPStatus() != 0 {
+							t.Fatalf("exchange failure=%v, want status-free request interruption", err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTokenResponseReadBoundAppliesToBothGrants(t *testing.T) {
 	for _, refresh := range []bool{false, true} {
 		name := "exchange"
@@ -392,7 +515,7 @@ func TestExchangeCancellationAfterDispatchRequiresFreshLogin(t *testing.T) {
 	}
 	_, err = client.Exchange(ctx, "code", session.Verifier)
 	var failure *TokenFailure
-	if !errors.As(err, &failure) || failure.Category() != TokenEndpointUnavailable || failure.HTTPStatus() != http.StatusOK {
+	if !errors.As(err, &failure) || failure.Category() != TokenRequestInterrupted || failure.HTTPStatus() != http.StatusOK || errors.Is(err, context.Canceled) {
 		t.Fatalf("post-dispatch exchange cancellation=%v, want response-interrupted recovery", err)
 	}
 	if !strings.Contains(err.Error(), "response interrupted") || strings.Contains(err.Error(), "endpoint unavailable (HTTP 200)") {
