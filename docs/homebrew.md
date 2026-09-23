@@ -33,7 +33,9 @@ its SHA-256. A Formula update never builds from a mutable branch.
 The `v0.2.0` standard CLI changes the machine recovery classification for
 authorization-code token exchange failures. The JSON envelope remains `v:1`,
 but callers that branch on the published `OAUTH_TOKEN_EXCHANGE_FAILED` code
-must handle these cases explicitly. Previously all of them exited with 5:
+must handle these cases explicitly. The published Formula may still be an
+earlier version; check `version` before relying on these v0.2.0 codes.
+Previously all of the following failures exited with 5:
 
 | Token failure | `error.code` in v0.2.0 | Exit |
 | --- | --- | --- |
@@ -43,19 +45,26 @@ must handle these cases explicitly. Previously all of them exited with 5:
 | Malformed HTTP 200, unexpected 1xx, or non-200 2xx | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 (auth) |
 | HTTP 3xx redirect | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 (auth) |
 | Cancellation or deadline after authorization-code token request attempt begins | `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 (fresh login; never replay the POST) |
-| Refresh request failure after possible dispatch, or invalid local exchange input | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 (auth) |
+| Refresh request failure, post-refresh persistence uncertainty, or invalid local exchange input | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 (auth) |
 
 Refresh request failures after an attempt begins keep the published
 `OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5 recovery in this release, including
 DNS/TLS failures even if they occurred before wire dispatch. A cancellation or
 deadline detected before an attempt remains a normal `CANCELED` or `TIMEOUT`.
 The post-attempt category is conservative because dispatch cannot always be
-established. Do not automatically
-retry an ambiguous refresh:
+established. Agents must not trigger another refresh after an ambiguous result:
 the server may have rotated the old token before the response was lost.
 A durable refresh fence across CLI processes is required before changing that
-behavior; this release does not provide one. Start a fresh login if refresh
-fails. The exchange-specific failure codes are also listed in the
+behavior; this release does not provide one. The CLI makes no repeat attempt
+within the same invocation. A failed token request leaves the old credential
+in place; after a local save error, the persisted credential state is unknown.
+A later auth-dependent invocation, including `auth status --check` or a read,
+may automatically retry the old token. Agents should avoid those commands after
+failure and start a fresh interactive login instead.
+If the old credential remains present, replacement requires explicit
+operator approval (`auth login --profile NAME --yes`); agents must not add
+`--yes` automatically. The exchange-specific
+failure codes are also listed in the
 [machine-error reference](oauth-errors.md).
 
 Only the fixed category and numeric HTTP status appear in an error. The token

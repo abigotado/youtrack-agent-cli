@@ -37,16 +37,23 @@ the following recovery codes are a deliberate breaking change.
 | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 | Report a token-response compatibility problem; do not retry unchanged. |
 | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 | Check the pinned token endpoint; never follow the redirect. |
 | `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 | Cancellation or deadline after an authorization-code token request attempt; start a fresh login, never replay the POST. |
-| `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Invalid local exchange input or a refresh request failure after possible dispatch; start a new login. |
+| `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Invalid local exchange input, refresh request failure, or post-refresh persistence uncertainty; start a new login. |
 
 Cancellation or deadline detected before a token request attempt retains
 normal cancellation/timeout recovery. Once an attempt begins, dispatch
 may be uncertain: interrupted code exchange requires a fresh login, and
 refresh failures keep the published code and exit in v0.2.0, including
-DNS/TLS failures. A failed
-refresh must not be retried automatically: the server may have rotated
-the token before its response was lost. A durable cross-process refresh
-fence is deferred. OAuth token errors do not publish `error.retry_after`;
+DNS/TLS failures and local failure after successful refresh. The server
+may have rotated the old refresh token before its response was lost.
+The CLI makes no repeat attempt within
+one invocation. Failed token requests leave the old credential in place;
+after a local save error, persisted credential state is unknown.
+A later auth-dependent invocation, including `auth status --check` or a
+read, may automatically retry the old token. Agents must avoid those commands
+until a fresh interactive login. The operator must explicitly approve
+replacement if the old credential remains (`auth login --profile NAME --yes`);
+agents must not add `--yes` automatically. A durable cross-process refresh fence
+is deferred. OAuth token errors do not publish `error.retry_after`;
 for endpoint unavailability, use caller-bounded backoff and a fresh login.
 See the [detailed OAuth recovery guide](https://github.com/abigotado/youtrack-agent-cli/blob/main/docs/oauth-errors.md).
 

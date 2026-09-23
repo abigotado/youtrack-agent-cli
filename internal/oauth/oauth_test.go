@@ -3,6 +3,7 @@ package oauth
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -253,8 +254,13 @@ func TestTokenFailuresClassifyExchangeAndKeepRefreshNonRetryable(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "transport", transport: errors.New("transport-secret-sentinel"), want: TokenEndpointUnavailable},
+		{name: "TLS verification", transport: &tls.CertificateVerificationError{Err: errors.New("certificate-secret-sentinel")}, want: TokenTransportRejected},
+		{name: "invalid certificate", transport: x509.CertificateInvalidError{Reason: x509.Expired, Detail: "certificate-secret-sentinel"}, want: TokenTransportRejected},
 		{name: "unknown authority", transport: x509.UnknownAuthorityError{}, want: TokenTransportRejected},
+		{name: "hostname mismatch", transport: x509.HostnameError{Certificate: &x509.Certificate{DNSNames: []string{"safe.example.test"}}, Host: "host-secret-sentinel"}, want: TokenTransportRejected},
+		{name: "system roots", transport: x509.SystemRootsError{Err: errors.New("roots-secret-sentinel")}, want: TokenTransportRejected},
 		{name: "DNS name not found", transport: &net.DNSError{Name: "dns-secret-sentinel", IsNotFound: true}, want: TokenTransportRejected},
+		{name: "transient DNS failure", transport: &net.DNSError{Name: "dns-secret-sentinel", IsNotFound: false, IsTemporary: true}, want: TokenEndpointUnavailable},
 		{name: "scheme mismatch", transport: http.ErrSchemeMismatch, want: TokenTransportRejected},
 		{name: "timeout status", status: http.StatusRequestTimeout, body: sentinel, want: TokenEndpointUnavailable, wantStatus: http.StatusRequestTimeout},
 		{name: "rate limit", status: http.StatusTooManyRequests, body: sentinel, want: TokenEndpointUnavailable, wantStatus: http.StatusTooManyRequests},
@@ -393,6 +399,78 @@ func TestTokenRedirectResponsesAreClosedWithoutFollowing(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestToken307And308NeverFollowLocation(t *testing.T) {
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			for _, location := range []string{"https://other.example.test/secret-sentinel", "http://[secret-sentinel"} {
+				t.Run(location, func(t *testing.T) {
+					body := &closingTokenBody{Reader: strings.NewReader("response-secret-sentinel")}
+					calls := 0
+					transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+						calls++
+						if request.URL.Host != "hub.example.test" {
+							t.Fatalf("OAuth request escaped fixed origin: %q", request.URL.Host)
+						}
+						return &http.Response{StatusCode: status, Body: body, Header: http.Header{"Location": {location}}}, nil
+					})
+					client, err := NewClient(testConfig(), transport)
+					if err != nil {
+						t.Fatal(err)
+					}
+					// Removing the fallback makes this test fail if the primary
+					// transport ever lets Location reach http.Client.
+					client.http.CheckRedirect = nil
+					session, err := NewSession(strings.NewReader(strings.Repeat("v", 64)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = client.Exchange(t.Context(), "code", session.Verifier)
+					var failure *TokenFailure
+					if !errors.As(err, &failure) || failure.Category() != TokenRedirectRefused || failure.HTTPStatus() != status {
+						t.Fatalf("OAuth failure=%v, want redirect refusal with HTTP %d", err, status)
+					}
+					if calls != 1 || body.closes != 1 || strings.Contains(err.Error(), "secret-sentinel") {
+						t.Fatalf("requests=%d closes=%d failure=%v, want one safe refusal", calls, body.closes, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTokenCheckRedirectFallbackRefusesAndCloses(t *testing.T) {
+	client, err := NewClient(testConfig(), roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("wrapped transport was unexpectedly used")
+		return nil, errors.New("unexpected request")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := &closingTokenBody{Reader: strings.NewReader("response-secret-sentinel")}
+	calls := 0
+	// Bypass only the Location-stripping wrapper to exercise the independent
+	// http.Client.CheckRedirect safeguard on the actual token exchange path.
+	client.http.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.URL.Host != "hub.example.test" {
+			t.Fatalf("OAuth request escaped fixed origin: %q", request.URL.Host)
+		}
+		return &http.Response{StatusCode: http.StatusFound, Body: body, Header: http.Header{"Location": {"https://other.example.test/secret-sentinel"}}}, nil
+	})
+	session, err := NewSession(strings.NewReader(strings.Repeat("v", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Exchange(t.Context(), "code", session.Verifier)
+	var failure *TokenFailure
+	if !errors.As(err, &failure) || failure.Category() != TokenRedirectRefused || failure.HTTPStatus() != http.StatusFound {
+		t.Fatalf("fallback failure=%v, want redirect refusal with HTTP 302", err)
+	}
+	if calls != 1 || body.closes != 1 || strings.Contains(err.Error(), "secret-sentinel") {
+		t.Fatalf("requests=%d closes=%d failure=%v, want one safe refusal", calls, body.closes, err)
 	}
 }
 

@@ -574,12 +574,21 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 	credential.AccessTokenExpiresAt = refreshed.ExpiresAt
 	credential.OAuthScopes = append([]string(nil), refreshed.Scopes...)
 	if err := auth.ValidateCredentialBinding(credential, selected); err != nil {
-		return auth.Credential{}, err
+		return auth.Credential{}, refreshPersistenceUncertain()
 	}
 	if err := s.Credentials.Save(ctx, selected.Name, credential); err != nil {
-		return auth.Credential{}, fmt.Errorf("persist rotated OAuth token: %w", err)
+		return auth.Credential{}, refreshPersistenceUncertain()
 	}
 	return credential, nil
+}
+
+// refreshPersistenceUncertain intentionally drops the local cause. The server
+// may have rotated the refresh token, and a failed save does not prove whether
+// the replacement credential was persisted. In particular, a canceled save
+// must not become the ordinary retryable CANCELED recovery.
+func refreshPersistenceUncertain() *errx.Error {
+	return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "rotated OAuth credential persistence is uncertain").
+		WithHint("stop auth-dependent commands; ask an operator to run 'youtrack-agent-cli auth login --profile NAME --yes'; do not retry refresh")
 }
 
 func oauthConfig(value profile.Profile) oauth.Config {

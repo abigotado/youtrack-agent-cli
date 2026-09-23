@@ -248,6 +248,8 @@ func NewClient(config Config, transport http.RoundTripper) (*Client, error) {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
+	// Keep CheckRedirect as defense in depth if a Location reaches http.Client:
+	// refusing a redirect can return both the response and a wrapped error.
 	return &Client{config: config, http: &http.Client{Transport: tokenTransport{base: transport}, CheckRedirect: func(*http.Request, []*http.Request) error { return errRedirectRefused }}, now: time.Now}, nil
 }
 

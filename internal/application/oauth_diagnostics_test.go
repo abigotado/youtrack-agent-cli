@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +71,9 @@ func TestOAuthTokenDiagnosticsKeepV1EnvelopeAndRecoveryExit(t *testing.T) {
 				}
 				header := make(http.Header)
 				header.Set("X-Secret", sentinel)
+				if test.status == http.StatusServiceUnavailable {
+					header.Set("Retry-After", "120")
+				}
 				if test.location != "" {
 					header.Set("Location", test.location)
 				}
@@ -118,6 +123,111 @@ func TestOAuthTokenDiagnosticsKeepV1EnvelopeAndRecoveryExit(t *testing.T) {
 				t.Fatalf("v1 envelope leaked untrusted OAuth content: %q", stdout.String())
 			}
 		})
+	}
+}
+
+func TestOAuthTokenContractTableMatchesRenderedDiagnostics(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/contract.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, found := strings.Cut(string(raw), "## OAuth token errors")
+	if !found {
+		t.Fatal("generated contract has no OAuth token errors section")
+	}
+	if next := strings.Index(section, "\n## "); next >= 0 {
+		section = section[:next]
+	}
+	documented := make(map[string]errx.Code)
+	for _, line := range strings.Split(section, "\n") {
+		if !strings.HasPrefix(line, "| ") || strings.HasPrefix(line, "| `error.code` ") || strings.HasPrefix(line, "| ---") {
+			continue
+		}
+		fields := strings.Split(line, "|")
+		if len(fields) != 5 {
+			t.Fatalf("malformed OAuth contract row: %q", line)
+		}
+		code := strings.Trim(strings.TrimSpace(fields[1]), "`")
+		if !strings.HasPrefix(code, "OAUTH_TOKEN_") {
+			t.Fatalf("unexpected OAuth contract code: %q", code)
+		}
+		if _, duplicate := documented[code]; duplicate {
+			t.Fatalf("duplicate OAuth contract code: %q", code)
+		}
+		exit, err := strconv.Atoi(strings.TrimSpace(fields[2]))
+		if err != nil {
+			t.Fatalf("invalid OAuth contract exit for %q: %v", code, err)
+		}
+		documented[code] = errx.Code(exit)
+	}
+
+	tests := []struct {
+		name      string
+		code      string
+		status    int
+		body      string
+		transport error
+		refresh   bool
+	}{
+		{name: "unavailable", code: "OAUTH_TOKEN_ENDPOINT_UNAVAILABLE", status: http.StatusServiceUnavailable},
+		{name: "transport rejected", code: "OAUTH_TOKEN_TRANSPORT_REJECTED", transport: x509.UnknownAuthorityError{}},
+		{name: "request rejected", code: "OAUTH_TOKEN_REQUEST_REJECTED", status: http.StatusBadRequest},
+		{name: "response invalid", code: "OAUTH_TOKEN_RESPONSE_INVALID", status: http.StatusOK, body: `{"invalid":true}`},
+		{name: "redirect refused", code: "OAUTH_TOKEN_REDIRECT_REFUSED", status: http.StatusFound},
+		{name: "request interrupted", code: "OAUTH_TOKEN_REQUEST_INTERRUPTED", transport: context.Canceled},
+		{name: "legacy refresh", code: "OAUTH_TOKEN_EXCHANGE_FAILED", status: http.StatusServiceUnavailable, refresh: true},
+	}
+	seen := make(map[string]bool)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			issuer := "https://hub.example.test"
+			client, err := oauth.NewClient(oauth.Config{
+				IssuerURL: issuer, AuthorizationURL: issuer + endpoint.OAuthAuthorizationPath,
+				TokenURL: issuer + endpoint.OAuthTokenPath, ClientID: "client", Scopes: []string{"YouTrack"},
+				RedirectURI: "http://127.0.0.1:18987/oauth/callback",
+			}, oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+				if test.transport != nil {
+					return nil, test.transport
+				}
+				return &http.Response{StatusCode: test.status, Body: io.NopCloser(strings.NewReader(test.body)), Header: make(http.Header)}, nil
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.refresh {
+				_, err = client.Refresh(t.Context(), oauth.TokenSet{RefreshToken: "refresh", Scopes: []string{"YouTrack"}})
+			} else {
+				session, sessionErr := oauth.NewSession(strings.NewReader(strings.Repeat("v", 64)))
+				if sessionErr != nil {
+					t.Fatal(sessionErr)
+				}
+				_, err = client.Exchange(t.Context(), "code", session.Verifier)
+			}
+			if err == nil {
+				t.Fatal("OAuth token request unexpectedly succeeded")
+			}
+			translated := TranslateError(err, "work")
+			var stdout bytes.Buffer
+			exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(translated)
+			var envelope output.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Code != test.code {
+				t.Fatalf("OAuth envelope=%+v, want code %q", envelope, test.code)
+			}
+			wantExit, found := documented[envelope.Error.Code]
+			if !found || exit != wantExit || errx.ExitCode(translated) != wantExit {
+				t.Fatalf("OAuth code=%q exit=%d translated exit=%d contract exit=%d found=%v", envelope.Error.Code, exit, errx.ExitCode(translated), wantExit, found)
+			}
+			if seen[envelope.Error.Code] {
+				t.Fatalf("runtime scenario duplicated OAuth code %q", envelope.Error.Code)
+			}
+			seen[envelope.Error.Code] = true
+		})
+	}
+	if len(documented) != len(tests) || len(seen) != len(tests) {
+		t.Fatalf("OAuth contract rows=%d runtime codes=%d, want exactly %d each", len(documented), len(seen), len(tests))
 	}
 }
 
