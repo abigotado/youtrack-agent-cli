@@ -569,7 +569,7 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 	})
 	if err != nil {
 		if errors.Is(err, oauth.ErrTokenExchange) {
-			return auth.Credential{}, errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "OAuth refresh request failed").
+			return auth.Credential{}, errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "OAuth refresh failed").
 				WithHint(refreshRecoveryHint)
 		}
 		return auth.Credential{}, err

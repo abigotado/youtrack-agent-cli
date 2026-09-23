@@ -263,7 +263,7 @@ func TestFailedRefreshKeepsStoredCredentialAndRequiresLogin(t *testing.T) {
 
 	_, err = service.AuthStatus(t.Context(), selected.Name, true)
 	var typed *errx.Error
-	if !errors.As(err, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || typed.RetryAfter != 0 || !strings.Contains(typed.Message, "refresh request failed") {
+	if !errors.As(err, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || typed.RetryAfter != 0 || typed.Message != "OAuth refresh failed" {
 		t.Fatalf("refresh recovery=%#v, want classified failed request", typed)
 	}
 	if requests != 1 || store.saveCalls != 0 || !reflect.DeepEqual(store.value, bound) {
@@ -404,7 +404,7 @@ func TestRefreshRejectsUnsafeTokenBeforePersistenceAndKeepsOldCredential(t *test
 	if !errors.As(err, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || typed.RetryAfter != 0 {
 		t.Fatalf("pre-save recovery=%#v, want non-retryable auth/5", typed)
 	}
-	if !strings.Contains(typed.Message, "refresh request failed") || strings.Contains(typed.Message, "persistence") {
+	if typed.Message != "OAuth refresh failed" {
 		t.Fatalf("parser rejection misstates failure stage: %q", typed.Message)
 	}
 	if requests != 1 || store.saveCalls != 0 || !store.exists || !reflect.DeepEqual(store.value, bound) {
@@ -572,6 +572,44 @@ func TestLoginOAuthClassifiesRejectedTokenExchange(t *testing.T) {
 	}
 	if requests != 1 || store.saveCalls != 0 || store.exists {
 		t.Fatalf("token requests=%d credential saves=%d exists=%t", requests, store.saveCalls, store.exists)
+	}
+}
+
+func TestFailedReloginPreservesExistingCredential(t *testing.T) {
+	selected := oauthApplicationProfile(t, true)
+	bound, err := auth.BindCredential(auth.Credential{
+		Kind: auth.CredentialOAuth, AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer",
+		AccessTokenExpiresAt: time.Unix(1_700_000_000, 0).UTC(), OAuthScopes: []string{"beta"},
+	}, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		status int
+		body   string
+		code   string
+	}{
+		{name: "rejected request", status: http.StatusBadRequest, body: "server-secret-sentinel", code: "OAUTH_TOKEN_REQUEST_REJECTED"},
+		{name: "invalid response", status: http.StatusOK, body: `{"access_token":"new-private-sentinel\nline","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`, code: "OAUTH_TOKEN_RESPONSE_INVALID"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &oauthCredentialStore{value: bound, exists: true}
+			requests := 0
+			transport := oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+				requests++
+				return &http.Response{StatusCode: test.status, Body: io.NopCloser(strings.NewReader(test.body)), Header: make(http.Header)}, nil
+			})
+			service := oauthApplicationService(t, selected, store, transport)
+			_, err := service.LoginOAuth(t.Context(), selected.Name, true, callbackBrowser{})
+			var typed *errx.Error
+			if !errors.As(TranslateError(err, selected.Name), &typed) || typed.Reason != test.code || typed.Code != errx.CodeAuth {
+				t.Fatalf("re-login recovery=%v, want %s auth/5", err, test.code)
+			}
+			if requests != 1 || store.saveCalls != 0 || !store.exists || !reflect.DeepEqual(store.value, bound) {
+				t.Fatalf("token requests=%d saves=%d exists=%t credential unchanged=%t", requests, store.saveCalls, store.exists, reflect.DeepEqual(store.value, bound))
+			}
+		})
 	}
 }
 

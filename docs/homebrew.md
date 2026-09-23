@@ -2,9 +2,11 @@
 
 ## Standard macOS Formula
 
-The standard macOS distribution channel for the existing CLI is a source-built
-Formula in the maintained tap. A merged source change reaches Homebrew only
-after its own release tag and a merged tap update; check `version` before
+The standard macOS distribution channel for the existing CLI is a planned
+source-built Formula in the maintained tap. The install command below applies
+after publication; it is not evidence that the Formula is already available.
+A merged source change reaches Homebrew only after its own release tag and a
+merged tap update; check `version` before
 relying on newly documented behavior:
 
 ```bash
