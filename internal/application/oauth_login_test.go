@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -261,11 +262,206 @@ func TestFailedRefreshKeepsStoredCredentialAndRequiresLogin(t *testing.T) {
 	service.Now = func() time.Time { return time.Unix(1_700_000_100, 0).UTC() }
 
 	_, err = service.AuthStatus(t.Context(), selected.Name, true)
-	if err != oauth.ErrTokenExchange {
-		t.Fatalf("refresh error=%v, want re-login requirement", err)
+	var typed *errx.Error
+	if !errors.As(err, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || typed.RetryAfter != 0 || !strings.Contains(typed.Message, "refresh request failed") {
+		t.Fatalf("refresh recovery=%#v, want classified failed request", typed)
 	}
-	if requests != 1 || store.saveCalls != 0 || store.value.RefreshToken != "old-refresh" {
-		t.Fatalf("refresh requests=%d saves=%d credential changed=%t", requests, store.saveCalls, store.value.RefreshToken != "old-refresh")
+	if requests != 1 || store.saveCalls != 0 || !reflect.DeepEqual(store.value, bound) {
+		t.Fatalf("refresh requests=%d saves=%d credential changed=%t", requests, store.saveCalls, !reflect.DeepEqual(store.value, bound))
+	}
+	var stdout bytes.Buffer
+	if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(TranslateError(err, selected.Name)); exit != errx.CodeAuth {
+		t.Fatalf("rendered refresh exit=%d, want auth/5", exit)
+	}
+	var envelope output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Error.RetryAfter != "" || bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
+		t.Fatalf("failed refresh envelope=%+v", envelope)
+	}
+	assertRefreshRecoveryHint(t, envelope.Hint)
+	if strings.Contains(stdout.String(), "server-secret-sentinel") {
+		t.Fatalf("failed refresh envelope leaked untrusted response: %q", stdout.String())
+	}
+}
+
+func TestCanceledInflightServiceRefreshRequiresOperatorRecovery(t *testing.T) {
+	selected := oauthApplicationProfile(t, true)
+	bound, err := auth.BindCredential(auth.Credential{
+		Kind: auth.CredentialOAuth, AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer",
+		AccessTokenExpiresAt: time.Unix(1_700_000_000, 0).UTC(), OAuthScopes: []string{"beta"},
+	}, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &oauthCredentialStore{value: bound, exists: true}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	requests := 0
+	transport := oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusOK, Body: oauthCanceledBody{cancel: cancel}, Header: make(http.Header)}, nil
+	})
+	service := oauthApplicationService(t, selected, store, transport)
+	service.Now = func() time.Time { return time.Unix(1_700_000_100, 0).UTC() }
+
+	_, err = service.AuthStatus(ctx, selected.Name, true)
+	if requests != 1 || store.saveCalls != 0 || !reflect.DeepEqual(store.value, bound) {
+		t.Fatalf("requests=%d saves=%d credential unchanged=%t", requests, store.saveCalls, reflect.DeepEqual(store.value, bound))
+	}
+	var stdout bytes.Buffer
+	if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(TranslateError(err, selected.Name)); exit != errx.CodeAuth {
+		t.Fatalf("in-flight refresh exit=%d, want auth/5", exit)
+	}
+	var envelope output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Error.RetryAfter != "" || bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
+		t.Fatalf("in-flight refresh envelope=%+v", envelope)
+	}
+	assertRefreshRecoveryHint(t, envelope.Hint)
+}
+
+func TestPreCanceledServiceRefreshDoesNotAttemptTokenRequest(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		make func(context.Context) (context.Context, context.CancelFunc)
+		code string
+	}{
+		{name: "canceled", make: context.WithCancel, code: "CANCELED"},
+		{name: "deadline", make: func(parent context.Context) (context.Context, context.CancelFunc) {
+			return context.WithDeadline(parent, time.Now().Add(-time.Second))
+		}, code: "TIMEOUT"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected := oauthApplicationProfile(t, true)
+			bound, err := auth.BindCredential(auth.Credential{
+				Kind: auth.CredentialOAuth, AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer",
+				AccessTokenExpiresAt: time.Unix(1_700_000_000, 0).UTC(), OAuthScopes: []string{"beta"},
+			}, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := &oauthCredentialStore{value: bound, exists: true}
+			requests := 0
+			service := oauthApplicationService(t, selected, store, oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+				requests++
+				return nil, errors.New("unexpected token request")
+			}))
+			service.Now = func() time.Time { return time.Unix(1_700_000_100, 0).UTC() }
+			ctx, cancel := test.make(t.Context())
+			cancel()
+			_, err = service.AuthStatus(ctx, selected.Name, true)
+			if requests != 0 || store.saveCalls != 0 || !reflect.DeepEqual(store.value, bound) {
+				t.Fatalf("requests=%d saves=%d credential unchanged=%t", requests, store.saveCalls, reflect.DeepEqual(store.value, bound))
+			}
+			var stdout bytes.Buffer
+			if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(TranslateError(err, selected.Name)); exit != errx.CodeRetryable {
+				t.Fatalf("pre-attempt exit=%d, want retryable/6", exit)
+			}
+			var envelope output.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Code != test.code {
+				t.Fatalf("pre-attempt envelope=%+v, want %s", envelope, test.code)
+			}
+		})
+	}
+}
+
+func TestRefreshRejectsUnsafeTokenBeforePersistenceAndKeepsOldCredential(t *testing.T) {
+	selected := oauthApplicationProfile(t, true)
+	bound, err := auth.BindCredential(auth.Credential{
+		Kind: auth.CredentialOAuth, AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer",
+		AccessTokenExpiresAt: time.Unix(1_700_000_000, 0).UTC(), OAuthScopes: []string{"beta"},
+	}, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &oauthCredentialStore{value: bound, exists: true}
+	requests := 0
+	transport := oauthDiagnosticTransport(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "hub.example.test" || request.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Host)
+		}
+		requests++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"access_token":"new-access-private-sentinel\nline","refresh_token":"new-refresh-private-sentinel","token_type":"Bearer","expires_in":3600}`)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	service := oauthApplicationService(t, selected, store, transport)
+	service.Now = func() time.Time { return time.Unix(1_700_000_100, 0).UTC() }
+	var logs bytes.Buffer
+	service.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+	_, err = service.AuthStatus(t.Context(), selected.Name, true)
+	var typed *errx.Error
+	if !errors.As(err, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || typed.RetryAfter != 0 {
+		t.Fatalf("pre-save recovery=%#v, want non-retryable auth/5", typed)
+	}
+	if !strings.Contains(typed.Message, "refresh request failed") || strings.Contains(typed.Message, "persistence") {
+		t.Fatalf("parser rejection misstates failure stage: %q", typed.Message)
+	}
+	if requests != 1 || store.saveCalls != 0 || !store.exists || !reflect.DeepEqual(store.value, bound) {
+		t.Fatalf("requests=%d saves=%d credential unchanged=%t", requests, store.saveCalls, reflect.DeepEqual(store.value, bound))
+	}
+	var stdout bytes.Buffer
+	if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(TranslateError(err, selected.Name)); exit != errx.CodeAuth {
+		t.Fatalf("rendered exit=%d, want auth/5", exit)
+	}
+	var envelope output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Error.Message != typed.Message || envelope.Error.RetryAfter != "" || bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
+		t.Fatalf("pre-save failure envelope=%+v", envelope)
+	}
+	assertRefreshRecoveryHint(t, envelope.Hint)
+	if strings.Contains(logs.String(), "binding rejected before persistence") {
+		t.Fatalf("token parser rejection incorrectly claimed a binding failure: %q", logs.String())
+	}
+	for _, secret := range []string{"new-access-private-sentinel", "new-refresh-private-sentinel", "old-access", "old-refresh"} {
+		if strings.Contains(stdout.String(), secret) || strings.Contains(logs.String(), secret) {
+			t.Fatalf("pre-save error or log leaked token %q", secret)
+		}
+	}
+}
+
+func TestRefreshPreSaveBindingFailureIsFixedAndRedacted(t *testing.T) {
+	const secret = "credential-private-sentinel"
+	for _, test := range []struct {
+		name     string
+		cause    error
+		category string
+	}{
+		{name: "invalid token", cause: fmt.Errorf("%w: %s", auth.ErrInvalidToken, secret), category: "invalid_credential"},
+		{name: "binding mismatch", cause: fmt.Errorf("%w: %s", auth.ErrCredentialBindingMismatch, secret), category: "binding_mismatch"},
+		{name: "other", cause: errors.New(secret), category: "other"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			failure := refreshPreSaveBindingFailure(test.cause, slog.New(slog.NewTextHandler(&logs, nil)))
+			if failure.Code != errx.CodeAuth || failure.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || failure.RetryAfter != 0 ||
+				!strings.Contains(failure.Message, "before persistence") || strings.Contains(failure.Message, "uncertain") {
+				t.Fatalf("pre-save binding failure=%#v, want fixed auth/5 before-persistence diagnosis", failure)
+			}
+			assertRefreshRecoveryHint(t, failure.Hint)
+			if !strings.Contains(logs.String(), "binding rejected before persistence") || !strings.Contains(logs.String(), test.category) {
+				t.Fatalf("pre-save log=%q, want fixed category %q", logs.String(), test.category)
+			}
+			var stdout bytes.Buffer
+			if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(failure); exit != errx.CodeAuth {
+				t.Fatalf("pre-save binding exit=%d, want auth/5", exit)
+			}
+			if strings.Contains(logs.String(), secret) || strings.Contains(stdout.String(), secret) || strings.Contains(failure.Error(), secret) {
+				t.Fatalf("pre-save binding leaked private cause: log=%q output=%q", logs.String(), stdout.String())
+			}
+		})
 	}
 }
 
@@ -314,9 +510,10 @@ func TestRotatedRefreshSaveFailureRequiresOperatorRecovery(t *testing.T) {
 			if !errors.As(translated, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || typed.RetryAfter != 0 {
 				t.Fatalf("recovery=%#v, want non-retryable legacy OAuth auth error", typed)
 			}
-			if !strings.Contains(typed.Hint, "stop auth-dependent commands") || !strings.Contains(typed.Hint, "operator") || !strings.Contains(typed.Hint, "auth login --profile NAME --yes") || !strings.Contains(typed.Hint, "do not retry") {
-				t.Fatalf("recovery hint=%q, want stop and operator-approved login", typed.Hint)
+			if !strings.Contains(typed.Message, "persistence is uncertain") {
+				t.Fatalf("post-save failure must disclose persistence uncertainty: %q", typed.Message)
 			}
+			assertRefreshRecoveryHint(t, typed.Hint)
 			var stdout bytes.Buffer
 			if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(translated); exit != errx.CodeAuth {
 				t.Fatalf("rendered exit=%d, want auth/5", exit)
@@ -357,5 +554,69 @@ func TestLoginOAuthClassifiesRejectedTokenExchange(t *testing.T) {
 	}
 	if requests != 1 || store.saveCalls != 0 || store.exists {
 		t.Fatalf("token requests=%d credential saves=%d exists=%t", requests, store.saveCalls, store.exists)
+	}
+}
+
+func TestLoginOAuthRejectsUnsafeTokenWithoutAccountReadOrPersistence(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{
+			name: "access token with escaped LF",
+			body: `{"access_token":"access-private-sentinel\nline","refresh_token":"refresh","token_type":"Bearer","expires_in":3600}`,
+		},
+		{
+			name: "refresh token with escaped NUL",
+			body: `{"access_token":"access","refresh_token":"refresh-private-sentinel\u0000end","token_type":"Bearer","expires_in":3600}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected := oauthApplicationProfile(t, false)
+			store := &oauthCredentialStore{}
+			tokenRequests, accountRequests := 0, 0
+			transport := oauthDiagnosticTransport(func(request *http.Request) (*http.Response, error) {
+				switch request.URL.Host {
+				case "hub.example.test":
+					tokenRequests++
+					if request.Method != http.MethodPost {
+						t.Fatalf("token method=%s, want POST", request.Method)
+					}
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(test.body)), Header: make(http.Header)}, nil
+				case "tracker.example.test":
+					accountRequests++
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"1-42","login":"alice"}`)), Header: make(http.Header)}, nil
+				default:
+					t.Fatalf("unexpected OAuth origin: %s", request.URL.Host)
+					return nil, errors.New("unexpected OAuth origin")
+				}
+			})
+			service := oauthApplicationService(t, selected, store, transport)
+			_, err := service.LoginOAuth(t.Context(), selected.Name, false, callbackBrowser{})
+			translated := TranslateError(err, selected.Name)
+			var typed *errx.Error
+			if !errors.As(translated, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_RESPONSE_INVALID" || typed.RetryAfter != 0 {
+				t.Fatalf("login failure=%#v, want invalid token response auth/5", typed)
+			}
+			if tokenRequests != 1 || accountRequests != 0 || store.saveCalls != 0 || store.exists {
+				t.Fatalf("token requests=%d account reads=%d credential saves=%d exists=%t", tokenRequests, accountRequests, store.saveCalls, store.exists)
+			}
+			var stdout bytes.Buffer
+			if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(translated); exit != errx.CodeAuth {
+				t.Fatalf("invalid login response exit=%d, want auth/5", exit)
+			}
+			var envelope output.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_RESPONSE_INVALID" || envelope.Error.RetryAfter != "" {
+				t.Fatalf("invalid login response envelope=%+v", envelope)
+			}
+			for _, secret := range []string{"access-private-sentinel", "refresh-private-sentinel"} {
+				if strings.Contains(stdout.String(), secret) || strings.Contains(err.Error(), secret) {
+					t.Fatalf("invalid login response leaked token %q", secret)
+				}
+			}
+		})
 	}
 }

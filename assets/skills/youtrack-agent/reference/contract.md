@@ -23,7 +23,9 @@ prompts, warnings, and logs go to stderr. `error.code` is a stable
 `SCREAMING_SNAKE_CASE` value; add error detail there before considering a new
 process status.
 
-## OAuth token errors (standard macOS CLI, v0.2.0)
+## OAuth token errors (standard macOS CLI; v0.2.0 introduction)
+
+These codes first ship in v0.2.0 and may not be present in an older installed Formula.
 
 Authorization-code exchange failures previously used
 `OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5. The JSON envelope remains v1, but
@@ -37,17 +39,18 @@ the following recovery codes are a deliberate breaking change.
 | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 | Report a token-response compatibility problem; do not retry unchanged. |
 | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 | Check the pinned token endpoint; never follow the redirect. |
 | `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 | Cancellation or deadline after an authorization-code token request attempt; start a fresh login, never replay the POST. |
-| `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Invalid local exchange input, refresh request failure, or post-refresh persistence uncertainty; start a new login. |
+| `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Invalid local exchange input, refresh request failure, post-refresh binding rejection, or persistence uncertainty; use the applicable recovery. |
 
 Cancellation or deadline detected before a token request attempt retains
 normal cancellation/timeout recovery. Once an attempt begins, dispatch
 may be uncertain: interrupted code exchange requires a fresh login, and
 refresh failures keep the published code and exit in v0.2.0, including
-DNS/TLS failures and local failure after successful refresh. The server
+DNS/TLS failures and local failure after successful refresh. Local binding
+rejection happens before Save and leaves the old credential in place; a
+Save error leaves persisted credential state unknown. The server
 may have rotated the old refresh token before its response was lost.
 The CLI makes no repeat attempt within
-one invocation. Failed token requests leave the old credential in place;
-after a local save error, persisted credential state is unknown.
+one invocation. Failed token requests leave the old credential in place.
 A later auth-dependent invocation, including `auth status --check` or a
 read, may automatically retry the old token. Agents must avoid those commands
 until a fresh interactive login. The operator must explicitly approve

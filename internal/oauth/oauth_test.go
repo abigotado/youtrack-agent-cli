@@ -341,6 +341,64 @@ func TestTokenFailuresClassifyExchangeAndKeepRefreshNonRetryable(t *testing.T) {
 	}
 }
 
+func TestTokenResponsesRejectEscapedControlCharactersInCredentials(t *testing.T) {
+	for _, grant := range []struct {
+		name    string
+		refresh bool
+	}{{name: "exchange"}, {name: "refresh", refresh: true}} {
+		t.Run(grant.name, func(t *testing.T) {
+			for _, field := range []string{"access_token", "refresh_token"} {
+				t.Run(field, func(t *testing.T) {
+					for _, control := range []struct {
+						name    string
+						escaped string
+					}{
+						{name: "NUL", escaped: `\u0000`},
+						{name: "CR", escaped: `\r`},
+						{name: "LF", escaped: `\n`},
+					} {
+						t.Run(control.name, func(t *testing.T) {
+							const sentinel = "token-private-sentinel"
+							access, refresh := sentinel, "refresh"
+							if field == "access_token" {
+								access += control.escaped
+							} else {
+								refresh = sentinel + control.escaped
+							}
+							body := `{"access_token":"` + access + `","refresh_token":"` + refresh + `","token_type":"Bearer","expires_in":3600}`
+							calls := 0
+							transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+								calls++
+								if request.Method != http.MethodPost || request.URL.Host != "hub.example.test" {
+									t.Fatalf("unexpected token endpoint: %s %s", request.Method, request.URL.Host)
+								}
+								return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+							})
+							err := tokenGrantError(t, grant.refresh, transport)
+							if calls != 1 {
+								t.Fatalf("token requests=%d, want exactly one", calls)
+							}
+							if grant.refresh {
+								if err != ErrTokenExchange {
+									t.Fatalf("refresh failure=%v, want legacy auth failure", err)
+								}
+							} else {
+								var failure *TokenFailure
+								if !errors.As(err, &failure) || failure.Category() != TokenResponseInvalid || failure.HTTPStatus() != http.StatusOK {
+									t.Fatalf("exchange failure=%v, want invalid HTTP 200 token response", err)
+								}
+							}
+							if strings.Contains(err.Error(), sentinel) {
+								t.Fatalf("token failure leaked credential: %q", err.Error())
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 type closingTokenBody struct {
 	io.Reader
 	closes int

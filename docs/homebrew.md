@@ -45,7 +45,7 @@ Previously all of the following failures exited with 5:
 | Malformed HTTP 200, unexpected 1xx, or non-200 2xx | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 (auth) |
 | HTTP 3xx redirect | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 (auth) |
 | Cancellation or deadline after authorization-code token request attempt begins | `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 (fresh login; never replay the POST) |
-| Refresh request failure, post-refresh persistence uncertainty, or invalid local exchange input | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 (auth) |
+| Refresh request failure, post-refresh binding rejection or persistence uncertainty, or invalid local exchange input | `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 (auth) |
 
 Refresh request failures after an attempt begins keep the published
 `OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5 recovery in this release, including
@@ -56,8 +56,9 @@ established. Agents must not trigger another refresh after an ambiguous result:
 the server may have rotated the old token before the response was lost.
 A durable refresh fence across CLI processes is required before changing that
 behavior; this release does not provide one. The CLI makes no repeat attempt
-within the same invocation. A failed token request leaves the old credential
-in place; after a local save error, the persisted credential state is unknown.
+within the same invocation. A failed token request or pre-Save binding
+rejection leaves the old credential in place; after a local save error, the
+persisted credential state is unknown.
 A later auth-dependent invocation, including `auth status --check` or a read,
 may automatically retry the old token. Agents should avoid those commands after
 failure and start a fresh interactive login instead.

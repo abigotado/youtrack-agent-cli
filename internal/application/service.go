@@ -30,6 +30,8 @@ import (
 
 const refreshSkew = 30 * time.Second
 
+const refreshRecoveryHint = "stop auth-dependent commands; ask an operator to run 'youtrack-agent-cli auth login --profile NAME --yes'; do not retry refresh"
+
 // Service owns the profile, policy, credential, intent, and journal boundary.
 type Service struct {
 	Profiles    *profile.Registry
@@ -566,6 +568,10 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 		Scopes: append([]string(nil), currentScopes...),
 	})
 	if err != nil {
+		if errors.Is(err, oauth.ErrTokenExchange) {
+			return auth.Credential{}, errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "OAuth refresh request failed").
+				WithHint(refreshRecoveryHint)
+		}
 		return auth.Credential{}, err
 	}
 	credential.AccessToken = refreshed.AccessToken
@@ -574,12 +580,30 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 	credential.AccessTokenExpiresAt = refreshed.ExpiresAt
 	credential.OAuthScopes = append([]string(nil), refreshed.Scopes...)
 	if err := auth.ValidateCredentialBinding(credential, selected); err != nil {
-		return auth.Credential{}, refreshPersistenceUncertain()
+		return auth.Credential{}, refreshPreSaveBindingFailure(err, s.Logger)
 	}
 	if err := s.Credentials.Save(ctx, selected.Name, credential); err != nil {
 		return auth.Credential{}, refreshPersistenceUncertain()
 	}
 	return credential, nil
+}
+
+// This path is a defensive fence after a successful token response and before
+// the first credential-store write. Never retain the rejected credential or
+// the underlying validation error in logs or the user-facing error.
+func refreshPreSaveBindingFailure(err error, logger *slog.Logger) *errx.Error {
+	if logger != nil {
+		category := "other"
+		switch {
+		case errors.Is(err, auth.ErrCredentialBindingMismatch):
+			category = "binding_mismatch"
+		case errors.Is(err, auth.ErrInvalidToken):
+			category = "invalid_credential"
+		}
+		logger.Warn("OAuth refresh binding rejected before persistence", "category", category)
+	}
+	return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "refreshed OAuth credential local binding rejected before persistence").
+		WithHint(refreshRecoveryHint)
 }
 
 // refreshPersistenceUncertain intentionally drops the local cause. The server
@@ -588,7 +612,7 @@ func (s *Service) refreshIfNeeded(ctx context.Context, selected profile.Profile,
 // must not become the ordinary retryable CANCELED recovery.
 func refreshPersistenceUncertain() *errx.Error {
 	return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "rotated OAuth credential persistence is uncertain").
-		WithHint("stop auth-dependent commands; ask an operator to run 'youtrack-agent-cli auth login --profile NAME --yes'; do not retry refresh")
+		WithHint(refreshRecoveryHint)
 }
 
 func oauthConfig(value profile.Profile) oauth.Config {

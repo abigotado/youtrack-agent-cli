@@ -68,7 +68,7 @@ func (failure *TokenFailure) Error() string {
 	case TokenEndpointUnavailable:
 		message = "OAuth token endpoint unavailable"
 		if failure.status == http.StatusOK {
-			message = "OAuth token response interrupted"
+			message = "OAuth token response unavailable"
 		}
 	case TokenRequestRejected:
 		message = "OAuth token request rejected"
@@ -81,7 +81,7 @@ func (failure *TokenFailure) Error() string {
 	case TokenRequestInterrupted:
 		message = "OAuth token request interrupted"
 		if failure.status == http.StatusOK {
-			message = "OAuth token response interrupted"
+			message = "OAuth token response interrupted by cancellation"
 		}
 	}
 	if failure.status != 0 {
@@ -363,14 +363,14 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	seconds, err := strconv.ParseInt(string(wire.ExpiresIn), 10, 64)
-	if err != nil || seconds <= 0 || seconds > int64((365*24*time.Hour)/time.Second) || wire.AccessToken == "" || len(wire.AccessToken) > 8192 || !strings.EqualFold(wire.TokenType, "Bearer") {
+	if err != nil || seconds <= 0 || seconds > int64((365*24*time.Hour)/time.Second) || !validTokenValue(wire.AccessToken) || !strings.EqualFold(wire.TokenType, "Bearer") {
 		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	refresh := wire.RefreshToken
 	if refresh == "" {
 		refresh = previousRefresh
 	}
-	if refresh == "" || len(refresh) > 8192 {
+	if !validTokenValue(refresh) {
 		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	grantedScopes, err := grantedScopes(wire.Scope, allowedScopes)
@@ -378,6 +378,12 @@ func (client *Client) request(ctx context.Context, form url.Values, previousRefr
 		return TokenSet{}, tokenFailure(TokenResponseInvalid, response.StatusCode)
 	}
 	return TokenSet{AccessToken: wire.AccessToken, RefreshToken: refresh, TokenType: "Bearer", ExpiresAt: client.now().Add(time.Duration(seconds) * time.Second).UTC(), Scopes: grantedScopes}, nil
+}
+
+// Match auth.ValidateToken before handing a response to the credential store,
+// without making the network-only OAuth package depend on credential storage.
+func validTokenValue(token string) bool {
+	return token != "" && len(token) <= 8192 && !strings.ContainsAny(token, "\x00\r\n")
 }
 
 func grantedScopes(raw json.RawMessage, allowed []string) ([]string, error) {

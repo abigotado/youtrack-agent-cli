@@ -127,38 +127,70 @@ func TestOAuthTokenDiagnosticsKeepV1EnvelopeAndRecoveryExit(t *testing.T) {
 }
 
 func TestOAuthTokenContractTableMatchesRenderedDiagnostics(t *testing.T) {
-	raw, err := os.ReadFile("../../docs/contract.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, section, found := strings.Cut(string(raw), "## OAuth token errors")
-	if !found {
-		t.Fatal("generated contract has no OAuth token errors section")
-	}
-	if next := strings.Index(section, "\n## "); next >= 0 {
-		section = section[:next]
+	documentation := []struct {
+		path      string
+		codeField int
+		exitField int
+	}{
+		{path: "../../docs/contract.md", codeField: 1, exitField: 2},
+		{path: "../../docs/oauth-errors.md", codeField: 1, exitField: 2},
+		{path: "../../docs/homebrew.md", codeField: 2, exitField: 3},
 	}
 	documented := make(map[string]errx.Code)
-	for _, line := range strings.Split(section, "\n") {
-		if !strings.HasPrefix(line, "| ") || strings.HasPrefix(line, "| `error.code` ") || strings.HasPrefix(line, "| ---") {
+	for _, document := range documentation {
+		raw, err := os.ReadFile(document.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		section := string(raw)
+		if document.path == "../../docs/contract.md" {
+			var found bool
+			_, section, found = strings.Cut(section, "## OAuth token errors")
+			if !found {
+				t.Fatal("generated contract has no OAuth token errors section")
+			}
+			if next := strings.Index(section, "\n## "); next >= 0 {
+				section = section[:next]
+			}
+		}
+		rows := make(map[string]errx.Code)
+		for _, line := range strings.Split(section, "\n") {
+			if !strings.HasPrefix(line, "| ") || !strings.Contains(line, "`OAUTH_TOKEN_") {
+				continue
+			}
+			fields := strings.Split(line, "|")
+			if len(fields) != 5 {
+				t.Fatalf("malformed OAuth row in %s: %q", document.path, line)
+			}
+			code := strings.Trim(strings.TrimSpace(fields[document.codeField]), "`")
+			if !strings.HasPrefix(code, "OAUTH_TOKEN_") {
+				t.Fatalf("OAuth code in wrong column of %s: %q", document.path, line)
+			}
+			if _, duplicate := rows[code]; duplicate {
+				t.Fatalf("duplicate OAuth code %q in %s", code, document.path)
+			}
+			exitText := strings.Fields(strings.TrimSpace(fields[document.exitField]))
+			if len(exitText) == 0 {
+				t.Fatalf("missing OAuth exit for %q in %s", code, document.path)
+			}
+			exit, err := strconv.Atoi(exitText[0])
+			if err != nil {
+				t.Fatalf("invalid OAuth exit for %q in %s: %v", code, document.path, err)
+			}
+			rows[code] = errx.Code(exit)
+		}
+		if len(rows) != 7 {
+			t.Fatalf("OAuth rows in %s=%d, want 7", document.path, len(rows))
+		}
+		if len(documented) == 0 {
+			documented = rows
 			continue
 		}
-		fields := strings.Split(line, "|")
-		if len(fields) != 5 {
-			t.Fatalf("malformed OAuth contract row: %q", line)
+		for code, want := range documented {
+			if got, exists := rows[code]; !exists || got != want {
+				t.Fatalf("OAuth code %s in %s: exit=%d exists=%v, want %d", code, document.path, got, exists, want)
+			}
 		}
-		code := strings.Trim(strings.TrimSpace(fields[1]), "`")
-		if !strings.HasPrefix(code, "OAUTH_TOKEN_") {
-			t.Fatalf("unexpected OAuth contract code: %q", code)
-		}
-		if _, duplicate := documented[code]; duplicate {
-			t.Fatalf("duplicate OAuth contract code: %q", code)
-		}
-		exit, err := strconv.Atoi(strings.TrimSpace(fields[2]))
-		if err != nil {
-			t.Fatalf("invalid OAuth contract exit for %q: %v", code, err)
-		}
-		documented[code] = errx.Code(exit)
 	}
 
 	tests := []struct {
@@ -360,6 +392,19 @@ func TestUntypedOAuthFailureRetainsPublishedRecovery(t *testing.T) {
 	if !errors.As(translated, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" {
 		t.Fatalf("translation=%#v", typed)
 	}
+	if !strings.Contains(typed.Hint, "correct invalid local exchange input") || !strings.Contains(typed.Hint, "if refresh was attempted") {
+		t.Fatalf("untyped failure needs conditional recovery: %q", typed.Hint)
+	}
+	assertRefreshRecoveryHint(t, typed.Hint)
+}
+
+func assertRefreshRecoveryHint(t *testing.T, hint string) {
+	t.Helper()
+	for _, required := range []string{"stop auth-dependent commands", "operator", "auth login --profile NAME --yes", "do not retry refresh"} {
+		if !strings.Contains(hint, required) {
+			t.Fatalf("refresh hint %q missing %q", hint, required)
+		}
+	}
 }
 
 func TestRefreshFailureKeepsLegacyNonRetryableEnvelope(t *testing.T) {
@@ -390,9 +435,10 @@ func TestRefreshFailureKeepsLegacyNonRetryableEnvelope(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Error.RetryAfter != "" || strings.Contains(strings.ToLower(envelope.Hint), "retry") {
-		t.Fatalf("refresh envelope advertises retry: %+v", envelope)
+	if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Error.RetryAfter != "" || bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
+		t.Fatalf("refresh envelope violated non-retryable contract: %+v", envelope)
 	}
+	assertRefreshRecoveryHint(t, envelope.Hint)
 	if strings.Contains(stdout.String(), "server-secret-sentinel") {
 		t.Fatalf("refresh envelope leaked untrusted response: %q", stdout.String())
 	}
@@ -418,7 +464,65 @@ func TestCanceledInflightRefreshKeepsLegacyNonRetryableEnvelope(t *testing.T) {
 	}
 	translated := TranslateError(err, "work")
 	var typed *errx.Error
-	if !errors.As(translated, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || typed.RetryAfter != 0 || strings.Contains(strings.ToLower(typed.Hint), "retry") {
+	if !errors.As(translated, &typed) || typed.Code != errx.CodeAuth || typed.Reason != "OAUTH_TOKEN_EXCHANGE_FAILED" || typed.RetryAfter != 0 {
 		t.Fatalf("in-flight refresh recovery=%#v, want auth/5 with re-login hint", typed)
+	}
+	assertRefreshRecoveryHint(t, typed.Hint)
+	var stdout bytes.Buffer
+	if exit := (&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(translated); exit != errx.CodeAuth {
+		t.Fatalf("rendered exit=%d, want auth/5", exit)
+	}
+	var envelope output.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "OAUTH_TOKEN_EXCHANGE_FAILED" || envelope.Error.RetryAfter != "" || bytes.Contains(stdout.Bytes(), []byte(`"retry_after"`)) {
+		t.Fatalf("in-flight refresh envelope=%+v", envelope)
+	}
+	assertRefreshRecoveryHint(t, envelope.Hint)
+}
+
+func TestOAuthHTTP200BodyFailureMessagesDistinguishCancellation(t *testing.T) {
+	tests := []struct {
+		name    string
+		cause   error
+		code    string
+		message string
+	}{
+		{name: "unavailable", cause: errors.New("server-secret-sentinel"), code: "OAUTH_TOKEN_ENDPOINT_UNAVAILABLE", message: "OAuth token response unavailable (HTTP 200)"},
+		{name: "interrupted", cause: context.Canceled, code: "OAUTH_TOKEN_REQUEST_INTERRUPTED", message: "OAuth token response interrupted by cancellation (HTTP 200)"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			issuer := "https://hub.example.test"
+			client, err := oauth.NewClient(oauth.Config{
+				IssuerURL: issuer, AuthorizationURL: issuer + endpoint.OAuthAuthorizationPath,
+				TokenURL: issuer + endpoint.OAuthTokenPath, ClientID: "client", Scopes: []string{"YouTrack"},
+				RedirectURI: "http://127.0.0.1:18987/oauth/callback",
+			}, oauthDiagnosticTransport(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: oauthFailingBody{err: test.cause}, Header: make(http.Header)}, nil
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			session, err := oauth.NewSession(strings.NewReader(strings.Repeat("v", 64)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Exchange(t.Context(), "authorization-code", session.Verifier)
+			translated := TranslateError(err, "work")
+			var stdout bytes.Buffer
+			(&output.Writer{Format: output.FormatJSON, Out: &stdout, Err: io.Discard}).Failure(translated)
+			var envelope output.Envelope
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error == nil || envelope.Error.Code != test.code || envelope.Error.Message != test.message {
+				t.Fatalf("HTTP 200 failure=%+v, want %s / %q", envelope, test.code, test.message)
+			}
+			if strings.Contains(stdout.String(), "server-secret-sentinel") {
+				t.Fatalf("HTTP 200 failure leaked body error: %q", stdout.String())
+			}
+		})
 	}
 }

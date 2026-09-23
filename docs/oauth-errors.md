@@ -13,7 +13,7 @@ release is pinned by a merged tap update.
 | `OAUTH_TOKEN_RESPONSE_INVALID` | 5 | Report a token-response compatibility problem. Includes malformed HTTP 200 and unexpected 1xx or non-200 2xx responses. Do not retry unchanged. |
 | `OAUTH_TOKEN_REDIRECT_REFUSED` | 5 | Check the pinned token endpoint. Redirects are never followed. |
 | `OAUTH_TOKEN_REQUEST_INTERRUPTED` | 5 | Cancellation or deadline expiry after an authorization-code token request was attempted. Start a fresh login; do not replay the token POST. |
-| `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Correct invalid local exchange input, or start a new login after a refresh request failure or post-refresh persistence uncertainty. This published code remains the refresh fallback in `v0.2.0`. |
+| `OAUTH_TOKEN_EXCHANGE_FAILED` | 5 | Correct invalid local exchange input, or start a new login after a refresh request failure, local binding rejection, or persistence uncertainty. This published code remains the refresh fallback in `v0.2.0`. |
 
 Before `v0.2.0`, all of these failures used
 `OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5. This is a deliberate breaking
@@ -32,15 +32,16 @@ code exchange therefore requires a fresh login, without retrying its token POST.
 After a refresh attempt, all failures retain the legacy non-retryable
 `OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5 recovery, including DNS and TLS failures
 that may in fact have occurred before dispatch and local failure after a
-successful refresh response. This intentionally coarse
+successful refresh response. A local binding rejection happens before Save,
+so the old credential remains unchanged. A Save failure leaves the persisted
+credential state unknown. This intentionally coarse
 classification preserves the published refresh contract until a durable
 cross-process fence can establish safe retry semantics. Refresh-token rotation
 makes a lost or malformed response ambiguous:
 the server may have consumed the old token even when this CLI cannot save the
 new one. This release does not have a durable cross-process refresh fence.
 The CLI does not repeat refresh within the same invocation. A failed token
-request leaves the old credential in place; after a local save error, whether
-the new credential was persisted is unknown. A later auth-dependent invocation, including
+request leaves the old credential in place. A later auth-dependent invocation, including
 `auth status --check` or an authenticated read, may automatically send that
 old refresh token again. Agents must avoid further auth-dependent commands
 after a failed refresh and direct the operator to a fresh interactive login.
