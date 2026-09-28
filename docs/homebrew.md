@@ -2,25 +2,30 @@
 
 ## Standard macOS Formula
 
-The standard macOS distribution channel for the existing CLI is a source-built
-Formula in the maintained tap. It is being activated by the immediately
-following tap PR from a newly tagged immutable source release. Until that PR
-lands, the command below is the post-release install command, not an
-already-published package:
+The standard macOS distribution channel for the existing CLI is a planned
+source-built Formula in the maintained tap. The install command below applies
+after publication; it is not evidence that the Formula is already available.
+A merged source change reaches Homebrew only after its own release tag and a
+merged tap update; check `version` before
+relying on newly documented behavior:
+
+An untagged source checkout reports `devel`. A `devel` build can be used for
+development, but it is not the tagged `v0.2.0` Formula; no Formula containing
+the planned OAuth classifications has been published yet.
 
 ```bash
 brew install abigotado/tap/youtrack-agent-cli
 youtrack-agent-cli version -o json
 ```
 
-Like the Jira, Slack, and Confluence CLI Formulae, this Formula pins a
-checksummed immutable source release and has Homebrew build it locally with Go
-and `CGO_ENABLED=1`. The resulting binary links the native macOS
-Security.framework Keychain backend. This is a Formula, not a downloaded
-binary Cask: it does not require an Apple Developer membership, Developer ID
+Like the Jira, Slack, and Confluence CLI Formulae, the planned Formula will
+pin a checksummed immutable source release and have Homebrew build it locally
+with Go and `CGO_ENABLED=1`. The resulting binary will link the native macOS
+Security.framework Keychain backend. This Formula will not be a downloaded
+binary Cask: it will need neither Apple Developer membership nor Developer ID
 signing, notarization, or an installer that removes Gatekeeper quarantine.
 
-The Formula carries the standard CLI, including explicit-profile OAuth,
+The Formula will carry the standard CLI, including explicit-profile OAuth,
 Keychain credential storage, REST reads, local journal operations, and the
 Agent Skill installer. The Linux portable Remote-MCP-only release is unchanged:
 it remains credential-free and does not gain a macOS archive from this Formula.
@@ -28,6 +33,56 @@ it remains credential-free and does not gain a macOS archive from this Formula.
 The release sequence is deliberately simple: merge the source change, create
 the immutable source tag, then open the tap PR that pins that exact archive and
 its SHA-256. A Formula update never builds from a mutable branch.
+
+### OAuth error-code transition in v0.2.0
+
+The planned tagged `v0.2.0` standard CLI changes machine recovery for
+authorization-code token exchange failures. The JSON envelope remains `v:1`,
+but callers branching on the published `OAUTH_TOKEN_EXCHANGE_FAILED` code
+must handle six new categories. Before this classification, the affected
+authorization-code exchange failures used that code and exit 5. This is not
+true of every *local post-refresh* failure: binding, invalid-token, Keychain,
+context, and unknown-store errors formerly crossed different translation
+paths. The planned `v0.2.0` CLI collapses them to
+`OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5. See the compact old-to-new local mapping
+in the [OAuth recovery guide](oauth-errors.md) and the seven canonical
+code/exit/recovery rows in the generated [machine contract](contract.md#oauth-token-errors-standard-macos-cli-planned-v020).
+
+Refresh request failures after an attempt begins keep the published
+`OAUTH_TOKEN_EXCHANGE_FAILED` / exit 5 recovery in this release, including
+DNS/TLS failures even if they occurred before wire dispatch. A cancellation or
+deadline detected before an attempt remains a normal `CANCELED` or `TIMEOUT`.
+The post-attempt category is conservative because dispatch cannot always be
+established. Agents must not trigger another refresh after an ambiguous result:
+the server may have rotated the old token before the response was lost.
+An HTTP 200 token-body read error is also non-retryable for authorization-code
+exchange because the server may already have consumed the code.
+A durable refresh fence across CLI processes is required before changing that
+behavior; this release does not provide one. The CLI makes no repeat attempt
+within the same invocation. A failed token request or pre-Save binding
+rejection leaves the old credential in place; after a local save error, the
+persisted credential state is unknown.
+The fixed public hint identifies local repair for each pre-Save validation or
+Save failure category: profile/credential binding, token validation, Keychain
+interaction or ACL, canceled/interrupted/timed-out save, Keychain availability,
+or another local store failure. It never includes the raw cause or OSStatus.
+Hints are repair prose, not stable machine IDs; branch on `error.code` and exit.
+A later auth-dependent invocation, including `auth status --check` or a read,
+may automatically retry the old token. Agents should avoid those commands after
+failure and start a fresh interactive login instead.
+If the old credential remains present, replacement requires explicit
+operator approval (`auth login --profile NAME --yes`); agents must not add
+`--yes` automatically. The exchange-specific
+failure codes are also listed in the
+[machine-error reference](oauth-errors.md).
+
+Only the fixed category and numeric HTTP status appear in an error. The token
+endpoint response, OAuth code, verifier, and tokens remain private. Do not
+retry a rejected request unchanged. Never replay an invalid-response token
+POST, regardless of subsequent configuration changes: check compatibility,
+then start a fresh interactive login for a new authorization code. A failed
+first login stores no new credential; restarting login starts a fresh browser
+authorization.
 
 ### Authentication and upgrades
 

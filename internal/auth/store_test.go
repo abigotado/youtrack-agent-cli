@@ -67,6 +67,44 @@ func TestCredentialPayloadRoundTripKindsAndRedaction(t *testing.T) {
 	}
 }
 
+func TestInvalidUTF8TokenRejectedBeforeCredentialSerialization(t *testing.T) {
+	selected := authTestProfile(t)
+	baseOAuth, err := BindCredential(Credential{
+		Kind: CredentialOAuth, AccessToken: "valid-access", RefreshToken: "valid-refresh",
+		TokenType: "Bearer", AccessTokenExpiresAt: time.Now().Add(time.Hour).UTC(),
+		OAuthScopes: []string{"YouTrack"},
+	}, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	basePermanent, err := BindCredential(Credential{Kind: CredentialPermanentToken, PermanentToken: "valid-permanent"}, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*Credential, string)
+		base   Credential
+	}{
+		{name: "access", base: baseOAuth, mutate: func(c *Credential, value string) { c.AccessToken = value }},
+		{name: "refresh", base: baseOAuth, mutate: func(c *Credential, value string) { c.RefreshToken = value }},
+		{name: "permanent", base: basePermanent, mutate: func(c *Credential, value string) { c.PermanentToken = value }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			invalid := string([]byte{'a', 0xff, 'b'})
+			if err := ValidateToken(invalid); !errors.Is(err, ErrInvalidToken) {
+				t.Fatalf("ValidateToken accepted malformed UTF-8: %v", err)
+			}
+			candidate := test.base
+			test.mutate(&candidate, invalid)
+			encoded, err := encodeCredentialValue(candidate)
+			if !errors.Is(err, ErrInvalidToken) || len(encoded) != 0 {
+				t.Fatalf("credential reached serialization with malformed UTF-8: err=%v bytes=%d", err, len(encoded))
+			}
+		})
+	}
+}
+
 func TestCredentialPayloadV2PersistsOAuthGrant(t *testing.T) {
 	selected := authTestProfile(t)
 	selected.OAuth.Scopes = []string{"YouTrack", "YouTrack-Admin"}

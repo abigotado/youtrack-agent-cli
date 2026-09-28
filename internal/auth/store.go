@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/profile"
 )
@@ -338,6 +339,9 @@ func ValidateToken(token string) error {
 	}
 	if len(token) > MaxTokenBytes {
 		return fmt.Errorf("%w: token exceeds %d bytes", ErrInvalidToken, MaxTokenBytes)
+	}
+	if !utf8.ValidString(token) {
+		return fmt.Errorf("%w: token is not valid UTF-8", ErrInvalidToken)
 	}
 	for _, character := range token {
 		if character == '\x00' || character == '\r' || character == '\n' {

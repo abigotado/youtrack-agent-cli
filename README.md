@@ -7,8 +7,8 @@ distribution channels:
   Remote-MCP-only. It validates non-secret read-only profile metadata and
   installs a shared Codex/Claude Code skill. Every remote read goes through the
   official YouTrack Remote MCP with an explicit six-tool allowlist.
-- The **standard macOS edition** is being activated as a source-built Homebrew
-  Formula. Homebrew will compile the existing standard CLI locally with
+- The **standard macOS edition** is being prepared as a source-built Homebrew
+  Formula. Once published, Homebrew will compile the standard CLI locally with
   `CGO_ENABLED=1`, so OAuth credentials remain in the native
   Security.framework Keychain. This channel needs neither an Apple Developer
   membership nor a signed/notarized application bundle.
@@ -49,20 +49,21 @@ envelopes, errors, and recovery.
 
 ## macOS Homebrew Formula
 
-The standard macOS distribution channel is a source-built Formula in the
-maintained tap. It will be activated by the immediately following tap PR from
-a newly tagged immutable source release; until that PR lands, the command below
-is the post-release install command, not an already-published package:
+The planned standard macOS distribution channel is a source-built Formula in
+the maintained tap. The command below is for use after publication, not an
+indication that the Formula is already available. A merged source change
+reaches Homebrew only after its own release tag and a merged tap update; check
+`version` before relying on newly documented behavior:
 
 ```bash
 brew install abigotado/tap/youtrack-agent-cli
 youtrack-agent-cli version -o json
 ```
 
-The Formula pins a checksummed source release and builds it locally with Go,
-CGO, and the macOS Security.framework; it does not download an unsigned
-executable, remove Gatekeeper quarantine, or need Apple Developer signing or
-notarization. It includes the standard explicit-profile OAuth and Keychain
+Once published, the Formula will pin a checksummed source release and build it
+locally with Go, CGO, and the macOS Security.framework; it does not download
+an unsigned executable, remove Gatekeeper quarantine, or need Apple Developer
+signing or notarization. It includes the standard explicit-profile OAuth and Keychain
 commands:
 
 ```bash

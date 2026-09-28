@@ -12,6 +12,7 @@ import (
 	"github.com/abigotado/youtrack-agent-cli/internal/intent"
 	"github.com/abigotado/youtrack-agent-cli/internal/journal"
 	"github.com/abigotado/youtrack-agent-cli/internal/oauth"
+	"github.com/abigotado/youtrack-agent-cli/internal/oauthrecovery"
 	"github.com/abigotado/youtrack-agent-cli/internal/profile"
 	"github.com/abigotado/youtrack-agent-cli/internal/skills"
 	"github.com/abigotado/youtrack-agent-cli/internal/writepolicy"
@@ -340,6 +341,7 @@ func TranslateError(err error, name string) error {
 	if errors.As(err, &typed) {
 		return err
 	}
+	var tokenFailure *oauth.TokenFailure
 	switch {
 	case errors.Is(err, auth.ErrLogoutIncomplete):
 		return errx.Conflict("LOGOUT_INCOMPLETE", "credential removal succeeded but profile %q metadata could not be removed", name).
@@ -388,13 +390,26 @@ func TranslateError(err error, name string) error {
 		return errx.Auth("OAUTH_CALLBACK_INVALID", "OAuth callback validation failed")
 	case errors.Is(err, oauth.ErrAuthorizationDenied):
 		return errx.Auth("OAUTH_AUTHORIZATION_DENIED", "YouTrack authorization was denied")
+	case errors.As(err, &tokenFailure) && tokenFailure != nil:
+		if descriptor, known := oauthrecovery.Lookup(tokenFailure.Category()); known {
+			return oauthRecoveryError(descriptor, tokenFailure.Error())
+		}
+		descriptor := oauthrecovery.Legacy()
+		return oauthRecoveryError(descriptor, "YouTrack OAuth token exchange failed").
+			WithHint("%s; do not replay the token request", descriptor.Hint)
 	case errors.Is(err, oauth.ErrTokenExchange):
-		return errx.Auth("OAUTH_TOKEN_EXCHANGE_FAILED", "YouTrack OAuth token exchange failed")
+		descriptor := oauthrecovery.Legacy()
+		return oauthRecoveryError(descriptor, "YouTrack OAuth token exchange failed").
+			WithHint("correct invalid local exchange input; if refresh was attempted, %s", descriptor.Hint)
 	case errors.Is(err, oauth.ErrInvalidConfig):
 		return errx.Usage("OAuth profile configuration is invalid")
 	default:
 		return errx.Internal("operation failed without exposing sensitive details")
 	}
+}
+
+func oauthRecoveryError(descriptor oauthrecovery.Descriptor, message string) *errx.Error {
+	return &errx.Error{Code: descriptor.Exit, Reason: descriptor.Reason, Message: message, Hint: descriptor.Hint}
 }
 
 func profileInfo(value profile.Profile) ProfileInfo {
