@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/intent"
 )
 
@@ -17,13 +18,26 @@ const (
 	maxLegacyV1Bytes   = 1 << 20 // historical maxRecordBytes at the v1 boundary
 	maxPreparedV2Bytes = 640 << 10
 	maxQuarantineBytes = 1024
-	quarantineReason   = "unsafe_v1_authority_state"
+	quarantineReason   = "unsafe_v1_migration_state"
 )
 
 var (
 	errInvalidJournalWire  = errors.New("invalid canonical mutation journal wire record")
 	errJournalWireTooLarge = errors.New("mutation journal wire record exceeds size limit")
 )
+
+// Typed errors are allocated at the exported boundary. The package-level
+// sentinels are immutable; sharing an *errx.Error would let callers mutate the
+// Code, Reason, Message, or wrapped cause observed by later calls.
+func typedJournalWireError(cause error) error {
+	if cause == nil {
+		return nil
+	}
+	if errors.Is(cause, errJournalWireTooLarge) {
+		return errx.Internal("mutation journal wire record exceeds size limit").Wrap(errJournalWireTooLarge)
+	}
+	return errx.Internal("invalid canonical mutation journal wire record").Wrap(errInvalidJournalWire)
+}
 
 // LegacyV1Disposition is a classification, not a grant of authority.
 type LegacyV1Disposition string
@@ -200,7 +214,8 @@ type legacyV1CustomField struct {
 
 // ClassifyLegacyV1 accepts only exact bytes produced by the historical v1
 // MarshalIndent-plus-LF encoder. Errors intentionally do not quote input.
-func ClassifyLegacyV1(raw []byte) (LegacyV1Classification, error) {
+func ClassifyLegacyV1(raw []byte) (classification LegacyV1Classification, err error) {
+	defer func() { err = typedJournalWireError(err) }()
 	if len(raw) > maxLegacyV1Bytes {
 		return LegacyV1Classification{}, errJournalWireTooLarge
 	}
@@ -218,7 +233,7 @@ func ClassifyLegacyV1(raw []byte) (LegacyV1Classification, error) {
 	if err != nil {
 		return LegacyV1Classification{}, errInvalidJournalWire
 	}
-	if err := validateRecord(record); err != nil {
+	if err := validateLegacyV1Record(wire); err != nil {
 		return LegacyV1Classification{}, errInvalidJournalWire
 	}
 	encoded, err := encodeJournalWire(wire)
@@ -226,10 +241,11 @@ func ClassifyLegacyV1(raw []byte) (LegacyV1Classification, error) {
 		return LegacyV1Classification{}, errInvalidJournalWire
 	}
 	digest := sha256.Sum256(raw)
-	classification := LegacyV1Classification{Record: record, SHA256: hex.EncodeToString(digest[:])}
-	if record.State == StatePrepared && record.Revision == 1 && record.MutationAttempts == 0 &&
+	classification = LegacyV1Classification{Record: record, SHA256: hex.EncodeToString(digest[:])}
+	if record.State == State("prepared") && record.Revision == 1 && record.MutationAttempts == 0 &&
 		record.Receipt == nil && record.Outcome == nil && len(record.Evidence) == 0 &&
-		wire.CreatedAt.Format(time.RFC3339Nano) == wire.UpdatedAt.Format(time.RFC3339Nano) {
+		wire.CreatedAt.Format(time.RFC3339Nano) == wire.UpdatedAt.Format(time.RFC3339Nano) &&
+		legacyV1MigratableToV2(record) {
 		classification.Disposition = LegacyV1Migratable
 	} else {
 		classification.Disposition = LegacyV1Quarantine
@@ -238,18 +254,7 @@ func ClassifyLegacyV1(raw []byte) (LegacyV1Classification, error) {
 }
 
 func (w legacyV1Wire) record() (Record, error) {
-	planBytes, err := json.Marshal(w.Plan)
-	if err != nil {
-		return Record{}, errInvalidJournalWire
-	}
-	var plan intent.Plan
-	if err := json.Unmarshal(planBytes, &plan); err != nil {
-		return Record{}, errInvalidJournalWire
-	}
-	currentBytes, err := json.Marshal(plan)
-	if err != nil || !bytes.Equal(planBytes, currentBytes) {
-		return Record{}, errInvalidJournalWire
-	}
+	plan := w.Plan.toIntent()
 	r := Record{Version: w.Version, Revision: w.Revision, State: w.State, Plan: plan,
 		MutationAttempts: w.MutationAttempts, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt}
 	if w.Receipt != nil {
@@ -281,23 +286,24 @@ type PreparedV2Record struct {
 // for future authority-bearing phases. An empty struct pointer allows strict
 // decoding to reject any non-null value without json.RawMessage.
 type preparedV2Wire struct {
-	Version              int         `json:"version"`
-	Revision             uint64      `json:"revision"`
-	State                State       `json:"state"`
-	Plan                 intent.Plan `json:"plan"`
-	Receipt              *struct{}   `json:"receipt"`
-	AuthorityEvidence    *struct{}   `json:"authority_evidence"`
-	CoordinatorEvidence  *struct{}   `json:"coordinator_evidence"`
-	MutationAttempts     uint8       `json:"mutation_attempts"`
-	Outcome              *struct{}   `json:"outcome"`
-	Evidence             *struct{}   `json:"evidence"`
-	LegacyV1RecordSHA256 *string     `json:"legacy_v1_record_sha256"`
-	CreatedAt            string      `json:"created_at"`
-	UpdatedAt            string      `json:"updated_at"`
+	Version              int          `json:"version"`
+	Revision             uint64       `json:"revision"`
+	State                State        `json:"state"`
+	Plan                 legacyV1Plan `json:"plan"`
+	Receipt              *struct{}    `json:"receipt"`
+	AuthorityEvidence    *struct{}    `json:"authority_evidence"`
+	CoordinatorEvidence  *struct{}    `json:"coordinator_evidence"`
+	MutationAttempts     uint8        `json:"mutation_attempts"`
+	Outcome              *struct{}    `json:"outcome"`
+	Evidence             *struct{}    `json:"evidence"`
+	LegacyV1RecordSHA256 *string      `json:"legacy_v1_record_sha256"`
+	CreatedAt            string       `json:"created_at"`
+	UpdatedAt            string       `json:"updated_at"`
 }
 
 // EncodePreparedV2 returns canonical indented JSON with a single terminal LF.
-func EncodePreparedV2(record PreparedV2Record) ([]byte, error) {
+func EncodePreparedV2(record PreparedV2Record) (encoded []byte, err error) {
+	defer func() { err = typedJournalWireError(err) }()
 	if err := validatePreparedV2(record); err != nil {
 		return nil, err
 	}
@@ -309,8 +315,12 @@ func EncodePreparedV2(record PreparedV2Record) ([]byte, error) {
 	if err != nil {
 		return nil, errInvalidJournalWire
 	}
-	wire := preparedV2Wire{Version: 2, Revision: record.Revision, State: StatePrepared,
-		Plan: record.Plan, LegacyV1RecordSHA256: record.LegacyV1RecordSHA256,
+	planWire, err := legacyPlanFromIntent(record.Plan)
+	if err != nil {
+		return nil, errInvalidJournalWire
+	}
+	wire := preparedV2Wire{Version: 2, Revision: record.Revision, State: State("prepared"),
+		Plan: planWire, LegacyV1RecordSHA256: record.LegacyV1RecordSHA256,
 		CreatedAt: createdAt, UpdatedAt: updatedAt}
 	raw, err := encodeJournalWire(wire)
 	if err != nil {
@@ -324,7 +334,8 @@ func EncodePreparedV2(record PreparedV2Record) ([]byte, error) {
 
 // DecodePreparedV2 rejects oversized input before JSON decoding and admits
 // only the canonical, authority-free prepared branch.
-func DecodePreparedV2(raw []byte) (PreparedV2Record, error) {
+func DecodePreparedV2(raw []byte) (record PreparedV2Record, err error) {
+	defer func() { err = typedJournalWireError(err) }()
 	if len(raw) > maxPreparedV2Bytes {
 		return PreparedV2Record{}, errJournalWireTooLarge
 	}
@@ -335,7 +346,7 @@ func DecodePreparedV2(raw []byte) (PreparedV2Record, error) {
 	if err := decodeExactJournalWire(raw, &wire); err != nil {
 		return PreparedV2Record{}, err
 	}
-	if wire.Version != 2 || wire.State != StatePrepared || wire.Receipt != nil ||
+	if wire.Version != 2 || wire.State != State("prepared") || wire.Receipt != nil ||
 		wire.AuthorityEvidence != nil || wire.CoordinatorEvidence != nil ||
 		wire.MutationAttempts != 0 || wire.Outcome != nil || wire.Evidence != nil {
 		return PreparedV2Record{}, errInvalidJournalWire
@@ -348,7 +359,7 @@ func DecodePreparedV2(raw []byte) (PreparedV2Record, error) {
 	if err != nil {
 		return PreparedV2Record{}, errInvalidJournalWire
 	}
-	record := PreparedV2Record{Revision: wire.Revision, Plan: wire.Plan,
+	record = PreparedV2Record{Revision: wire.Revision, Plan: wire.Plan.toIntent(),
 		LegacyV1RecordSHA256: wire.LegacyV1RecordSHA256, CreatedAt: created, UpdatedAt: updated}
 	canonical, err := EncodePreparedV2(record)
 	if err != nil || !bytes.Equal(raw, canonical) {
@@ -358,10 +369,11 @@ func DecodePreparedV2(raw []byte) (PreparedV2Record, error) {
 }
 
 func validatePreparedV2(record PreparedV2Record) error {
-	if record.CreatedAt.IsZero() || record.UpdatedAt.Before(record.CreatedAt) {
+	if record.UpdatedAt.Before(record.CreatedAt) {
 		return errInvalidJournalWire
 	}
-	if err := record.Plan.Validate(); err != nil {
+	planWire, err := legacyPlanFromIntent(record.Plan)
+	if err != nil || validateLegacyPlan(planWire) != nil {
 		return errInvalidJournalWire
 	}
 	if record.LegacyV1RecordSHA256 == nil {
@@ -391,9 +403,9 @@ type quarantineMarkerWire struct {
 }
 
 // EncodeQuarantineMarker returns the exact five-field canonical marker.
-func EncodeQuarantineMarker(marker QuarantineMarker) ([]byte, error) {
-	if !isDigest(marker.RecordSHA256) || !unsafeLegacyV1State(marker.State) ||
-		marker.DetectedAt.IsZero() {
+func EncodeQuarantineMarker(marker QuarantineMarker) (encoded []byte, err error) {
+	defer func() { err = typedJournalWireError(err) }()
+	if !isDigest(marker.RecordSHA256) || !unsafeLegacyV1State(marker.State) {
 		return nil, errInvalidJournalWire
 	}
 	detectedAt, err := canonicalJournalTime(marker.DetectedAt)
@@ -414,7 +426,8 @@ func EncodeQuarantineMarker(marker QuarantineMarker) ([]byte, error) {
 }
 
 // DecodeQuarantineMarker does not confer authority on the referenced record.
-func DecodeQuarantineMarker(raw []byte) (QuarantineMarker, error) {
+func DecodeQuarantineMarker(raw []byte) (marker QuarantineMarker, err error) {
+	defer func() { err = typedJournalWireError(err) }()
 	if len(raw) > maxQuarantineBytes {
 		return QuarantineMarker{}, errJournalWireTooLarge
 	}
@@ -432,7 +445,7 @@ func DecodeQuarantineMarker(raw []byte) (QuarantineMarker, error) {
 	if err != nil {
 		return QuarantineMarker{}, errInvalidJournalWire
 	}
-	marker := QuarantineMarker{RecordSHA256: wire.RecordSHA256, State: wire.State, DetectedAt: detected}
+	marker = QuarantineMarker{RecordSHA256: wire.RecordSHA256, State: wire.State, DetectedAt: detected}
 	canonical, err := EncodeQuarantineMarker(marker)
 	if err != nil || !bytes.Equal(raw, canonical) {
 		return QuarantineMarker{}, errInvalidJournalWire
@@ -442,9 +455,9 @@ func DecodeQuarantineMarker(raw []byte) (QuarantineMarker, error) {
 
 func unsafeLegacyV1State(state State) bool {
 	switch state {
-	case StatePrepared, StateConfirmed, StateCanceled, StateExpired, StateInFlight,
-		StateFailedBeforeMutation, StateApplied, StateAmbiguous, StateReconciled,
-		StateOperatorResolutionRequired, StateResolvedApplied, StateResolvedNotApplied:
+	case State("prepared"), State("confirmed"), State("canceled"), State("expired"), State("in_flight"),
+		State("failed_before_mutation"), State("applied"), State("ambiguous"), State("reconciled"),
+		State("operator_resolution_required"), State("resolved_applied"), State("resolved_not_applied"):
 		return true
 	default:
 		return false
@@ -468,7 +481,7 @@ func parseCanonicalJournalTime(raw string) (time.Time, error) {
 
 func canonicalJournalTime(value time.Time) (string, error) {
 	utc := value.UTC()
-	if utc.IsZero() || utc.Year() < 1 || utc.Year() > 9999 {
+	if utc.Year() < 1 || utc.Year() > 9999 {
 		return "", errInvalidJournalWire
 	}
 	encoded := utc.Format(time.RFC3339Nano)

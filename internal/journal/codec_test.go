@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 )
 
 var codecTime = time.Date(2026, 9, 28, 15, 0, 0, 0, time.UTC)
@@ -255,6 +258,33 @@ func TestClassifyLegacyV1RequiresPristinePrepared(t *testing.T) {
 	}
 }
 
+func TestClassifyLegacyV1QuarantinesValidPreparedDatesOutsideV2Grammar(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stamp time.Time
+	}{
+		{"year zero", time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"non-UTC year 9999 crossing into UTC year 10000", time.Date(9999, 12, 31, 23, 30, 0, 0, time.FixedZone("minus one", -3600))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			record := legacyCodecRecord(t, StatePrepared)
+			record.CreatedAt, record.UpdatedAt = tc.stamp, tc.stamp
+			if err := validateRecord(record); err != nil {
+				t.Fatalf("historical v1 writer would not have accepted probe: %v", err)
+			}
+			raw := legacyCodecBytes(t, record)
+			classified, err := ClassifyLegacyV1(raw)
+			if err != nil || classified.Disposition != LegacyV1Quarantine || classified.SHA256 != codecDigest(raw) {
+				t.Fatalf("valid v1 that cannot migrate must quarantine: %#v, %v", classified, err)
+			}
+			if _, err := EncodePreparedV2(PreparedV2Record{Revision: 1, Plan: classified.Record.Plan,
+				CreatedAt: classified.Record.CreatedAt, UpdatedAt: classified.Record.UpdatedAt}); err == nil {
+				t.Fatal("v2 unexpectedly encodes a date outside its grammar")
+			}
+		})
+	}
+}
+
 func TestClassifyLegacyV1RejectsNoncanonicalInput(t *testing.T) {
 	raw := legacyCodecBytes(t, legacyCodecRecord(t, StatePrepared))
 	plan := journalPlan(t)
@@ -417,13 +447,13 @@ func TestQuarantineMarkerExactBytesAndStrictDecode(t *testing.T) {
 		"  \"schema_version\": 1,\n" +
 		"  \"record_sha256\": \"" + digest + "\",\n" +
 		"  \"state\": \"confirmed\",\n" +
-		"  \"reason\": \"unsafe_v1_authority_state\",\n" +
+		"  \"reason\": \"unsafe_v1_migration_state\",\n" +
 		"  \"detected_at\": \"2026-09-28T15:00:00Z\"\n" +
 		"}\n"
 	if string(raw) != want {
 		t.Fatalf("quarantine marker bytes differ\nwant:\n%s\ngot:\n%s", want, raw)
 	}
-	if got := codecDigest(raw); got != "1864ce1f3ff1e2720ed03b33228782b2c6c5539cc7ca6a1f799ad256ed60f101" {
+	if got := codecDigest(raw); got != "609b46b5c221e3808c6ced386d475bda3fbd02148b1b154e616615344d7f479e" {
 		t.Fatalf("marker digest = %s", got)
 	}
 	decoded, err := DecodeQuarantineMarker(raw)
@@ -444,7 +474,7 @@ func TestQuarantineMarkerExactBytesAndStrictDecode(t *testing.T) {
 		"duplicate state": codecReplaceOnce(t, raw, `"state": "confirmed",`, "\"state\": \"confirmed\",\n  \"state\": \"confirmed\","),
 		"unknown":         codecReplaceOnce(t, raw, `"state": "confirmed",`, "\"state\": \"confirmed\",\n  \"extra\": 1,"),
 		"wrong version":   codecReplaceOnce(t, raw, `"schema_version": 1`, `"schema_version": 2`),
-		"wrong reason":    codecReplaceOnce(t, raw, `"reason": "unsafe_v1_authority_state"`, `"reason": "safe"`),
+		"wrong reason":    codecReplaceOnce(t, raw, `"reason": "unsafe_v1_migration_state"`, `"reason": "safe"`),
 		"wrong state":     codecReplaceOnce(t, raw, `"state": "confirmed"`, `"state": "bogus"`),
 		"wrong digest":    codecReplaceOnce(t, raw, `"record_sha256": "`+digest+`"`, `"record_sha256": "nope"`),
 		"wrong timestamp": codecReplaceOnce(t, raw, `"detected_at": "2026-09-28T15:00:00Z"`, `"detected_at": null`),
@@ -534,19 +564,79 @@ func TestJournalCodecDistinctPredecodeCaps(t *testing.T) {
 		{"quarantine marker", maxQuarantineBytes, func(raw []byte) error { _, err := DecodeQuarantineMarker(raw); return err }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.parse([]byte("x")); err != errInvalidJournalWire {
-				t.Fatalf("malformed in-cap input returned %v, want syntax rejection", err)
+			if err := tc.parse([]byte("x")); !errors.Is(err, errInvalidJournalWire) || errx.ExitCode(err) != errx.CodeInternal {
+				t.Fatalf("malformed in-cap input returned %v, want typed syntax rejection", err)
 			}
 			atLimit := bytes.Repeat([]byte{'x'}, tc.limit)
-			if err := tc.parse(atLimit); err != errInvalidJournalWire {
-				t.Fatalf("malformed input exactly at %d-byte cap returned %v, want decode rejection", tc.limit, err)
+			if err := tc.parse(atLimit); !errors.Is(err, errInvalidJournalWire) || errx.ExitCode(err) != errx.CodeInternal {
+				t.Fatalf("malformed input exactly at %d-byte cap returned %v, want typed decode rejection", tc.limit, err)
 			}
 			raw := bytes.Repeat([]byte{'x'}, tc.limit+1)
 			if len(raw) != tc.limit+1 {
 				t.Fatal("test probe is not exactly one byte over the codec cap")
 			}
-			if err := tc.parse(raw); !errors.Is(err, errJournalWireTooLarge) {
-				t.Fatalf("one-byte-over-cap input returned %v, want size rejection", err)
+			if err := tc.parse(raw); !errors.Is(err, errJournalWireTooLarge) || errx.ExitCode(err) != errx.CodeInternal {
+				t.Fatalf("one-byte-over-cap input returned %v, want typed size rejection", err)
+			}
+		})
+	}
+}
+
+func TestJournalCodecErrorsAreFreshPerReturn(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		limit int
+		parse func([]byte) error
+	}{
+		{"legacy v1", maxLegacyV1Bytes, func(raw []byte) error { _, err := ClassifyLegacyV1(raw); return err }},
+		{"prepared v2", maxPreparedV2Bytes, func(raw []byte) error { _, err := DecodePreparedV2(raw); return err }},
+		{"quarantine marker", maxQuarantineBytes, func(raw []byte) error { _, err := DecodeQuarantineMarker(raw); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, failure := range []struct {
+				name string
+				raw  []byte
+				base error
+			}{
+				{"malformed", []byte("x"), errInvalidJournalWire},
+				{"oversize", bytes.Repeat([]byte{'x'}, tc.limit+1), errJournalWireTooLarge},
+			} {
+				t.Run(failure.name, func(t *testing.T) {
+					const calls = 16
+					results := make([]error, calls)
+					var group sync.WaitGroup
+					for i := range results {
+						group.Add(1)
+						go func(index int) {
+							defer group.Done()
+							results[index] = tc.parse(failure.raw)
+						}(i)
+					}
+					group.Wait()
+					seen := make(map[*errx.Error]bool, calls)
+					for _, err := range results {
+						var typed *errx.Error
+						if !errors.Is(err, failure.base) || !errors.As(err, &typed) || typed.Code != errx.CodeInternal {
+							t.Fatalf("returned error has wrong sentinel or exit contract: %v", err)
+						}
+						if seen[typed] {
+							t.Fatal("two calls shared a mutable errx.Error instance")
+						}
+						seen[typed] = true
+					}
+					var first *errx.Error
+					if !errors.As(results[0], &first) {
+						t.Fatal("first error is not typed")
+					}
+					first.Hint = "MUTATED_FIRST_ERROR_SENTINEL"
+					first.Reason = "MUTATED_FIRST_ERROR"
+					later := tc.parse(failure.raw)
+					var laterTyped *errx.Error
+					if !errors.As(later, &laterTyped) || laterTyped.Hint == first.Hint || laterTyped.Reason == first.Reason ||
+						!errors.Is(later, failure.base) {
+						t.Fatalf("mutating an earlier error contaminated a later call: %v", later)
+					}
+				})
 			}
 		})
 	}
@@ -562,8 +652,8 @@ func TestJournalCodecAcceptsBoundaryYears(t *testing.T) {
 		{"year 9999", 9999},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// Second 1 avoids Go's time.Time zero value at year 1, Jan 1.
-			stamp := time.Date(tc.year, 1, 1, 0, 0, 1, 0, time.UTC)
+			// The exact earliest allowed instant is also Go's time.Time zero value.
+			stamp := time.Date(tc.year, 1, 1, 0, 0, 0, 0, time.UTC)
 			v2, err := EncodePreparedV2(PreparedV2Record{Revision: 1, Plan: plan, CreatedAt: stamp, UpdatedAt: stamp})
 			if err != nil {
 				t.Fatalf("encode v2 at valid year boundary: %v", err)

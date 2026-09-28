@@ -199,8 +199,11 @@ historical re-encoding; parser errors must not echo input. A semantically valid
 v1 `prepared` record migrates only at revision 1, zero mutation attempts, no
 receipt/outcome/evidence, and byte-identical creation/update timestamp
 spellings. A valid v1 record in any other state or with later revision or
-different timestamps is quarantined; an invalid record is malformed, not a
-migration or quarantine candidate. This
+different timestamps is quarantined. A pristine prepared v1 record is also
+quarantined if its historical timestamp or encoding cannot be represented by
+the stricter v2 prepared codec. For example, a valid v1 time can use year
+0000 or an offset that normalizes to UTC year 10000. An invalid v1 record is
+malformed, not a migration or quarantine candidate. This
 classification never establishes native authority.
 
 A canonical v2 record contains these fields in order: `version`
@@ -218,7 +221,8 @@ A migrated prepared record has revision 2, a non-null lowercase 64-character
 hex SHA-256 of the exact historical v1 bytes, and `updated_at >= created_at`.
 Both timestamps use canonical UTC RFC3339Nano with terminal `Z`, no redundant
 fractional zeros or timezone offset, and a representable year from 0001 through
-9999. Encoding normalizes UTC and rejects out-of-range years; decoding rejects
+9999, including the exact zero-instant `0001-01-01T00:00:00Z`. Encoding
+normalizes UTC and rejects out-of-range years; decoding rejects
 other timestamp spellings. The digest field is only a claim until migration
 compares it with a locked source record and durably replaces that record.
 Existing plan, receipt, outcome, and evidence values retain their bounded
@@ -269,11 +273,12 @@ over the v1 path, fsyncs the directory, then rereads and byte-compares v2 before
 returning success. Any failure before rename leaves v1 intact; failure after an
 uncertain rename requires exact reread and never a second write.
 
-A valid v1 record in any other state is always rejected with
+A valid v1 record that cannot safely migrate is always rejected with
 `JOURNAL_V1_AUTHORITY_STATE_QUARANTINED`, including `canceled`, `expired`,
 `confirmed`, `in_flight`, every valid `failed_before_mutation` record, and
 `applied`, `ambiguous`, `reconciled`, `operator_resolution_required`,
-`resolved_applied`, or `resolved_not_applied`. In particular, the v1 schema
+`resolved_applied`, or `resolved_not_applied`, as well as a pristine
+`prepared` record with v2-unrepresentable time or encoding. In particular, the v1 schema
 requires `failed_before_mutation` to retain a receipt, one mutation attempt,
 and a matching outcome; it is not a zero-attempt local terminal and never
 migrates. The source record remains byte-for-byte unchanged. Under the plan lock the CLI
@@ -281,7 +286,7 @@ atomically writes a separate exclusive `0600` sibling at exact filename
 `<plan-id>.v1-quarantine.json` using the same temp-file/fsync/rename/directory-
 fsync protocol. The marker contains only
 `schema_version`, `record_sha256`, `state`, `reason` exactly
-`unsafe_v1_authority_state`, and `detected_at`; if marker creation is ambiguous
+`unsafe_v1_migration_state`, and `detected_at`; if marker creation is ambiguous
 or fails, the in-memory quarantine still blocks all operations. Status may
 report its digest, but neither authority recovery nor another migration can
 consume it. The current `approval.Unsupported` boundary means no legitimate
@@ -292,8 +297,9 @@ authority or a migration candidate.
 The quarantine marker uses the same two-space indented JSON and one terminal
 LF, with all five fields present in the order above. It is capped at 1,024
 bytes before decoding. `schema_version` is integer 1, `record_sha256` is the
-lowercase 64-character hex digest of the exact valid v1 bytes, `state` is one
-of the valid unsafe v1 states above, and `detected_at` is canonical UTC
+lowercase 64-character hex digest of the exact valid v1 bytes. `state` is
+`prepared` only for a valid but nonmigratable record, or one of the other
+valid unsafe v1 states above. `detected_at` is canonical UTC
 RFC3339Nano with terminal `Z` and year 0001 through 9999. The marker is audit
 evidence only; its digest and state do not independently validate the source
 record or confer authority.
