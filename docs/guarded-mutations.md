@@ -39,9 +39,10 @@ profile identity, key generation/fingerprint, challenge digest, registry revisio
 and authorization-context digest. Cross-language golden vectors pin the encoding.
 The [Gate 1A protocol](gate1a-protocol.md) records
 the implemented pre-Gate v3 contract. Expected revision/context values are
-comparison claims, not verified authority. Journal v2, full authority-chain
-verification, durable confirmation, and the native helper remain unimplemented;
-these codecs do not constitute a passed Gate 1A.
+comparison claims, not verified authority. A pure prepared-only journal v2
+codec exists, but v2 storage/migration, full authority-chain verification,
+durable confirmation, and the native helper remain unimplemented; these codecs
+do not constitute a passed Gate 1A.
 The activation boundary also requires the exact event-ledger codec in
 [Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md) and a
 capability-specific, offline-root-signed provisional authorization plus
@@ -175,15 +176,54 @@ persist a v3 receipt into that record. Do not bridge the schemas by copying
 metadata or treating the journal's validation as receipt verification. Full
 authority verification and the strict v2 record/migration below must land first.
 
-The current implementation writes journal record version 1. Native authority
-work must first introduce strict record version 2; no v1 record can enter the
-coordinator. A canonical v2 record contains these fields in order: `version`
+The current Store still writes and reads journal record version 1. The
+isolated [journal codec](../internal/journal/codec.go) neither changes Store
+behavior nor admits any journal to the coordinator. Native authority work
+must integrate strict record version 2 before confirmation or dispatch; no v1
+record can enter the coordinator.
+
+The historical v1 wire is frozen independently of future `Record` and
+`intent.Plan` fields, including the nested profile, policy, operation, request,
+expected-state, visibility, and custom-field shapes. Its predecode cap is a
+literal 1,048,576 bytes, not a future `intent.MaxCanonicalPlanBytes` value. It
+is a JSON object encoded by Go `json.MarshalIndent` with empty prefix, two-space
+indentation, no extra whitespace, and exactly one trailing LF byte. Its exact
+top-level field order is `version`, `revision`, `state`, `plan`, optional
+`receipt`, `mutation_attempts`, optional `outcome`, optional `evidence`,
+`created_at`, `updated_at`. The optional fields use the historical `omitempty`
+rules, including omission of empty evidence. Nested receipt, outcome, and
+evidence retain their historical field order and omission rules. A decoder
+must reject unknown fields, duplicate keys, reordered fields, alternate escaping/spacing,
+additional trailing bytes, and any input that is not byte-identical to its
+historical re-encoding; parser errors must not echo input. A semantically valid
+v1 `prepared` record migrates only at revision 1, zero mutation attempts, no
+receipt/outcome/evidence, and byte-identical creation/update timestamp
+spellings. A valid v1 record in any other state or with later revision or
+different timestamps is quarantined; an invalid record is malformed, not a
+migration or quarantine candidate. This
+classification never establishes native authority.
+
+A canonical v2 record contains these fields in order: `version`
 exactly `2`, `revision`, `state`, `plan`, `receipt`, `authority_evidence`,
 `coordinator_evidence`, `mutation_attempts`, `outcome`, `evidence`,
 `legacy_v1_record_sha256`, `created_at`, and `updated_at`. Nullable fields are
-present as null rather than omitted. Existing plan, receipt, outcome, and
-evidence values retain their bounded codecs. `authority_evidence` is null only
-for `prepared` and v2 `canceled`/`expired` records reached before authority
+present as literal `null` rather than omitted. The pure prepared-only codec
+accepts at most 655,360 bytes before JSON decoding, the same
+`json.MarshalIndent` two-space grammar and one LF as v1, and no trailing data
+or noncanonical alternate bytes. It accepts `state: "prepared"` and
+`mutation_attempts: 0` only, with `receipt`, `authority_evidence`,
+`coordinator_evidence`, `outcome`, and `evidence` all null. A fresh v2 prepared
+record has revision 1, null `legacy_v1_record_sha256`, and equal timestamps.
+A migrated prepared record has revision 2, a non-null lowercase 64-character
+hex SHA-256 of the exact historical v1 bytes, and `updated_at >= created_at`.
+Both timestamps use canonical UTC RFC3339Nano with terminal `Z`, no redundant
+fractional zeros or timezone offset, and a representable year from 0001 through
+9999. Encoding normalizes UTC and rejects out-of-range years; decoding rejects
+other timestamp spellings. The digest field is only a claim until migration
+compares it with a locked source record and durably replaces that record.
+Existing plan, receipt, outcome, and evidence values retain their bounded
+codecs. `authority_evidence` is null only for `prepared` and v2
+`canceled`/`expired` records reached before authority
 acquisition; otherwise it is exactly one closed branch. `production`,
 `post_grant_verification`, and `activation_smoke` retain their existing
 descriptor/provisional/stage-token-or-grant/context/registry evidence. The Gate
@@ -248,6 +288,15 @@ consume it. The current `approval.Unsupported` boundary means no legitimate
 current supported command path could have created any valid v1 state beyond
 `prepared`; every unexpected non-prepared record remains evidence, never
 authority or a migration candidate.
+
+The quarantine marker uses the same two-space indented JSON and one terminal
+LF, with all five fields present in the order above. It is capped at 1,024
+bytes before decoding. `schema_version` is integer 1, `record_sha256` is the
+lowercase 64-character hex digest of the exact valid v1 bytes, `state` is one
+of the valid unsafe v1 states above, and `detected_at` is canonical UTC
+RFC3339Nano with terminal `Z` and year 0001 through 9999. The marker is audit
+evidence only; its digest and state do not independently validate the source
+record or confer authority.
 
 ## Executor boundary
 
