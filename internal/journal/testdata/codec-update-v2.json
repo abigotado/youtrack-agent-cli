@@ -1,0 +1,62 @@
+{
+  "version": 2,
+  "revision": 1,
+  "state": "prepared",
+  "plan": {
+    "schema_version": 1,
+    "plan_id": "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "kind": "issue.update",
+    "profile": {
+      "name": "work",
+      "instance": "https://acme.youtrack.cloud",
+      "rest_base_url": "https://acme.youtrack.cloud/api",
+      "oauth_issuer_url": "https://hub.example.test",
+      "identity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "credential_generation": "gen-1",
+      "account": {
+        "id": "1-2",
+        "login": "alice"
+      }
+    },
+    "policy": {
+      "project": {
+        "id": "0-1",
+        "key": "APP"
+      },
+      "policy_revision": 1,
+      "policy_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "schema_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "executor_assurance": "rest-best-effort",
+      "authorized_capability": "issue-update",
+      "notification_policy": "youtrack-default",
+      "reconciliation_strategy": "bounded-exact-and-marker"
+    },
+    "operation": {
+      "issue_update": {
+        "request": {
+          "issue_id": "APP-1",
+          "set": {
+            "summary": "new"
+          }
+        },
+        "expected": {
+          "issue_id": "APP-1",
+          "issue_state_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "touched_fields_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      }
+    },
+    "request_sha256": "9b4a6652ef2500c4d1e59669cadf6dcc8dc2e77224684cd7433c8d49d844955b",
+    "expected_sha256": "f17747d18c996141cb33aeba203a6635cffa8bd4fb178e14fb592af283ff77c9",
+    "intent_sha256": "56635c16b12d2b5b4849a76fa936fc8f04550509c9afc4afa1fbd06a568da341"
+  },
+  "receipt": null,
+  "authority_evidence": null,
+  "coordinator_evidence": null,
+  "mutation_attempts": 0,
+  "outcome": null,
+  "evidence": null,
+  "legacy_v1_record_sha256": null,
+  "created_at": "2026-09-28T15:00:00Z",
+  "updated_at": "2026-09-28T15:00:00Z"
+}
