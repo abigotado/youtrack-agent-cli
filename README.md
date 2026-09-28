@@ -87,7 +87,11 @@ channels.
 
 Copy [the portable read-only example](docs/profile.portable-readonly.example.json),
 replace the instance, expected account, OAuth public-client registration, and scopes, then
-validate it before writing local metadata:
+validate it before writing local metadata. For the OAuth `scopes` value, replace
+`replace-with-youtrack-service-id` with the instance's **YouTrack Service ID**
+from Administration > Server Settings > Global Settings > Hub Integration >
+View integration details. This is the resource service ID, not the OAuth client
+ID or its name (`youtrack-agent-cli`), and not the literal word `YouTrack`.
 
 ```bash
 youtrack-agent-cli profile add --from profile.json --dry-run
