@@ -28,7 +28,7 @@ func TestStoreMigratePreparedV1WindowsDoesNotCreateDirectory(t *testing.T) {
 
 func TestStoreMigratePreparedV1WindowsRefusesBeforeWrite(t *testing.T) {
 	store := New(filepath.Join(t.TempDir(), "journal"))
-	if err := store.ensureDirectory(); err != nil {
+	if err := os.MkdirAll(store.directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	planID := "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA"

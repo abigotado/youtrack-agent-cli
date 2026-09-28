@@ -366,10 +366,11 @@ func TestStoreMigratePreparedV1DetectsSourceReplacementBeforeRename(t *testing.T
 	}
 	var renameCalls int
 	store.beforeMigrateRename = func(int, string) error {
-		if err := os.Remove(path); err != nil {
+		replacement := path + ".replacement"
+		if err := os.WriteFile(replacement, []byte(historicalV1Prepared), 0o600); err != nil {
 			return err
 		}
-		return os.WriteFile(path, []byte(historicalV1Prepared), 0o600)
+		return os.Rename(replacement, path)
 	}
 	store.migrateRename = func(dirFD int, oldName, newName string) error {
 		renameCalls++
