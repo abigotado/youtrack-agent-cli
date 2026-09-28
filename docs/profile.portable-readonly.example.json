@@ -8,7 +8,7 @@
     "authorization_url": "https://example.myjetbrains.com/api/rest/oauth2/auth",
     "token_url": "https://example.myjetbrains.com/api/rest/oauth2/token",
     "client_id": "replace-with-public-client-id",
-    "scopes": ["YouTrack"],
+    "scopes": ["replace-with-youtrack-service-id"],
     "redirect_uri": "http://127.0.0.1:18987/oauth/callback"
   },
   "expected_account_id": "1-2",

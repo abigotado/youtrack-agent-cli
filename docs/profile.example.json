@@ -9,7 +9,7 @@
     "token_url": "https://youtrack.example.com/api/rest/oauth2/token",
     "client_id": "registered-public-client",
     "scopes": [
-      "YouTrack"
+      "replace-with-youtrack-service-id"
     ],
     "redirect_uri": "http://127.0.0.1:18987/oauth/callback"
   },
