@@ -1,14 +1,12 @@
 package journal
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,12 +24,22 @@ var (
 	remoteIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 )
 
+func journalConflict(reason, format string, args ...any) *errx.Error {
+	return errx.Conflict(reason, format, args...).WithHint(
+		"inspect the local journal; do not retry a mutation automatically")
+}
+
 // Store owns one journal directory. Unrelated records have independent locks.
 type Store struct {
 	directory string
 	now       func() time.Time
 	rename    func(string, string) error
 	openDir   func(string) (*os.File, error)
+	// Migration-only fault boundaries. Nil selects the anchored OS operation.
+	migrateRename       func(int, string, string) error
+	markerLink          func(int, string, string) error
+	migrateDirSync      func(*os.File) error
+	beforeMigrateRename func(int, string) error
 }
 
 // CommitError means the atomic rename completed, but directory durability
@@ -79,7 +87,7 @@ func (s Store) Create(ctx context.Context, plan intent.Plan) (Record, error) {
 		_, readErr := os.Lstat(path)
 		switch {
 		case readErr == nil:
-			return errx.Conflict("JOURNAL_RECORD_EXISTS", "mutation plan %q is already recorded", plan.PlanID)
+			return journalConflict("JOURNAL_RECORD_EXISTS", "mutation plan %q is already recorded", plan.PlanID)
 		case !errors.Is(readErr, os.ErrNotExist):
 			return fmt.Errorf("inspect mutation journal record: %w", readErr)
 		}
@@ -96,7 +104,7 @@ func (s Store) Get(ctx context.Context, planID string) (Record, error) {
 	if err := s.ensureDirectory(); err != nil {
 		return Record{}, err
 	}
-	path, err := s.recordPath(planID)
+	path, err := s.historicalRecordPath(planID)
 	if err != nil {
 		return Record{}, err
 	}
@@ -123,7 +131,7 @@ func (s Store) CompareAndSwap(ctx context.Context, planID string, expectedRevisi
 	if err := s.ensureDirectory(); err != nil {
 		return Record{}, err
 	}
-	path, err := s.recordPath(planID)
+	path, err := s.historicalRecordPath(planID)
 	if err != nil {
 		return Record{}, err
 	}
@@ -136,8 +144,11 @@ func (s Store) CompareAndSwap(ctx context.Context, planID string, expectedRevisi
 		if err != nil {
 			return err
 		}
+		if current.Version == 2 {
+			return journalConflict("JOURNAL_V2_AUTHORITY_UNAVAILABLE", "prepared v2 journal records cannot enter the v1 transition path")
+		}
 		if current.Revision != expectedRevision {
-			return errx.Conflict("JOURNAL_REVISION_CONFLICT", "mutation plan %q changed from revision %d to %d", planID, expectedRevision, current.Revision)
+			return journalConflict("JOURNAL_REVISION_CONFLICT", "mutation plan %q changed from revision %d to %d", planID, expectedRevision, current.Revision)
 		}
 		updated, err = applyTransition(current, transition, s.currentTime())
 		if err != nil {
@@ -150,7 +161,7 @@ func (s Store) CompareAndSwap(ctx context.Context, planID string, expectedRevisi
 
 func applyTransition(current Record, transition Transition, now time.Time) (Record, error) {
 	if !allowedTransition(current.State, transition.To) {
-		return Record{}, errx.Conflict("INVALID_JOURNAL_TRANSITION", "mutation plan cannot move from %s to %s", current.State, transition.To)
+		return Record{}, journalConflict("INVALID_JOURNAL_TRANSITION", "mutation plan cannot move from %s to %s", current.State, transition.To)
 	}
 	next := current
 	next.Revision++
@@ -159,7 +170,7 @@ func applyTransition(current Record, transition Transition, now time.Time) (Reco
 	switch transition.To {
 	case StateConfirmed:
 		if transition.Receipt == nil {
-			return Record{}, errx.Conflict("RECEIPT_REQUIRED", "confirmation requires a signed receipt binding")
+			return Record{}, journalConflict("RECEIPT_REQUIRED", "confirmation requires a signed receipt binding")
 		}
 		if err := validateReceiptBinding(current.Plan, *transition.Receipt); err != nil {
 			return Record{}, err
@@ -167,18 +178,18 @@ func applyTransition(current Record, transition Transition, now time.Time) (Reco
 		next.Receipt = cloneReceipt(transition.Receipt)
 	case StateInFlight:
 		if current.Receipt == nil || transition.Receipt != nil || current.MutationAttempts != 0 {
-			return Record{}, errx.Conflict("RECEIPT_REPLAY", "the approval receipt is absent or has already been consumed")
+			return Record{}, journalConflict("RECEIPT_REPLAY", "the approval receipt is absent or has already been consumed")
 		}
 		if !now.Before(current.Receipt.ExpiresAt) {
-			return Record{}, errx.Conflict("RECEIPT_EXPIRED", "the approval receipt expired before durable consumption")
+			return Record{}, journalConflict("RECEIPT_EXPIRED", "the approval receipt expired before durable consumption")
 		}
 		next.MutationAttempts = 1
 	case StateFailedBeforeMutation, StateApplied, StateAmbiguous:
 		if transition.Outcome == nil || current.MutationAttempts != 1 {
-			return Record{}, errx.Conflict("OUTCOME_INVALID", "a dispatched mutation requires one bounded outcome")
+			return Record{}, journalConflict("OUTCOME_INVALID", "a dispatched mutation requires one bounded outcome")
 		}
 		if transition.Outcome.Code != string(transition.To) {
-			return Record{}, errx.Conflict("OUTCOME_INVALID", "mutation outcome code does not match state %s", transition.To)
+			return Record{}, journalConflict("OUTCOME_INVALID", "mutation outcome code does not match state %s", transition.To)
 		}
 		if err := validateOutcome(*transition.Outcome); err != nil {
 			return Record{}, err
@@ -186,7 +197,7 @@ func applyTransition(current Record, transition Transition, now time.Time) (Reco
 		next.Outcome = cloneOutcome(transition.Outcome)
 	case StateReconciled, StateOperatorResolutionRequired, StateResolvedApplied, StateResolvedNotApplied:
 		if transition.Evidence == nil {
-			return Record{}, errx.Conflict("EVIDENCE_REQUIRED", "this transition requires bounded evidence")
+			return Record{}, journalConflict("EVIDENCE_REQUIRED", "this transition requires bounded evidence")
 		}
 		if err := validateEvidence(*transition.Evidence); err != nil {
 			return Record{}, err
@@ -194,7 +205,7 @@ func applyTransition(current Record, transition Transition, now time.Time) (Reco
 		next.Evidence = append(append([]Evidence(nil), current.Evidence...), *transition.Evidence)
 	case StateCanceled, StateExpired:
 		if transition.Receipt != nil || transition.Outcome != nil || transition.Evidence != nil {
-			return Record{}, errx.Conflict("TRANSITION_DATA_INVALID", "cancel or expiry cannot add receipt, outcome, or evidence")
+			return Record{}, journalConflict("TRANSITION_DATA_INVALID", "cancel or expiry cannot add receipt, outcome, or evidence")
 		}
 	}
 	if err := validateRecord(next); err != nil {
@@ -292,19 +303,19 @@ func validateRecord(record Record) error {
 
 func validateOutcome(outcome Outcome) error {
 	if outcome.EvidenceSHA256 != "" && !isDigest(outcome.EvidenceSHA256) {
-		return errx.Conflict("OUTCOME_INVALID", "mutation outcome evidence digest is malformed")
+		return journalConflict("OUTCOME_INVALID", "mutation outcome evidence digest is malformed")
 	}
 	switch outcome.Code {
 	case string(StateApplied):
 		if !remoteIDPattern.MatchString(outcome.RemoteID) {
-			return errx.Conflict("OUTCOME_INVALID", "applied mutation outcome requires one bounded exact remote ID")
+			return journalConflict("OUTCOME_INVALID", "applied mutation outcome requires one bounded exact remote ID")
 		}
 	case string(StateFailedBeforeMutation), string(StateAmbiguous):
 		if outcome.RemoteID != "" {
-			return errx.Conflict("OUTCOME_INVALID", "non-applied mutation outcome cannot claim a remote ID")
+			return journalConflict("OUTCOME_INVALID", "non-applied mutation outcome cannot claim a remote ID")
 		}
 	default:
-		return errx.Conflict("OUTCOME_INVALID", "mutation outcome code is unsupported")
+		return journalConflict("OUTCOME_INVALID", "mutation outcome code is unsupported")
 	}
 	return nil
 }
@@ -312,7 +323,7 @@ func validateOutcome(outcome Outcome) error {
 func validateReceiptBinding(plan intent.Plan, receipt ReceiptBinding) error {
 	if !receiptIDPattern.MatchString(receipt.ReceiptID) || !noncePattern.MatchString(receipt.Nonce) || receipt.PlanSHA256 != plan.IntentSHA256 ||
 		receipt.ExpiresAt.IsZero() || strings.TrimSpace(receipt.KeyGeneration) == "" || !isDigest(receipt.ReceiptSHA256) {
-		return errx.Conflict("RECEIPT_BINDING_MISMATCH", "receipt binding does not match mutation plan %q", plan.PlanID)
+		return journalConflict("RECEIPT_BINDING_MISMATCH", "receipt binding does not match mutation plan %q", plan.PlanID)
 	}
 	return nil
 }
@@ -320,7 +331,7 @@ func validateReceiptBinding(plan intent.Plan, receipt ReceiptBinding) error {
 func validateEvidence(evidence Evidence) error {
 	if !isDigest(evidence.SHA256) || evidence.CollectedAt.IsZero() || evidence.Summary == "" ||
 		len(evidence.Summary) > 1024 || strings.ContainsRune(evidence.Summary, '\x00') {
-		return errx.Conflict("EVIDENCE_INVALID", "reconciliation evidence is missing, oversized, or malformed")
+		return journalConflict("EVIDENCE_INVALID", "reconciliation evidence is missing, oversized, or malformed")
 	}
 	return nil
 }
@@ -344,8 +355,8 @@ func (s Store) ensureDirectory() error {
 	if err != nil {
 		return fmt.Errorf("inspect mutation journal directory: %w", err)
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
-		return errx.Internal("mutation journal directory is not a private real directory")
+	if !validJournalDirectoryInfo(info) {
+		return errx.Internal("mutation journal directory is not an owned private 0700 real directory")
 	}
 	return nil
 }
@@ -357,44 +368,32 @@ func (s Store) recordPath(planID string) (string, error) {
 	return filepath.Join(s.directory, planID+".json"), nil
 }
 
+func (s Store) historicalRecordPath(planID string) (string, error) {
+	// Reads and migration must use the frozen historical grammar. New plan
+	// creation may evolve independently with intent.ValidatePlanID.
+	if !legacyPlanID(planID) {
+		return "", errx.Usage("plan ID must be a canonical historical YTAP identifier")
+	}
+	return filepath.Join(s.directory, planID+".json"), nil
+}
+
 func readRecord(path, expectedPlanID string) (Record, error) {
-	info, err := os.Lstat(path)
+	raw, err := readJournalFile(filepath.Dir(path), filepath.Base(path), maxRecordBytes)
 	if errors.Is(err, os.ErrNotExist) {
 		return Record{}, errx.NotFound("mutation_plan", filepath.Base(path), nil)
 	}
 	if err != nil {
-		return Record{}, fmt.Errorf("inspect mutation journal record: %w", err)
-	}
-	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() > maxRecordBytes {
-		return Record{}, errx.Internal("mutation journal record is insecure, oversized, or not a regular file")
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return Record{}, fmt.Errorf("open mutation journal record: %w", err)
-	}
-	defer file.Close()
-	opened, err := file.Stat()
-	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
-		return Record{}, errx.Internal("mutation journal record changed while opening")
-	}
-	raw, err := io.ReadAll(io.LimitReader(file, maxRecordBytes+1))
-	if err != nil {
-		return Record{}, fmt.Errorf("read mutation journal record: %w", err)
-	}
-	if len(raw) > maxRecordBytes {
-		return Record{}, errx.Internal("mutation journal record exceeds its size limit")
+		return Record{}, errx.Internal("mutation journal record is insecure, oversized, or changed while reading")
 	}
 	var record Record
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&record); err != nil {
-		return Record{}, errx.Internal("mutation journal record is corrupt").Wrap(err)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return Record{}, errx.Internal("mutation journal record contains trailing JSON")
-	}
-	if err := validateRecord(record); err != nil {
-		return Record{}, err
+	if classified, classifyErr := ClassifyLegacyV1(raw); classifyErr == nil {
+		record = classified.Record
+	} else if prepared, decodeErr := DecodePreparedV2(raw); decodeErr == nil {
+		record = preparedRecordProjection(prepared)
+	} else {
+		// Decoder diagnostics may contain journal-controlled text. Neither
+		// historical nor v2 parser errors cross the Store boundary.
+		return Record{}, errx.Internal("mutation journal record is malformed or noncanonical")
 	}
 	if record.Plan.PlanID != expectedPlanID {
 		return Record{}, errx.Internal("mutation journal filename and embedded plan ID do not match")

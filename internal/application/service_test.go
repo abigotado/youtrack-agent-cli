@@ -1,6 +1,7 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -25,6 +26,44 @@ type trapCredentials struct{ calls int }
 func (store *trapCredentials) Exists(context.Context, string) (bool, error) {
 	store.calls++
 	return false, errors.New("credential trap called")
+}
+
+func TestMutationStatusAndExportNeverMigrateLegacyJournal(t *testing.T) {
+	service, credentials, transport := mutationService(t)
+	journalDir := filepath.Join(t.TempDir(), "journal")
+	service.Journal = journal.New(journalDir)
+	created, err := service.PrepareMutationInfo(context.Background(), validPrepareInput(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	journalPath := filepath.Join(journalDir, created.PlanID+".json")
+	before, err := os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.MutationStatus(context.Background(), created.PlanID)
+	if err != nil || status.Version != 1 || status.Revision != 1 {
+		t.Fatalf("status of v1 = %#v, %v", status, err)
+	}
+	exportPath := filepath.Join(t.TempDir(), "plan.json")
+	exported, err := service.ExportMutation(context.Background(), created.PlanID, exportPath)
+	if err != nil || exported.Version != 1 {
+		t.Fatalf("export of v1 = %#v, %v", exported, err)
+	}
+	if _, err := os.Stat(exportPath); err != nil {
+		t.Fatalf("export did not write plan: %v", err)
+	}
+	after, err := os.ReadFile(journalPath)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("status/export changed authoritative v1: %v", err)
+	}
+	markerPath := filepath.Join(journalDir, created.PlanID+".v1-quarantine.json")
+	if _, err := os.Lstat(markerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("status/export created quarantine marker: %v", err)
+	}
+	if credentials.calls != 0 || transport.calls != 0 {
+		t.Fatalf("status/export contacted credentials=%d network=%d", credentials.calls, transport.calls)
+	}
 }
 func (store *trapCredentials) Load(context.Context, string) (auth.Credential, error) {
 	store.calls++

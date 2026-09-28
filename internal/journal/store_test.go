@@ -400,10 +400,11 @@ func TestGetRejectsImpossibleDurableDispatchRecords(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			record := dispatchedRecord(t)
 			test.mutate(&record)
-			raw, err := json.Marshal(record)
+			raw, err := json.MarshalIndent(record, "", "  ")
 			if err != nil {
 				t.Fatal(err)
 			}
+			raw = append(raw, '\n')
 			path := filepath.Join(store.directory, record.Plan.PlanID+".json")
 			if err := os.WriteFile(path, raw, 0o600); err != nil {
 				t.Fatal(err)

@@ -176,11 +176,13 @@ persist a v3 receipt into that record. Do not bridge the schemas by copying
 metadata or treating the journal's validation as receipt verification. Full
 authority verification and the strict v2 record/migration below must land first.
 
-The current Store still writes and reads journal record version 1. The
-isolated [journal codec](../internal/journal/codec.go) neither changes Store
-behavior nor admits any journal to the coordinator. Native authority work
-must integrate strict record version 2 before confirmation or dispatch; no v1
-record can enter the coordinator.
+The Store still creates version 1 records. Its `Get` path strictly reads
+canonical historical v1 and prepared-only v2, and its internal
+`MigratePreparedV1` storage operation can replace one pristine prepared v1
+record with a prepared v2 record. `CompareAndSwap` refuses v2. This migration
+does not admit either version to a coordinator or enable confirmation or
+dispatch. Native authority work must integrate the full strict v2 lifecycle
+before any v1 or prepared-only v2 record can enter it.
 
 The historical v1 wire is frozen independently of future `Record` and
 `intent.Plan` fields, including the nested profile, policy, operation, request,
@@ -260,18 +262,38 @@ recovery-close or recovery-actor fields and no recovery journal CAS. A later
 cleanup only validates existing durable normal closure and deletes that exact
 active item's persistent reference; the journal is unchanged.
 
-Migration reads a v1 record under its existing per-plan lock with no-follow,
-size, owner, mode, canonical decode, and revision checks. Only `prepared` with
+Migration reads a v1 record under its existing per-plan lock using an anchored
+directory file descriptor and fd-relative no-follow, nonblocking open. It
+checks the real directory is owned by the effective user at mode `0700` and
+the source is an owned, regular, single-link `0600` file with bounded size and
+stable file identity before and after reading. Canonical decoding and exact
+embedded plan ID are required. Windows migration refuses before directory or
+lock creation because the same file-identity contract is not implemented
+there. Only `prepared` with
 `mutation_attempts == 0`, no receipt, no outcome, and no evidence may migrate:
 that is the sole safe state actually producible by the currently shipped
 fail-closed command path. It copies the plan, sets receipt, authority,
 coordinator, outcome, and evidence null, sets
 `legacy_v1_record_sha256` to SHA-256 of the exact v1 bytes, increments revision
-once, and preserves state/timestamps except for `updated_at`. It writes a
-same-directory exclusive `0600` temporary file, fsyncs it, atomically renames
-over the v1 path, fsyncs the directory, then rereads and byte-compares v2 before
-returning success. Any failure before rename leaves v1 intact; failure after an
-uncertain rename requires exact reread and never a second write.
+once, and preserves state/timestamps except for `updated_at`. The internal API
+requires expected revision 1; an exact already-migrated revision-2 record with
+a non-null legacy digest is an idempotent read-only success for a repeated
+revision-1 request only after directory fsync and exact secure reread. A
+failed sync or reread remains a nonretryable commit-uncertain result; observing
+the v2 bytes alone cannot launder a failed earlier directory sync into
+success. It writes a same-directory exclusive `0600` temporary
+file, fsyncs it, atomically renames over the v1 path, fsyncs the directory,
+then securely rereads and byte-compares v2 before returning success. Any
+failure before rename leaves v1 intact; failure after an uncertain rename
+requires exact reread and never a second write. A post-rename directory-sync
+failure remains a commit-uncertain error even when the new bytes are visible.
+Before rename, an anchored reread must confirm that the source has the same
+device, inode, size, modification time, and exact bytes classified under the
+plan lock. Cooperating Store writers serialize on that advisory lock. POSIX
+rename does not provide a conditional destination-inode comparison, so an
+uncooperative process running as the same user can still race between this
+last check and rename; the supported same-user trust boundary treats such
+interference as denial of service, never as approval authority.
 
 A valid v1 record that cannot safely migrate is always rejected with
 `JOURNAL_V1_AUTHORITY_STATE_QUARANTINED`, including `canceled`, `expired`,
@@ -281,10 +303,14 @@ A valid v1 record that cannot safely migrate is always rejected with
 `prepared` record with v2-unrepresentable time or encoding. In particular, the v1 schema
 requires `failed_before_mutation` to retain a receipt, one mutation attempt,
 and a matching outcome; it is not a zero-attempt local terminal and never
-migrates. The source record remains byte-for-byte unchanged. Under the plan lock the CLI
-atomically writes a separate exclusive `0600` sibling at exact filename
-`<plan-id>.v1-quarantine.json` using the same temp-file/fsync/rename/directory-
-fsync protocol. The marker contains only
+migrates. The source record remains byte-for-byte unchanged. Under the plan
+lock the internal Store attempts to write a separate exclusive `0600` sibling
+at exact filename
+`<plan-id>.v1-quarantine.json` using an exclusive same-directory `0600`
+temporary file, file fsync, fd-relative `linkat` to the final marker name
+without clobbering an existing marker, temporary-link removal, directory
+fsync, and secure exact reread. A matching preexisting marker is preserved,
+including its original detection time. The marker contains only
 `schema_version`, `record_sha256`, `state`, `reason` exactly
 `unsafe_v1_migration_state`, and `detected_at`; if marker creation is ambiguous
 or fails, the in-memory quarantine still blocks all operations. Status may
