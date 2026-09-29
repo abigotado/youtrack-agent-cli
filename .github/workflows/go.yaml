@@ -228,6 +228,9 @@ jobs:
       - name: Skill mutation fails closed
         run: go test -race -run '^TestWindowsSkillMutationFailsClosed$' ./internal/skills
 
+      - name: Journal migration fails closed
+        run: go test -race -run '^TestStoreMigratePreparedV1Windows' ./internal/journal
+
       - name: Build unsupported credential backend
         run: go build ./cmd/youtrack-agent-cli
 

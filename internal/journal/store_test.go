@@ -52,7 +52,7 @@ func dispatchedRecord(t *testing.T) Record {
 	}
 }
 
-func TestStoreCASReplayAndCrashSemantics(t *testing.T) {
+func TestStoreCASRefusesV1WithoutChangingRecord(t *testing.T) {
 	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 	store := New(filepath.Join(t.TempDir(), "journal"))
 	store.now = func() time.Time { return now }
@@ -73,37 +73,31 @@ func TestStoreCASReplayAndCrashSemantics(t *testing.T) {
 		t.Fatalf("record permissions = %o", info.Mode().Perm())
 	}
 
-	receipt := &ReceiptBinding{
-		ReceiptID: "YTAR-AAAAAAAAAAAAAAAAAAAAAAAAAA", Nonce: "YTAN-BBBBBBBBBBBBBBBBBBBBBBBBBB",
-		PlanSHA256: plan.IntentSHA256, ExpiresAt: now.Add(5 * time.Minute),
-		KeyGeneration: "key-1", ReceiptSHA256: strings.Repeat("f", 64),
-	}
-	confirmed, err := store.CompareAndSwap(context.Background(), plan.PlanID, 1, Transition{To: StateConfirmed, Receipt: receipt})
+	path := filepath.Join(store.directory, plan.PlanID+".json")
+	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.CompareAndSwap(context.Background(), plan.PlanID, 1, Transition{To: StateCanceled})
-	var typed *errx.Error
-	if !errors.As(err, &typed) || typed.Reason != "JOURNAL_REVISION_CONFLICT" {
-		t.Fatalf("stale CAS error = %#v", err)
-	}
-	inFlight, err := store.CompareAndSwap(context.Background(), plan.PlanID, confirmed.Revision, Transition{To: StateInFlight})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !inFlight.NonReplayable() || !inFlight.RequiresReconciliation() || inFlight.MutationAttempts != 1 {
-		t.Fatalf("in-flight record = %#v", inFlight)
+	for _, test := range []struct {
+		name     string
+		revision uint64
+		to       State
+	}{{"current revision", 1, StateConfirmed}, {"stale revision", 0, StateCanceled}} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := store.CompareAndSwap(context.Background(), plan.PlanID, test.revision, Transition{To: test.to})
+			var typed *errx.Error
+			if !errors.As(err, &typed) || typed.Reason != "JOURNAL_AUTHORITY_UNAVAILABLE" || errx.ExitCode(err) != errx.CodeInternal {
+				t.Fatalf("CAS authority refusal = %#v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("CAS changed v1 bytes: %v", err)
+			}
+		})
 	}
 	recovered, err := store.Get(context.Background(), plan.PlanID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if recovered.State != StateInFlight || !recovered.NonReplayable() {
-		t.Fatalf("crash recovery made record replayable: %#v", recovered)
-	}
-	_, err = store.CompareAndSwap(context.Background(), plan.PlanID, recovered.Revision, Transition{To: StateInFlight})
-	if !errors.As(err, &typed) || typed.Reason != "INVALID_JOURNAL_TRANSITION" {
-		t.Fatalf("receipt replay error = %#v", err)
+	if err != nil || recovered.State != StatePrepared || recovered.Revision != 1 {
+		t.Fatalf("read after denied CAS = %#v, %v", recovered, err)
 	}
 }
 
@@ -134,6 +128,45 @@ func TestStorePersistsPlanAboveFormerRecordLimit(t *testing.T) {
 	}
 	if info.Size() <= 256<<10 || info.Size() > maxRecordBytes {
 		t.Fatalf("journal record size = %d, want former limit < size <= %d", info.Size(), maxRecordBytes)
+	}
+}
+
+func TestStoreFrozenV1BudgetAndCreateRoundTrip(t *testing.T) {
+	if maxRecordBytes != maxLegacyV1Bytes || maxLegacyV1Bytes != 1<<20 {
+		t.Fatalf("v1 Store budget changed: write=%d read=%d", maxRecordBytes, maxLegacyV1Bytes)
+	}
+	store := New(filepath.Join(t.TempDir(), "journal"))
+	plan := journalPlan(t)
+	created, err := store.Create(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Get(context.Background(), plan.PlanID)
+	if err != nil || loaded.Version != 1 || loaded.State != StatePrepared || loaded.Revision != created.Revision ||
+		loaded.Plan.IntentSHA256 != created.Plan.IntentSHA256 {
+		t.Fatalf("newly created v1 cannot be read by frozen decoder: %#v, %v", loaded, err)
+	}
+}
+
+func TestStoreCreateRejectsV2UnrepresentableTimeBeforeCommit(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		at   time.Time
+	}{
+		{"year zero", time.Date(0, time.January, 1, 0, 0, 0, 0, time.UTC)},
+		{"year ten thousand", time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := New(filepath.Join(t.TempDir(), "journal"))
+			store.now = func() time.Time { return test.at }
+			plan := journalPlan(t)
+			if _, err := store.Create(context.Background(), plan); err == nil {
+				t.Fatal("Create accepted record that prepared-v2 migration cannot encode")
+			}
+			if _, err := os.Lstat(filepath.Join(store.directory, plan.PlanID+".json")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("unrepresentable Create committed journal bytes: %v", err)
+			}
+		})
 	}
 }
 
@@ -310,36 +343,31 @@ func TestCompleteStateTable(t *testing.T) {
 
 func TestResolvedFlowRequiresBoundedEvidence(t *testing.T) {
 	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
-	store := New(filepath.Join(t.TempDir(), "journal"))
-	store.now = func() time.Time { return now }
 	plan := journalPlan(t)
-	record, err := store.Create(context.Background(), plan)
-	if err != nil {
-		t.Fatal(err)
-	}
+	record := Record{Version: 1, Revision: 1, State: StatePrepared, Plan: plan, CreatedAt: now, UpdatedAt: now}
 	receipt := &ReceiptBinding{ReceiptID: "YTAR-AAAAAAAAAAAAAAAAAAAAAAAAAA", Nonce: "YTAN-BBBBBBBBBBBBBBBBBBBBBBBBBB", PlanSHA256: plan.IntentSHA256, ExpiresAt: now.Add(time.Minute), KeyGeneration: "key-1", ReceiptSHA256: strings.Repeat("f", 64)}
-	record, err = store.CompareAndSwap(context.Background(), plan.PlanID, record.Revision, Transition{To: StateConfirmed, Receipt: receipt})
+	record, err := applyTransition(record, Transition{To: StateConfirmed, Receipt: receipt}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = store.CompareAndSwap(context.Background(), plan.PlanID, record.Revision, Transition{To: StateInFlight})
+	record, err = applyTransition(record, Transition{To: StateInFlight}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = store.CompareAndSwap(context.Background(), plan.PlanID, record.Revision, Transition{To: StateAmbiguous, Outcome: &Outcome{Code: string(StateAmbiguous)}})
+	record, err = applyTransition(record, Transition{To: StateAmbiguous, Outcome: &Outcome{Code: string(StateAmbiguous)}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CompareAndSwap(context.Background(), plan.PlanID, record.Revision, Transition{To: StateOperatorResolutionRequired}); err == nil {
+	if _, err := applyTransition(record, Transition{To: StateOperatorResolutionRequired}, now); err == nil {
 		t.Fatal("transition without evidence succeeded")
 	}
 	evidence := &Evidence{SHA256: strings.Repeat("1", 64), Summary: "bounded evidence was non-unique", CollectedAt: now}
-	record, err = store.CompareAndSwap(context.Background(), plan.PlanID, record.Revision, Transition{To: StateOperatorResolutionRequired, Evidence: evidence})
+	record, err = applyTransition(record, Transition{To: StateOperatorResolutionRequired, Evidence: evidence}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resolution := &Evidence{SHA256: strings.Repeat("2", 64), Summary: "operator reviewed exact issue", CollectedAt: now}
-	record, err = store.CompareAndSwap(context.Background(), plan.PlanID, record.Revision, Transition{To: StateResolvedApplied, Evidence: resolution})
+	record, err = applyTransition(record, Transition{To: StateResolvedApplied, Evidence: resolution}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,10 +428,11 @@ func TestGetRejectsImpossibleDurableDispatchRecords(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			record := dispatchedRecord(t)
 			test.mutate(&record)
-			raw, err := json.Marshal(record)
+			raw, err := json.MarshalIndent(record, "", "  ")
 			if err != nil {
 				t.Fatal(err)
 			}
+			raw = append(raw, '\n')
 			path := filepath.Join(store.directory, record.Plan.PlanID+".json")
 			if err := os.WriteFile(path, raw, 0o600); err != nil {
 				t.Fatal(err)
