@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -78,6 +79,140 @@ func TestStoreMigratePreparedV1RejectsUnsafeSourceFiles(t *testing.T) {
 			}
 			if _, err := os.Lstat(markerPath); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("unsafe source gained marker: %v", err)
+			}
+		})
+	}
+}
+
+func TestStoreGetAndCASRejectUnsafeSourceFiles(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		setup func(t *testing.T, path string)
+	}{
+		{"symlink", func(t *testing.T, path string) {
+			t.Helper()
+			target := filepath.Join(filepath.Dir(path), "target.json")
+			if err := os.WriteFile(target, []byte(historicalV1Prepared), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"mode 0644", func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.Chmod(path, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"multiple hard links", func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.Link(path, filepath.Join(filepath.Dir(path), "second.json")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"oversized", func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.WriteFile(path, bytes.Repeat([]byte{'x'}, maxLegacyV1Bytes+1), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"FIFO", func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, path, _ := migrationFixture(t, []byte(historicalV1Prepared))
+			test.setup(t, path)
+			before, err := os.Lstat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, operation := range []struct {
+				name string
+				run  func() error
+			}{
+				{"Get", func() error { _, err := store.Get(context.Background(), "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA"); return err }},
+				{"CompareAndSwap", func() error {
+					_, err := store.CompareAndSwap(context.Background(), "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", 1, Transition{To: StateCanceled})
+					return err
+				}},
+			} {
+				t.Run(operation.name, func(t *testing.T) {
+					if err := operation.run(); err == nil {
+						t.Fatal("unsafe journal source was accepted")
+					}
+					after, err := os.Lstat(path)
+					if err != nil || !os.SameFile(before, after) || before.Mode() != after.Mode() || before.Size() != after.Size() {
+						t.Fatalf("unsafe journal source changed: before=%v after=%v err=%v", before, after, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestStorePrivateSetgidDirectorySupportsCreateGetAndMigration(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "journal"))
+	if err := os.Mkdir(store.directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(store.directory, 0o2700); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(store.directory)
+	if err != nil || info.Mode()&os.ModeSetgid == 0 {
+		t.Skipf("filesystem does not preserve setgid on private directory: %v, %v", info, err)
+	}
+	plan := journalPlan(t)
+	created, err := store.Create(context.Background(), plan)
+	if err != nil || created.State != StatePrepared {
+		t.Fatalf("Create under setgid directory = %#v, %v", created, err)
+	}
+	loaded, err := store.Get(context.Background(), plan.PlanID)
+	if err != nil || loaded.State != StatePrepared || loaded.Revision != 1 {
+		t.Fatalf("Get under setgid directory = %#v, %v", loaded, err)
+	}
+	migrated, err := store.MigratePreparedV1(context.Background(), plan.PlanID, 1)
+	if err != nil || migrated.Revision != 2 {
+		t.Fatalf("Migrate under setgid directory = %#v, %v", migrated, err)
+	}
+}
+
+func TestStoreRejectsOtherSpecialDirectoryBits(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		mode os.FileMode
+	}{{"sticky", 0o1700}, {"setuid", 0o4700}} {
+		t.Run(test.name, func(t *testing.T) {
+			store := New(filepath.Join(t.TempDir(), "journal"))
+			if err := os.Mkdir(store.directory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(store.directory, test.mode); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Lstat(store.directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode()&(os.ModeSticky|os.ModeSetuid) == 0 {
+				t.Skip("filesystem did not preserve requested special bit")
+			}
+			if _, err := store.Create(context.Background(), journalPlan(t)); err == nil {
+				t.Fatal("Create accepted directory with unsafe special bit")
+			}
+			if _, err := store.Get(context.Background(), "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA"); err == nil {
+				t.Fatal("Get accepted directory with unsafe special bit")
 			}
 		})
 	}
@@ -285,6 +420,139 @@ func TestStoreMigratePreparedV1MarkerPublishAmbiguityNeverReplacesSource(t *test
 			marker, err := DecodeQuarantineMarker(markerRaw)
 			if err != nil || marker.RecordSHA256 != codecDigest(unsafe) || marker.State != StateConfirmed {
 				t.Fatalf("published marker = %#v, %v", marker, err)
+			}
+		})
+	}
+}
+
+func TestStoreQuarantineMarkerRecoversAfterUnlinkFailure(t *testing.T) {
+	unsafe := legacyCodecBytes(t, legacyCodecRecord(t, StateConfirmed))
+	for _, test := range []struct {
+		name              string
+		failures          int
+		wantRestartRepair bool
+	}{
+		{"one-shot failure repaired in same call", 1, false},
+		{"persistent failure repaired by fresh store", 2, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, sourcePath, markerPath := migrationFixture(t, unsafe)
+			calls := 0
+			store.markerUnlink = func(dirFD int, temporary string) error {
+				calls++
+				if calls <= test.failures {
+					return syscall.EIO
+				}
+				return unix.Unlinkat(dirFD, temporary, 0)
+			}
+			_, err := store.MigratePreparedV1(context.Background(), "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", 1)
+			var typed *errx.Error
+			if !errors.As(err, &typed) || typed.Reason != "JOURNAL_V1_AUTHORITY_STATE_QUARANTINED" {
+				t.Fatalf("quarantine refusal = %v", err)
+			}
+			if calls < test.failures {
+				t.Fatalf("unlink hook invoked only %d times", calls)
+			}
+			if test.wantRestartRepair {
+				if errors.Unwrap(typed) == nil {
+					t.Fatal("marker persistence failure was discarded")
+				}
+				restarted := New(store.directory)
+				_, err = restarted.MigratePreparedV1(context.Background(), "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", 1)
+				if !errors.As(err, &typed) || typed.Reason != "JOURNAL_V1_AUTHORITY_STATE_QUARANTINED" || errors.Unwrap(typed) != nil {
+					t.Fatalf("fresh Store did not securely recover matching marker: %v", err)
+				}
+			}
+			markerRaw, err := os.ReadFile(markerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			marker, err := DecodeQuarantineMarker(markerRaw)
+			if err != nil || marker.RecordSHA256 != codecDigest(unsafe) || marker.State != StateConfirmed {
+				t.Fatalf("recovered quarantine marker = %#v, %v", marker, err)
+			}
+			info, err := os.Lstat(markerPath)
+			if err != nil || info.Mode().Perm() != 0o600 || info.Sys().(*syscall.Stat_t).Nlink != 1 {
+				t.Fatalf("recovered marker is not a private single-link file: %v, %v", info, err)
+			}
+			source, err := os.ReadFile(sourcePath)
+			if err != nil || !bytes.Equal(source, unsafe) {
+				t.Fatalf("quarantine changed original v1 source: %v", err)
+			}
+		})
+	}
+}
+
+func TestStoreQuarantineRecoveryRefusesAmbiguousExtraHardLink(t *testing.T) {
+	unsafe := legacyCodecBytes(t, legacyCodecRecord(t, StateConfirmed))
+	store, sourcePath, markerPath := migrationFixture(t, unsafe)
+	store.markerUnlink = func(int, string) error { return syscall.EIO }
+	_, err := store.MigratePreparedV1(context.Background(), "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", 1)
+	var typed *errx.Error
+	if !errors.As(err, &typed) || typed.Reason != "JOURNAL_V1_AUTHORITY_STATE_QUARANTINED" || errors.Unwrap(typed) == nil {
+		t.Fatalf("persistent unlink failure was not retained: %v", err)
+	}
+	before, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(markerPath, filepath.Join(store.directory, "extra-link.json")); err != nil {
+		t.Fatal(err)
+	}
+	restarted := New(store.directory)
+	_, err = restarted.MigratePreparedV1(context.Background(), "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", 1)
+	if !errors.As(err, &typed) || typed.Reason != "JOURNAL_V1_AUTHORITY_STATE_QUARANTINED" || errors.Unwrap(typed) == nil {
+		t.Fatalf("ambiguous extra link was accepted or not diagnosed: %v", err)
+	}
+	after, err := os.ReadFile(markerPath)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("ambiguous marker changed: %v", err)
+	}
+	source, err := os.ReadFile(sourcePath)
+	if err != nil || !bytes.Equal(source, unsafe) {
+		t.Fatalf("ambiguous recovery changed original v1 source: %v", err)
+	}
+}
+
+func TestStoreMigrationRetainsPrivateOperationalCauses(t *testing.T) {
+	sentinel := errors.New("journal-operational-sentinel-private")
+	for _, test := range []struct {
+		name   string
+		source []byte
+		inject func(*Store)
+	}{
+		{"marker link", legacyCodecBytes(t, legacyCodecRecord(t, StateConfirmed)), func(store *Store) {
+			store.markerLink = func(int, string, string) error { return sentinel }
+		}},
+		{"marker directory sync", legacyCodecBytes(t, legacyCodecRecord(t, StateConfirmed)), func(store *Store) {
+			store.migrateDirSync = func(*os.File) error { return sentinel }
+		}},
+		{"migration rename", []byte(historicalV1Prepared), func(store *Store) {
+			store.migrateRename = func(int, string, string) error { return sentinel }
+		}},
+		{"pre-rename recheck", []byte(historicalV1Prepared), func(store *Store) {
+			store.beforeMigrateRename = func(int, string) error { return sentinel }
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, sourcePath, _ := migrationFixture(t, test.source)
+			test.inject(&store)
+			_, err := store.MigratePreparedV1(context.Background(), "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", 1)
+			if !errors.Is(err, sentinel) {
+				t.Fatalf("operational cause was discarded: %v", err)
+			}
+			var typed *errx.Error
+			if !errors.As(err, &typed) || strings.Contains(typed.Message, sentinel.Error()) || strings.Contains(typed.Hint, sentinel.Error()) {
+				t.Fatalf("private cause leaked to public contract: %#v", typed)
+			}
+			if test.name == "marker link" || test.name == "marker directory sync" {
+				if typed.Reason != "JOURNAL_V1_AUTHORITY_STATE_QUARANTINED" {
+					t.Fatalf("unsafe v1 lost quarantine reason: %#v", typed)
+				}
+			}
+			after, readErr := os.ReadFile(sourcePath)
+			if readErr != nil || !bytes.Equal(after, test.source) {
+				t.Fatalf("operational failure changed source: %v", readErr)
 			}
 		})
 	}

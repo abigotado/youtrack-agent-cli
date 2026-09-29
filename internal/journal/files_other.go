@@ -2,7 +2,11 @@
 
 package journal
 
-import "os"
+import (
+	"os"
+
+	"github.com/abigotado/youtrack-agent-cli/internal/errx"
+)
 
 // No reviewed anchored migration exists for this platform. Ordinary v1/v2
 // reads retain the portable historical Store path; migration refuses early.
@@ -14,7 +18,9 @@ type secureJournalDirectory struct {
 func migrationAvailable() bool { return false }
 
 func migrationUnsupported() error {
-	return journalConflict("JOURNAL_MIGRATION_UNSUPPORTED", "secure journal migration is not available on this platform")
+	refusal := errx.Internal("secure journal migration is not available on this platform")
+	refusal.Reason = "JOURNAL_MIGRATION_UNSUPPORTED"
+	return refusal.WithHint("retain the journal record; use a reviewed Darwin or Linux migration path")
 }
 
 func validJournalDirectoryInfo(info os.FileInfo) bool {
@@ -33,6 +39,9 @@ func (*secureJournalDirectory) readIdentified(string, int) ([]byte, journalFileI
 func (*secureJournalDirectory) createTemp(string, []byte) (string, error) {
 	return "", migrationUnsupported()
 }
-func (*secureJournalDirectory) unlink(string) error    { return migrationUnsupported() }
+func (*secureJournalDirectory) unlink(string) error { return migrationUnsupported() }
+func (*secureJournalDirectory) recoverQuarantineLink(string, func([]byte) bool, func(int, string) error) error {
+	return migrationUnsupported()
+}
 func defaultMigrationRename(int, string, string) error { return migrationUnsupported() }
 func defaultMarkerLink(int, string, string) error      { return migrationUnsupported() }

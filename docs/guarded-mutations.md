@@ -176,13 +176,16 @@ persist a v3 receipt into that record. Do not bridge the schemas by copying
 metadata or treating the journal's validation as receipt verification. Full
 authority verification and the strict v2 record/migration below must land first.
 
-The Store still creates version 1 records. Its `Get` path strictly reads
-canonical historical v1 and prepared-only v2, and its internal
+The Store still creates version 1 records, but only by a private frozen
+prepared-v1 encoder that verifies the exact historical bytes and refuses a
+live plan or record shape change it cannot represent. Its `Get` path strictly
+reads canonical historical v1 and prepared-only v2, and its internal
 `MigratePreparedV1` storage operation can replace one pristine prepared v1
-record with a prepared v2 record. `CompareAndSwap` refuses v2. This migration
-does not admit either version to a coordinator or enable confirmation or
-dispatch. Native authority work must integrate the full strict v2 lifecycle
-before any v1 or prepared-only v2 record can enter it.
+record with a prepared v2 record. `CompareAndSwap` validates the named record
+but refuses transitions for both versions until native authority verification
+exists. This migration does not admit either version to a coordinator or enable
+confirmation or dispatch. Native authority work must integrate the full strict
+v2 lifecycle before any v1 or prepared-only v2 record can enter it.
 
 The historical v1 wire is frozen independently of future `Record` and
 `intent.Plan` fields, including the nested profile, policy, operation, request,
@@ -264,7 +267,8 @@ active item's persistent reference; the journal is unchanged.
 
 Migration reads a v1 record under its existing per-plan lock using an anchored
 directory file descriptor and fd-relative no-follow, nonblocking open. It
-checks the real directory is owned by the effective user at mode `0700` and
+checks the real directory is owned by the effective user at mode `0700`, or
+`2700` when the setgid bit is inherited from a private parent, and
 the source is an owned, regular, single-link `0600` file with bounded size and
 stable file identity before and after reading. Canonical decoding and exact
 embedded plan ID are required. Windows migration refuses before directory or

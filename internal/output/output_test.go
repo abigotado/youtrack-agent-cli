@@ -82,6 +82,32 @@ func decodeEnvelopeUseNumber(t *testing.T, out *bytes.Buffer) map[string]any {
 	return env
 }
 
+func TestFailureDoesNotRenderWrappedJournalCause(t *testing.T) {
+	const sentinel = "UNTRUSTED_JOURNAL_CONTENT_SENTINEL"
+	for _, format := range []Format{FormatJSON, FormatText} {
+		t.Run(string(format), func(t *testing.T) {
+			w, out, stderr := writer(format, nil)
+			failure := errx.Internal("mutation journal record could not be read").
+				WithHint("retain the local journal; do not retry a mutation").
+				Wrap(errors.New(sentinel))
+			failure.Reason = "JOURNAL_READ_FAILED"
+			if code := w.Failure(failure); code != errx.CodeInternal {
+				t.Fatalf("exit code = %d, want %d", code, errx.CodeInternal)
+			}
+			if strings.Contains(out.String(), sentinel) || strings.Contains(stderr.String(), sentinel) {
+				t.Fatalf("wrapped cause reached output: stdout=%q stderr=%q", out.String(), stderr.String())
+			}
+			if format == FormatJSON {
+				env := decodeEnvelope(t, out)
+				body := env["error"].(map[string]any)
+				if body["code"] != "JOURNAL_READ_FAILED" || body["message"] != failure.Message || env["hint"] != failure.Hint {
+					t.Fatalf("unexpected stable failure envelope: %v", env)
+				}
+			}
+		})
+	}
+}
+
 func TestSuccessEnvelopeAndCompactProjection(t *testing.T) {
 	w, out, stderr := writer(FormatJSON, nil)
 	w.WithContext("work", "https://example.youtrack.cloud", "1-2", "alice")

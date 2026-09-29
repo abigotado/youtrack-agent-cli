@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -38,6 +37,7 @@ type Store struct {
 	// Migration-only fault boundaries. Nil selects the anchored OS operation.
 	migrateRename       func(int, string, string) error
 	markerLink          func(int, string, string) error
+	markerUnlink        func(int, string) error
 	migrateDirSync      func(*os.File) error
 	beforeMigrateRename func(int, string) error
 }
@@ -68,9 +68,6 @@ func (s Store) Create(ctx context.Context, plan intent.Plan) (Record, error) {
 	if err := plan.Validate(); err != nil {
 		return Record{}, fmt.Errorf("create journal record: %w", err)
 	}
-	if err := s.ensureDirectory(); err != nil {
-		return Record{}, err
-	}
 	path, err := s.recordPath(plan.PlanID)
 	if err != nil {
 		return Record{}, err
@@ -79,6 +76,13 @@ func (s Store) Create(ctx context.Context, plan intent.Plan) (Record, error) {
 	record := Record{
 		Version: recordVersion, Revision: 1, State: StatePrepared, Plan: plan,
 		CreatedAt: now, UpdatedAt: now,
+	}
+	raw, err := encodePreparedLegacyV1(record)
+	if err != nil {
+		return Record{}, errx.Internal("mutation journal plan cannot be encoded as a canonical prepared v1 record").Wrap(err)
+	}
+	if err := s.ensureDirectory(); err != nil {
+		return Record{}, err
 	}
 	err = lockfile.With(path, func() error {
 		if err := ctx.Err(); err != nil {
@@ -91,7 +95,7 @@ func (s Store) Create(ctx context.Context, plan intent.Plan) (Record, error) {
 		case !errors.Is(readErr, os.ErrNotExist):
 			return fmt.Errorf("inspect mutation journal record: %w", readErr)
 		}
-		return s.writeAtomic(path, record)
+		return s.writeAtomic(path, raw)
 	})
 	return record, err
 }
@@ -123,8 +127,10 @@ func (s Store) Get(ctx context.Context, planID string) (Record, error) {
 	return record, err
 }
 
-// CompareAndSwap applies one allowed transition when revision still matches.
-func (s Store) CompareAndSwap(ctx context.Context, planID string, expectedRevision uint64, transition Transition) (Record, error) {
+// CompareAndSwap currently has no authority to advance either journal version.
+// It still validates the named record so missing or malformed data cannot be
+// mistaken for an authorized transition.
+func (s Store) CompareAndSwap(ctx context.Context, planID string, _ uint64, _ Transition) (Record, error) {
 	if err := ctx.Err(); err != nil {
 		return Record{}, err
 	}
@@ -135,28 +141,19 @@ func (s Store) CompareAndSwap(ctx context.Context, planID string, expectedRevisi
 	if err != nil {
 		return Record{}, err
 	}
-	var updated Record
 	err = lockfile.With(path, func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		current, err := readRecord(path, planID)
+		_, err := readRecord(path, planID)
 		if err != nil {
 			return err
 		}
-		if current.Version == 2 {
-			return journalConflict("JOURNAL_V2_AUTHORITY_UNAVAILABLE", "prepared v2 journal records cannot enter the v1 transition path")
-		}
-		if current.Revision != expectedRevision {
-			return journalConflict("JOURNAL_REVISION_CONFLICT", "mutation plan %q changed from revision %d to %d", planID, expectedRevision, current.Revision)
-		}
-		updated, err = applyTransition(current, transition, s.currentTime())
-		if err != nil {
-			return err
-		}
-		return s.writeAtomic(path, updated)
+		refusal := errx.Internal("journal state transitions are unavailable until native authority verification is implemented")
+		refusal.Reason = "JOURNAL_AUTHORITY_UNAVAILABLE"
+		return refusal.WithHint("inspect the local journal; do not retry a mutation or transition automatically")
 	})
-	return updated, err
+	return Record{}, err
 }
 
 func applyTransition(current Record, transition Transition, now time.Time) (Record, error) {
@@ -356,7 +353,7 @@ func (s Store) ensureDirectory() error {
 		return fmt.Errorf("inspect mutation journal directory: %w", err)
 	}
 	if !validJournalDirectoryInfo(info) {
-		return errx.Internal("mutation journal directory is not an owned private 0700 real directory")
+		return errx.Internal("mutation journal directory is not an owned private 0700 or 2700 real directory")
 	}
 	return nil
 }
@@ -378,12 +375,15 @@ func (s Store) historicalRecordPath(planID string) (string, error) {
 }
 
 func readRecord(path, expectedPlanID string) (Record, error) {
-	raw, err := readJournalFile(filepath.Dir(path), filepath.Base(path), maxRecordBytes)
+	raw, err := readJournalFile(filepath.Dir(path), filepath.Base(path), maxLegacyV1Bytes)
 	if errors.Is(err, os.ErrNotExist) {
 		return Record{}, errx.NotFound("mutation_plan", filepath.Base(path), nil)
 	}
 	if err != nil {
-		return Record{}, errx.Internal("mutation journal record is insecure, oversized, or changed while reading")
+		if errors.Is(err, errInvalidJournalWire) || errors.Is(err, errJournalWireTooLarge) {
+			return Record{}, errx.Internal("mutation journal record is insecure, oversized, or changed while reading").Wrap(err)
+		}
+		return Record{}, errx.Internal("mutation journal record could not be read").Wrap(err)
 	}
 	var record Record
 	if classified, classifyErr := ClassifyLegacyV1(raw); classifyErr == nil {
@@ -401,13 +401,8 @@ func readRecord(path, expectedPlanID string) (Record, error) {
 	return record, nil
 }
 
-func (s Store) writeAtomic(path string, record Record) (err error) {
-	raw, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode mutation journal record: %w", err)
-	}
-	raw = append(raw, '\n')
-	if len(raw) > maxRecordBytes {
+func (s Store) writeAtomic(path string, raw []byte) (err error) {
+	if len(raw) > maxLegacyV1Bytes {
 		return errx.Internal("mutation journal record exceeds its size limit")
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".journal-*.tmp")

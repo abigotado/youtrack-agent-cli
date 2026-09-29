@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build darwin || linux
 
 package journal
 
@@ -98,6 +98,10 @@ func TestStoreMigratePreparedV1WritesExactV2AndIsIdempotent(t *testing.T) {
 	if _, err := store.CompareAndSwap(context.Background(), planID, 2, Transition{To: StateCanceled}); err == nil {
 		t.Fatal("legacy CAS wrote authority-bearing state into prepared-only v2")
 	} else {
+		var typed *errx.Error
+		if !errors.As(err, &typed) || typed.Reason != "JOURNAL_AUTHORITY_UNAVAILABLE" || errx.ExitCode(err) != errx.CodeInternal {
+			t.Fatalf("v2 CAS authority refusal = %v", err)
+		}
 		assertLocalJournalNoRetryHint(t, err)
 	}
 	postCAS, err := os.ReadFile(path)
@@ -193,6 +197,20 @@ func TestStoreMigratePreparedV1QuarantinesOnlyValidUnsafeRecords(t *testing.T) {
 				t.Fatalf("quarantine marker = %#v, %v", marker, err)
 			}
 		})
+	}
+}
+
+func TestStoreCASCannotAdvanceQuarantinedV1(t *testing.T) {
+	unsafe := legacyCodecBytes(t, legacyCodecRecord(t, StateConfirmed))
+	store, path, _ := migrationFixture(t, unsafe)
+	_, err := store.CompareAndSwap(context.Background(), "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA", 2, Transition{To: StateInFlight})
+	var typed *errx.Error
+	if !errors.As(err, &typed) || typed.Reason != "JOURNAL_AUTHORITY_UNAVAILABLE" || errx.ExitCode(err) != errx.CodeInternal {
+		t.Fatalf("quarantined v1 CAS authority refusal = %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(after, unsafe) {
+		t.Fatalf("CAS changed quarantined v1 bytes: %v", err)
 	}
 }
 

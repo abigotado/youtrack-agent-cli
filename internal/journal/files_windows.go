@@ -4,6 +4,8 @@ package journal
 
 import (
 	"os"
+
+	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 )
 
 // Windows has no reviewed implementation of the anchored no-follow,
@@ -17,7 +19,9 @@ type secureJournalDirectory struct {
 func migrationAvailable() bool { return false }
 
 func migrationUnsupported() error {
-	return journalConflict("JOURNAL_MIGRATION_UNSUPPORTED", "secure journal migration is not available on Windows")
+	refusal := errx.Internal("secure journal migration is not available on Windows")
+	refusal.Reason = "JOURNAL_MIGRATION_UNSUPPORTED"
+	return refusal.WithHint("retain the journal record; use a reviewed Darwin or Linux migration path")
 }
 
 func validJournalDirectoryInfo(info os.FileInfo) bool {
@@ -36,6 +40,9 @@ func (*secureJournalDirectory) readIdentified(string, int) ([]byte, journalFileI
 func (*secureJournalDirectory) createTemp(string, []byte) (string, error) {
 	return "", migrationUnsupported()
 }
-func (*secureJournalDirectory) unlink(string) error    { return migrationUnsupported() }
+func (*secureJournalDirectory) unlink(string) error { return migrationUnsupported() }
+func (*secureJournalDirectory) recoverQuarantineLink(string, func([]byte) bool, func(int, string) error) error {
+	return migrationUnsupported()
+}
 func defaultMigrationRename(int, string, string) error { return migrationUnsupported() }
 func defaultMarkerLink(int, string, string) error      { return migrationUnsupported() }

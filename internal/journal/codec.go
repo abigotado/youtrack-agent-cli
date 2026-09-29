@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"time"
 
@@ -90,6 +91,38 @@ type legacyV1Evidence struct {
 	SHA256      string    `json:"sha256"`
 	Summary     string    `json:"summary"`
 	CollectedAt time.Time `json:"collected_at"`
+}
+
+// encodePreparedLegacyV1 is deliberately private and prepared-only. The Store
+// must never marshal a live Record directly: a future optional field could
+// otherwise produce bytes that the frozen historical reader cannot accept.
+func encodePreparedLegacyV1(record Record) (encoded []byte, err error) {
+	defer func() { err = typedJournalWireError(err) }()
+	if !frozenPlanShape(reflect.TypeOf(record), reflect.TypeOf(legacyV1Wire{})) ||
+		record.Version != 1 || record.Revision != 1 || record.State != StatePrepared ||
+		record.Receipt != nil || record.MutationAttempts != 0 || record.Outcome != nil ||
+		len(record.Evidence) != 0 || !record.CreatedAt.Equal(record.UpdatedAt) {
+		return nil, errInvalidJournalWire
+	}
+	plan, err := legacyPlanFromIntent(record.Plan)
+	if err != nil {
+		return nil, errInvalidJournalWire
+	}
+	wire := legacyV1Wire{Version: 1, Revision: 1, State: StatePrepared,
+		Plan: plan, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}
+	raw, err := encodeJournalWire(wire)
+	if err != nil {
+		return nil, errInvalidJournalWire
+	}
+	if len(raw) > maxLegacyV1Bytes {
+		return nil, errJournalWireTooLarge
+	}
+	classified, err := ClassifyLegacyV1(raw)
+	if err != nil || classified.Disposition != LegacyV1Migratable ||
+		classified.Record.Plan.PlanID != record.Plan.PlanID {
+		return nil, errInvalidJournalWire
+	}
+	return raw, nil
 }
 
 // These types pin the complete v1 plan shape, including all nested operation
