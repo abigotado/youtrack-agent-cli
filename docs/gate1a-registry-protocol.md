@@ -667,6 +667,26 @@ context only in activation smoke, or the grant-bound
 final context only in production/post-grant verification—plus registry
 revision, plan, journal revision, and signed receipt digest, and sets registry intent null. Production,
 smoke, and post-grant modes reject the Gate context before active acquisition.
+For `operation_kind=apply`, `registry_revision` is an exact JSON integer in
+`1..256`, and `plan_id` is `YTAP-` followed by uppercase unpadded RFC 4648
+Base32 of exactly 16 decoded bytes; decode/re-encode equality is required.
+`journal_revision` is an exact JSON integer, `2` or `3`, claiming the
+confirmed v2 journal revision to be validated after active acquisition.
+Only these combinations are admitted:
+
+| Prepared v2 origin | Confirmed state at active acquisition | `legacy_v1_record_sha256` | Active `journal_revision` |
+| --- | --- | --- | --- |
+| fresh `prepared` at revision 1 | `confirmed` at revision 2 | `null` | `2` |
+| migrated v1 `prepared` at revision 2 | `confirmed` at revision 3 | non-null digest retained from the validated migration | `3` |
+
+Any other state/revision/provenance combination is ineligible for apply. The
+helper validates the complete confirmed combination while holding the acquired
+active, before the later
+`confirmed -> in_flight` CAS. A claimed revision alone grants no authority.
+These values constrain only the active record.
+Permit and closed journal-revision sets remain deferred until the v2
+transition matrix is frozen; they must not be inferred from this table.
+
 Registry commit requires the pre-read
 registry-intent digest and sets context, registry revision, plan, and journal
 revision and signed receipt digest null. Its eventual request/proposal/candidate is constructed and
@@ -820,11 +840,16 @@ The uninterrupted apply order is exact:
    project policy, credential binding, preconditions, plan, and journal
    revision. Expiry or another definitive failure after acquisition but before
    permit closes `failed_before_mutation`, burns the receipt, and sends zero
-   mutation bytes.
+   mutation bytes. An invalid active journal state/revision/provenance
+   combination is not such a closeable failure: no valid terminal journal CAS
+   is established, so the acquired active remains unclosed quarantine with no
+   permit or mutation bytes pending a separately reviewed recovery path.
 3. The CLI durably compare-and-swaps `confirmed -> in_flight`, storing the
    exact historical registry and authorization evidence. This is the local
-   crash-bookkeeping point, not same-user anti-replay authority; failure closes
-   the lease as `failed_before_mutation`.
+   crash-bookkeeping point, not same-user anti-replay authority. Failure before
+   permit sends zero mutation bytes; it closes as `failed_before_mutation` only
+   if a valid terminal journal CAS is possible. A corrupt or impossible stored
+   state remains unclosed quarantine, never a synthesized normal close.
 4. The helper reauthenticates that same connection, rechecks the unchanged
    ledger/context/profile/token cutoffs and returned `in_flight` revision,
    and requires trusted time strictly before the signed receipt's `expires_at`
