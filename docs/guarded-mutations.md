@@ -235,17 +235,25 @@ The future v2 confirmation transition must check the complete expected
 `prepared` state/revision pair before incrementing: fresh revision 1 becomes
 `confirmed` revision 2, and migrated revision 2 becomes `confirmed` revision
 3. The fresh branch has null `legacy_v1_record_sha256`; the migrated branch
-retains the non-null digest validated during migration. After acquiring active,
-the apply coordinator must validate the complete confirmed
-state/revision/provenance combination before `confirmed -> in_flight`. A
-mismatch grants no permit or send and leaves the acquired active unclosed and
+retains the non-null digest validated during migration. After active acquisition,
+the CLI's apply coordinator validates the complete confirmed
+state/revision/provenance combination from the locked journal record before its
+`confirmed -> in_flight` CAS. The helper cannot independently prove migration
+provenance from that same-user-writable journal; it validates the protected
+registry, receipt, context, coordinator history, and active grammar and
+bindings, then requires the CLI's returned `in_flight` revision to be the
+active confirmed revision plus one. Neither a journal claim nor that returned
+revision independently grants send authority. A mismatch grants no permit or
+send and leaves the acquired active unclosed and
 quarantined pending a separately reviewed recovery path, with zero mutation
 bytes. A future CAS must check its expected
 state/revision pair before a checked revision increment; an impossible stored
 v2 pair or revision overflow is corrupt state and fails closed, never wraps or
-grants authority. This does not define permit or closed journal-revision sets,
-which remain deferred until the full v2
-transition matrix is frozen. No confirmation or dispatch is enabled by this
+grants authority. The active and permit `journal_revision` fields both record
+the confirmed predecessor (`2` for fresh or `3` for migrated); the permit does
+not record the later `in_flight` revision (`3` or `4`). The closed record's
+journal-revision set remains deferred until the full v2 transition matrix is
+frozen. No confirmation or dispatch is enabled by this
 contract.
 
 Existing plan, receipt, outcome, and evidence values retain their bounded

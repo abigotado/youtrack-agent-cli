@@ -679,13 +679,17 @@ Only these combinations are admitted:
 | fresh `prepared` at revision 1 | `confirmed` at revision 2 | `null` | `2` |
 | migrated v1 `prepared` at revision 2 | `confirmed` at revision 3 | non-null digest retained from the validated migration | `3` |
 
-Any other state/revision/provenance combination is ineligible for apply. The
-helper validates the complete confirmed combination while holding the acquired
-active, before the later
-`confirmed -> in_flight` CAS. A claimed revision alone grants no authority.
-These values constrain only the active record.
-Permit and closed journal-revision sets remain deferred until the v2
-transition matrix is frozen; they must not be inferred from this table.
+Any other state/revision/provenance combination is ineligible for apply. After
+active acquisition, the CLI's apply coordinator validates the complete
+confirmed state/revision/provenance combination from its locked journal record
+before its `confirmed -> in_flight` CAS. The helper validates the active record's
+grammar and protected registry, receipt, context, and coordinator history; it
+cannot independently establish journal provenance from the same-user-writable
+journal or treat a CLI claim as authority. A claimed revision alone grants no
+permit or send. The active and permit `journal_revision` fields both record
+the confirmed predecessor: `2` for fresh and `3` for migrated plans. The
+closed record's journal-revision set remains deferred until the full v2
+transition matrix is frozen.
 
 Registry commit requires the pre-read
 registry-intent digest and sets context, registry revision, plan, and journal
@@ -705,9 +709,11 @@ An apply permit is compact canonical JSON capped at 4,096 bytes with fields
 `artifact_descriptor_sha256`, `authorization_context_sha256`,
 `registry_revision`, `plan_id`, `journal_revision`, `receipt_sha256`,
 `mutation_request_sha256`, `issued_at`, and `expires_at`, in that order. It is
-stored once under `permit/<lease-id>`. Every field is non-null, repeats the
-validated active lease, and binds the exact canonical signed receipt and final
-HTTP request bytes. Its expiry equals the active expiry. A permit is evidence
+stored once under `permit/<lease-id>`. Every field is non-null. Its shared
+binding fields repeat the validated active lease, including the confirmed
+predecessor `journal_revision` (`2` or `3`). The receipt digest binds the
+exact canonical signed receipt, `mutation_request_sha256` binds the final HTTP
+request bytes, and the permit expiry equals the active expiry. A permit is evidence
 for at most one send on the still-open authenticated coordinator connection;
 it is not a bearer token and is never returned as caller-selectable bytes.
 
@@ -837,24 +843,34 @@ The uninterrupted apply order is exact:
    replays the complete ledger, validates the unexpired
    helper profile and applicable live authority/context (the exact root-signed
    Gate token/context in Gate mode or the existing stage/production chain), and checks the receipt,
-   project policy, credential binding, preconditions, plan, and journal
-   revision. Expiry or another definitive failure after acquisition but before
+   project policy, credential binding, preconditions, and plan. The helper
+   checks the active journal-revision grammar and allowed values, while the CLI checks
+   the locked journal's complete confirmed state/revision/provenance
+   combination; the helper does not infer that provenance from a CLI claim.
+   Expiry or another definitive failure after acquisition but before
    permit closes `failed_before_mutation`, burns the receipt, and sends zero
    mutation bytes. An invalid active journal state/revision/provenance
    combination is not such a closeable failure: no valid terminal journal CAS
    is established, so the acquired active remains unclosed quarantine with no
    permit or mutation bytes pending a separately reviewed recovery path.
-3. The CLI durably compare-and-swaps `confirmed -> in_flight`, storing the
-   exact historical registry and authorization evidence. This is the local
+3. Under its per-plan journal lock, the CLI validates the complete confirmed
+   state/revision/provenance combination and durably compare-and-swaps
+   `confirmed -> in_flight` with a checked revision increment, storing the
+   exact historical registry and authorization evidence. It returns the new
+   revision, `3` for a fresh plan or `4` for a migrated plan. This is the local
    crash-bookkeeping point, not same-user anti-replay authority. Failure before
    permit sends zero mutation bytes; it closes as `failed_before_mutation` only
    if a valid terminal journal CAS is possible. A corrupt or impossible stored
    state remains unclosed quarantine, never a synthesized normal close.
 4. The helper reauthenticates that same connection, rechecks the unchanged
-   ledger/context/profile/token cutoffs and returned `in_flight` revision,
-   and requires trusted time strictly before the signed receipt's `expires_at`
-   immediately before adding
-   exactly one permit. The successful or exact-read-reconciled permit add is
+   ledger/context/profile/token cutoffs, and requires the returned `in_flight`
+   revision to equal the active confirmed predecessor plus one (`3` or `4`).
+   The connection's expected journal revision advances to that returned value
+   only after this check; the permit still records the active predecessor.
+   The helper cannot infer migration provenance from this arithmetic. It also
+   requires trusted time strictly before the signed receipt's `expires_at`
+   immediately before adding exactly one permit. The successful or
+   exact-read-reconciled permit add is
    the sole send-authority linearization point.
 5. Only the same connection may send the one request whose exact bytes hash to
    `mutation_request_sha256`. The helper keeps the coordinator acquired across
