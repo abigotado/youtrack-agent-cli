@@ -246,9 +246,12 @@ The separate claimed prepared-to-`canceled` codec accepts only
 claim has revision 2 and a null legacy digest; a migrated claim has revision 3
 and retains a non-null lowercase SHA-256 legacy digest. Both require
 `updated_at >= created_at` and the same canonical UTC timestamp and frozen
-nested-plan rules as prepared v2. The prepared decoder rejects canceled bytes,
-and the canceled decoder rejects prepared bytes. No codec for `expired`,
-confirmed, or any authority-bearing state is introduced here. These rules
+nested-plan rules as prepared v2. Equal creation and cancellation timestamps
+are valid: timestamp order does not prove causality; a future locked predecessor
+check and revision CAS must establish the transition. The prepared decoder
+rejects canceled bytes, and the canceled decoder rejects prepared bytes. No
+codec for `expired`, `confirmed`, or any authority-bearing state is introduced
+here. These rules
 validate a byte shape only; they do not establish that a preceding prepared
 record existed, that a CAS occurred, or that the digest names an actual v1
 record.

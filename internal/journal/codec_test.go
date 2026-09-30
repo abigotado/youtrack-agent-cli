@@ -558,6 +558,92 @@ func TestPreparedLineageV2CanonicalizesTimeNowInputs(t *testing.T) {
 	}
 }
 
+func TestPreparedLineageV2CanonicalNanosecondBoundaries(t *testing.T) {
+	plan := journalPlan(t)
+	legacyDigest := historicalV1PreparedSHA256
+	zero := time.Date(2026, 9, 28, 15, 0, 0, 0, time.UTC)
+	fractional := time.Date(2026, 9, 28, 15, 0, 0, 123456789, time.UTC)
+	later := time.Date(2026, 9, 28, 15, 0, 1, 123000000, time.UTC)
+	for _, tc := range []struct {
+		name        string
+		created     time.Time
+		updated     time.Time
+		createdWire string
+		updatedWire string
+		encode      func() ([]byte, error)
+		decode      func([]byte) (time.Time, time.Time, error)
+	}{
+		{"prepared zero", zero, zero, "2026-09-28T15:00:00Z", "2026-09-28T15:00:00Z",
+			func() ([]byte, error) {
+				return EncodePreparedV2(PreparedV2Record{Revision: 1, Plan: plan, CreatedAt: zero, UpdatedAt: zero})
+			},
+			func(raw []byte) (time.Time, time.Time, error) {
+				record, err := DecodePreparedV2(raw)
+				return record.CreatedAt, record.UpdatedAt, err
+			}},
+		{"prepared fractional", fractional, fractional, "2026-09-28T15:00:00.123456789Z", "2026-09-28T15:00:00.123456789Z",
+			func() ([]byte, error) {
+				return EncodePreparedV2(PreparedV2Record{Revision: 1, Plan: plan, CreatedAt: fractional, UpdatedAt: fractional})
+			},
+			func(raw []byte) (time.Time, time.Time, error) {
+				record, err := DecodePreparedV2(raw)
+				return record.CreatedAt, record.UpdatedAt, err
+			}},
+		{"prepared migrated fractions", fractional, later, "2026-09-28T15:00:00.123456789Z", "2026-09-28T15:00:01.123Z",
+			func() ([]byte, error) {
+				return EncodePreparedV2(PreparedV2Record{Revision: 2, Plan: plan, LegacyV1RecordSHA256: &legacyDigest, CreatedAt: fractional, UpdatedAt: later})
+			},
+			func(raw []byte) (time.Time, time.Time, error) {
+				record, err := DecodePreparedV2(raw)
+				return record.CreatedAt, record.UpdatedAt, err
+			}},
+		{"canceled zero", zero, zero, "2026-09-28T15:00:00Z", "2026-09-28T15:00:00Z",
+			func() ([]byte, error) {
+				return EncodePreparedCanceledV2(PreparedCanceledV2Record{Revision: 2, Plan: plan, CreatedAt: zero, UpdatedAt: zero})
+			},
+			func(raw []byte) (time.Time, time.Time, error) {
+				record, err := DecodePreparedCanceledV2(raw)
+				return record.CreatedAt, record.UpdatedAt, err
+			}},
+		{"canceled fresh fractions", fractional, later, "2026-09-28T15:00:00.123456789Z", "2026-09-28T15:00:01.123Z",
+			func() ([]byte, error) {
+				return EncodePreparedCanceledV2(PreparedCanceledV2Record{Revision: 2, Plan: plan, CreatedAt: fractional, UpdatedAt: later})
+			},
+			func(raw []byte) (time.Time, time.Time, error) {
+				record, err := DecodePreparedCanceledV2(raw)
+				return record.CreatedAt, record.UpdatedAt, err
+			}},
+		{"canceled migrated fractions", fractional, later, "2026-09-28T15:00:00.123456789Z", "2026-09-28T15:00:01.123Z",
+			func() ([]byte, error) {
+				return EncodePreparedCanceledV2(PreparedCanceledV2Record{Revision: 3, Plan: plan, LegacyV1RecordSHA256: &legacyDigest, CreatedAt: fractional, UpdatedAt: later})
+			},
+			func(raw []byte) (time.Time, time.Time, error) {
+				record, err := DecodePreparedCanceledV2(raw)
+				return record.CreatedAt, record.UpdatedAt, err
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := tc.encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				`"created_at": "` + tc.createdWire + `"`,
+				`"updated_at": "` + tc.updatedWire + `"`,
+			} {
+				if !bytes.Contains(raw, []byte(want)) {
+					t.Fatalf("canonical nanosecond wire lacks %s", want)
+				}
+			}
+			created, updated, err := tc.decode(raw)
+			if err != nil || !created.Equal(tc.created) || !updated.Equal(tc.updated) ||
+				created.Location() != time.UTC || updated.Location() != time.UTC {
+				t.Fatalf("nanosecond round trip = %v, %v, %v", created, updated, err)
+			}
+		})
+	}
+}
+
 func TestPreparedCanceledV2RejectsNoncanonicalOrUnsafeInput(t *testing.T) {
 	plan := journalPlan(t)
 	raw, err := EncodePreparedCanceledV2(PreparedCanceledV2Record{Revision: 2, Plan: plan, CreatedAt: codecTime, UpdatedAt: codecTime.Add(time.Second)})
