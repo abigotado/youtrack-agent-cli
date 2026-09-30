@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -159,6 +160,48 @@ func TestStoreCreatePersistsCanonicalPreparedV2WithoutLegacyProvenance(t *testin
 	}
 }
 
+func TestStoreCreateReturnsCanonicalRecordReadBackFromDisk(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "journal"))
+	stamp := time.Date(2026, 9, 29, 9, 34, 56, 123000000, time.FixedZone("west-three", -3*60*60))
+	store.now = func() time.Time { return stamp }
+	base := journalPlan(t)
+	policy := base.Policy
+	policy.AuthorizedCapability = "comment-add"
+	plan, err := intent.PrepareWithSource(
+		base.Profile, policy, intent.KindCommentAdd,
+		[]byte(`{"issue_id":"APP-1","text":"reviewed","visibility":{"mode":"public"},"marker":"none"}`),
+		[]byte(`{"issue_id":"APP-1","issue_state_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}`),
+		fixedID("YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An omitted optional slice is canonical on disk, while a caller may have
+	// supplied a non-nil empty slice with identical semantic content.
+	plan.Operation.CommentAdd.Request.Visibility.GroupIDs = []string{}
+	if err := plan.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.Create(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Get(context.Background(), plan.PlanID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(created, loaded) {
+		t.Fatalf("Create returned a record different from Get: created=%#v loaded=%#v", created, loaded)
+	}
+	if created.CreatedAt != stamp.UTC() || created.UpdatedAt != stamp.UTC() ||
+		created.CreatedAt.Location() != time.UTC || created.UpdatedAt.Location() != time.UTC {
+		t.Fatalf("Create timestamps were not canonically decoded: created=%v updated=%v", created.CreatedAt, created.UpdatedAt)
+	}
+	if created.Plan.Operation.CommentAdd.Request.Visibility.GroupIDs != nil {
+		t.Fatalf("Create retained a non-canonical empty visibility slice: %#v", created.Plan.Operation.CommentAdd.Request.Visibility.GroupIDs)
+	}
+}
+
 func TestStoreCreateRefusesDuplicateWithoutChangingV2(t *testing.T) {
 	store := New(filepath.Join(t.TempDir(), "journal"))
 	plan := journalPlan(t)
@@ -212,8 +255,8 @@ func TestStorePersistsPlanAboveFormerRecordLimit(t *testing.T) {
 }
 
 func TestStoreFrozenV1BudgetAndRead(t *testing.T) {
-	if maxRecordBytes != maxLegacyV1Bytes || maxLegacyV1Bytes != 1<<20 {
-		t.Fatalf("v1 Store budget changed: alias=%d read=%d", maxRecordBytes, maxLegacyV1Bytes)
+	if maxLegacyV1Bytes != 1<<20 {
+		t.Fatalf("frozen v1 read budget changed: %d", maxLegacyV1Bytes)
 	}
 	store := New(filepath.Join(t.TempDir(), "journal"))
 	plan := journalPlan(t)
@@ -271,8 +314,11 @@ func TestStoreCreateRejectsInvalidPlanFieldsWithoutJournalFile(t *testing.T) {
 			}
 			_, err := store.Create(context.Background(), plan)
 			var typed *errx.Error
-			if !errors.As(err, &typed) || typed.Reason != "INTERNAL" || errx.ExitCode(err) != errx.CodeInternal {
+			if !errors.As(err, &typed) || typed.Reason != "USAGE" || errx.ExitCode(err) != errx.CodeUsage || !errors.Is(err, intent.ErrInvalidPlan) {
 				t.Fatalf("Create %s refusal = %v", test.name, err)
+			}
+			if typed.Message != "input failed strict validation" || typed.Hint != "check the flags against --help" {
+				t.Fatalf("Create %s changed the public usage contract: %#v", test.name, typed)
 			}
 			if strings.Contains(typed.Message, "UNTRUSTED_SENTINEL") || strings.Contains(typed.Hint, "UNTRUSTED_SENTINEL") ||
 				strings.Contains(err.Error(), "UNTRUSTED_SENTINEL") {
@@ -328,20 +374,6 @@ func TestStoreReadsLegacyApprovalIncompatiblePlan(t *testing.T) {
 	}
 	if loaded.Plan.Profile.Instance != "https://acme.youtrack.cloud:443" || loaded.Plan.IntentSHA256 != legacyDigest {
 		t.Fatalf("loaded plan changed legacy bindings: %#v", loaded.Plan)
-	}
-}
-
-func TestJournalRecordBudgetCoversBoundedEnvelope(t *testing.T) {
-	// Canonical plan, worst-case escaped evidence, future full receipt, and a
-	// conservative indentation/metadata reserve must fit the durable cap.
-	const (
-		maximumEvidenceBudget = 16 * 6 * 1024
-		futureReceiptBudget   = 4 << 10
-		envelopeBudget        = 128 << 10
-	)
-	required := intent.MaxCanonicalPlanBytes + maximumEvidenceBudget + futureReceiptBudget + envelopeBudget
-	if required >= maxRecordBytes {
-		t.Fatalf("journal budget %d does not cover required bounded envelope %d", maxRecordBytes, required)
 	}
 }
 

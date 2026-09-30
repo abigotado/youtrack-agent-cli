@@ -28,6 +28,23 @@ func (store *trapCredentials) Exists(context.Context, string) (bool, error) {
 	return false, errors.New("credential trap called")
 }
 
+func (store *trapCredentials) Load(context.Context, string) (auth.Credential, error) {
+	store.calls++
+	return auth.Credential{}, errors.New("credential trap called")
+}
+func (store *trapCredentials) Save(context.Context, string, auth.Credential) error {
+	store.calls++
+	return errors.New("credential trap called")
+}
+func (store *trapCredentials) Delete(context.Context, string) error {
+	store.calls++
+	return errors.New("credential trap called")
+}
+func (store *trapCredentials) MigrateKeychain(context.Context, string) error {
+	store.calls++
+	return errors.New("credential trap called")
+}
+
 func TestMutationStatusAndExportPreserveFreshV2(t *testing.T) {
 	service, credentials, transport := mutationService(t)
 	journalDir := filepath.Join(t.TempDir(), "journal")
@@ -165,23 +182,6 @@ func TestMutationStatusAndExportNeverMigrateLegacyJournal(t *testing.T) {
 	if credentials.calls != 0 || transport.calls != 0 {
 		t.Fatalf("status/export contacted credentials=%d network=%d", credentials.calls, transport.calls)
 	}
-}
-
-func (store *trapCredentials) Load(context.Context, string) (auth.Credential, error) {
-	store.calls++
-	return auth.Credential{}, errors.New("credential trap called")
-}
-func (store *trapCredentials) Save(context.Context, string, auth.Credential) error {
-	store.calls++
-	return errors.New("credential trap called")
-}
-func (store *trapCredentials) Delete(context.Context, string) error {
-	store.calls++
-	return errors.New("credential trap called")
-}
-func (store *trapCredentials) MigrateKeychain(context.Context, string) error {
-	store.calls++
-	return errors.New("credential trap called")
 }
 
 type trapTransport struct{ calls int }
@@ -499,6 +499,42 @@ func TestCredentialReplacementConfirmationPrecedesTokenRead(t *testing.T) {
 	}
 	if reader.calls != 0 || transport.calls != 0 {
 		t.Fatalf("preflight touched reader=%d network=%d", reader.calls, transport.calls)
+	}
+}
+
+func TestTranslateErrorPreservesStoreInvalidPlanUsage(t *testing.T) {
+	service, credentials, transport := mutationService(t)
+	record, err := service.PrepareMutation(context.Background(), PrepareInput{
+		Profile: "work", Kind: intent.KindIssueUpdate, Project: writepolicy.Project{ID: "0-1", Key: "APP"},
+		SchemaSHA256: strings.Repeat("a", 64),
+		RequestJSON:  []byte(`{"issue_id":"APP-1","set":{"summary":"new"}}`),
+		ExpectedJSON: []byte(`{"issue_id":"APP-1","issue_state_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","touched_fields_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := record.Plan
+	plan.Kind = intent.Kind("UNTRUSTED_SENTINEL")
+	plan.Policy.AuthorizedCapability = ""
+	if sourceErr := plan.Validate(); sourceErr == nil || !strings.Contains(sourceErr.Error(), "UNTRUSTED_SENTINEL") {
+		t.Fatalf("invalid source plan did not exercise the sentinel-bearing validation path: %v", sourceErr)
+	}
+	_, storeErr := service.Journal.Create(context.Background(), plan)
+	if !errors.Is(storeErr, intent.ErrInvalidPlan) {
+		t.Fatalf("Store invalid plan error = %v", storeErr)
+	}
+	translated := TranslateError(storeErr, "work")
+	var typed *errx.Error
+	if !errors.As(translated, &typed) || typed.Code != errx.CodeUsage || typed.Reason != "USAGE" ||
+		typed.Message != "input failed strict validation" || typed.Hint != "check the flags against --help" {
+		t.Fatalf("translated Store error = %#v", translated)
+	}
+	if strings.Contains(translated.Error(), "UNTRUSTED_SENTINEL") ||
+		strings.Contains(typed.Message, "UNTRUSTED_SENTINEL") || strings.Contains(typed.Hint, "UNTRUSTED_SENTINEL") {
+		t.Fatalf("translated Store error exposed plan-controlled text: %v", translated)
+	}
+	if credentials.calls != 0 || transport.calls != 0 {
+		t.Fatalf("offline invalid plan touched credentials=%d network=%d", credentials.calls, transport.calls)
 	}
 }
 

@@ -60,13 +60,13 @@ func New(directory string) Store {
 	return Store{directory: directory, now: time.Now}
 }
 
-// Create atomically records a valid plan in prepared state at revision 1.
+// Create atomically records a valid plan as canonical prepared v2 at revision 1.
 func (s Store) Create(ctx context.Context, plan intent.Plan) (Record, error) {
 	if err := ctx.Err(); err != nil {
 		return Record{}, err
 	}
 	if err := plan.Validate(); err != nil {
-		return Record{}, errx.Internal("mutation journal plan is invalid").Wrap(err)
+		return Record{}, errx.Usage("input failed strict validation").Wrap(err)
 	}
 	path, err := s.recordPath(plan.PlanID)
 	if err != nil {
@@ -80,7 +80,13 @@ func (s Store) Create(ctx context.Context, plan intent.Plan) (Record, error) {
 	if err != nil {
 		return Record{}, errx.Internal("mutation journal plan cannot be encoded as a canonical prepared v2 record").Wrap(err)
 	}
-	record := preparedRecordProjection(prepared)
+	// Project from the canonical bytes, not the caller's in-memory values.
+	// This must happen before creating the journal directory or lock file.
+	decoded, err := DecodePreparedV2(raw)
+	if err != nil {
+		return Record{}, errx.Internal("canonical prepared v2 record cannot be decoded").Wrap(err)
+	}
+	record := preparedRecordProjection(decoded)
 	if err := s.ensureDirectory(); err != nil {
 		return Record{}, err
 	}
@@ -95,7 +101,7 @@ func (s Store) Create(ctx context.Context, plan intent.Plan) (Record, error) {
 		case !errors.Is(readErr, os.ErrNotExist):
 			return fmt.Errorf("inspect mutation journal record: %w", readErr)
 		}
-		return s.writeAtomic(path, raw)
+		return s.writeAtomic(path, raw, maxPreparedV2Bytes)
 	})
 	return record, err
 }
@@ -157,6 +163,8 @@ func (s Store) CompareAndSwap(ctx context.Context, planID string, _ uint64, _ Tr
 }
 
 func applyTransition(current Record, transition Transition, now time.Time) (Record, error) {
+	// Legacy v1 transition logic only. CompareAndSwap does not call this.
+	// Never use it to enable v2 transitions without native authority checks.
 	if !allowedTransition(current.State, transition.To) {
 		return Record{}, journalConflict("INVALID_JOURNAL_TRANSITION", "mutation plan cannot move from %s to %s", current.State, transition.To)
 	}
@@ -231,6 +239,8 @@ func allowedTransition(from, to State) bool {
 }
 
 func validateRecord(record Record) error {
+	// Historical v1 validator only. A fresh v2 projection is not valid here;
+	// it must be checked by the version-specific codec and authority protocol.
 	if record.Version != recordVersion || record.Revision == 0 || record.CreatedAt.IsZero() || record.UpdatedAt.Before(record.CreatedAt) {
 		return errx.Internal("mutation journal record metadata is corrupt")
 	}
@@ -401,8 +411,8 @@ func readRecord(path, expectedPlanID string) (Record, error) {
 	return record, nil
 }
 
-func (s Store) writeAtomic(path string, raw []byte) (err error) {
-	if len(raw) > maxLegacyV1Bytes {
+func (s Store) writeAtomic(path string, raw []byte, maxBytes int) (err error) {
+	if len(raw) > maxBytes {
 		return errx.Internal("mutation journal record exceeds its size limit")
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".journal-*.tmp")

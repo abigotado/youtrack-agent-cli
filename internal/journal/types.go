@@ -8,12 +8,7 @@ import (
 	"github.com/abigotado/youtrack-agent-cli/internal/intent"
 )
 
-const (
-	recordVersion = 1
-	// Historical v1 files have a frozen cap. Keep this alias for the v1 budget
-	// checks; it must not derive from a future intent plan-size constant.
-	maxRecordBytes = maxLegacyV1Bytes
-)
+const recordVersion = 1 // historical v1 only
 
 // State is one durable point in the non-replayable mutation lifecycle.
 type State string
