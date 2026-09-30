@@ -66,21 +66,21 @@ func (s Store) Create(ctx context.Context, plan intent.Plan) (Record, error) {
 		return Record{}, err
 	}
 	if err := plan.Validate(); err != nil {
-		return Record{}, fmt.Errorf("create journal record: %w", err)
+		return Record{}, errx.Internal("mutation journal plan is invalid").Wrap(err)
 	}
 	path, err := s.recordPath(plan.PlanID)
 	if err != nil {
 		return Record{}, err
 	}
 	now := s.currentTime()
-	record := Record{
-		Version: recordVersion, Revision: 1, State: StatePrepared, Plan: plan,
-		CreatedAt: now, UpdatedAt: now,
+	prepared := PreparedV2Record{
+		Revision: 1, Plan: plan, CreatedAt: now, UpdatedAt: now,
 	}
-	raw, err := encodePreparedLegacyV1(record)
+	raw, err := EncodePreparedV2(prepared)
 	if err != nil {
-		return Record{}, errx.Internal("mutation journal plan cannot be encoded as a canonical prepared v1 record").Wrap(err)
+		return Record{}, errx.Internal("mutation journal plan cannot be encoded as a canonical prepared v2 record").Wrap(err)
 	}
+	record := preparedRecordProjection(prepared)
 	if err := s.ensureDirectory(); err != nil {
 		return Record{}, err
 	}

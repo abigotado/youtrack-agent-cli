@@ -52,18 +52,26 @@ func dispatchedRecord(t *testing.T) Record {
 	}
 }
 
-func TestStoreCASRefusesV1WithoutChangingRecord(t *testing.T) {
-	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
-	store := New(filepath.Join(t.TempDir(), "journal"))
-	store.now = func() time.Time { return now }
-	plan := journalPlan(t)
-
-	record, err := store.Create(context.Background(), plan)
-	if err != nil {
+func seedLegacyV1Journal(t *testing.T, store Store, planID string, raw []byte) string {
+	t.Helper()
+	if err := store.ensureDirectory(); err != nil {
 		t.Fatal(err)
 	}
-	if record.State != StatePrepared || record.Revision != 1 {
-		t.Fatalf("created record = %#v", record)
+	path := filepath.Join(store.directory, planID+".json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestStoreCASRefusesV1WithoutChangingRecord(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "journal"))
+	plan := journalPlan(t)
+
+	path := seedLegacyV1Journal(t, store, plan.PlanID, []byte(historicalV1Prepared))
+	record, err := store.Get(context.Background(), plan.PlanID)
+	if err != nil || record.Version != 1 || record.State != StatePrepared || record.Revision != 1 {
+		t.Fatalf("seeded v1 record = %#v, %v", record, err)
 	}
 	info, err := os.Stat(filepath.Join(store.directory, plan.PlanID+".json"))
 	if err != nil {
@@ -73,7 +81,6 @@ func TestStoreCASRefusesV1WithoutChangingRecord(t *testing.T) {
 		t.Fatalf("record permissions = %o", info.Mode().Perm())
 	}
 
-	path := filepath.Join(store.directory, plan.PlanID+".json")
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +105,79 @@ func TestStoreCASRefusesV1WithoutChangingRecord(t *testing.T) {
 	recovered, err := store.Get(context.Background(), plan.PlanID)
 	if err != nil || recovered.State != StatePrepared || recovered.Revision != 1 {
 		t.Fatalf("read after denied CAS = %#v, %v", recovered, err)
+	}
+}
+
+func TestStoreCreatePersistsCanonicalPreparedV2WithoutLegacyProvenance(t *testing.T) {
+	stamp := time.Date(2026, 9, 29, 12, 34, 56, 0, time.UTC)
+	store := New(filepath.Join(t.TempDir(), "journal"))
+	store.now = func() time.Time { return stamp }
+	plan := journalPlan(t)
+	created, err := store.Create(context.Background(), plan)
+	if err != nil || created.Version != 2 || created.Revision != 1 || created.State != StatePrepared ||
+		!created.CreatedAt.Equal(stamp) || !created.UpdatedAt.Equal(stamp) {
+		t.Fatalf("fresh Create = %#v, %v", created, err)
+	}
+	path := filepath.Join(store.directory, plan.PlanID+".json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := EncodePreparedV2(PreparedV2Record{Revision: 1, Plan: plan, CreatedAt: stamp, UpdatedAt: stamp})
+	if err != nil || !bytes.Equal(raw, want) {
+		t.Fatalf("fresh disk bytes differ from canonical prepared v2: %v", err)
+	}
+	decoded, err := DecodePreparedV2(raw)
+	if err != nil || decoded.Revision != 1 || decoded.LegacyV1RecordSHA256 != nil || decoded.Plan.IntentSHA256 != plan.IntentSHA256 {
+		t.Fatalf("fresh v2 decode = %#v, %v", decoded, err)
+	}
+	loaded, err := store.Get(context.Background(), plan.PlanID)
+	if err != nil || loaded.Version != 2 || loaded.Revision != 1 || loaded.State != StatePrepared ||
+		loaded.Plan.IntentSHA256 != plan.IntentSHA256 {
+		t.Fatalf("fresh v2 Get = %#v, %v", loaded, err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		t.Fatalf("fresh v2 file mode = %v, %v", info, err)
+	}
+	for _, test := range []struct {
+		name     string
+		revision uint64
+		to       State
+	}{{"current revision", 1, StateConfirmed}, {"stale revision", 0, StateCanceled}} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := store.CompareAndSwap(context.Background(), plan.PlanID, test.revision, Transition{To: test.to})
+			var typed *errx.Error
+			if !errors.As(err, &typed) || typed.Reason != "JOURNAL_AUTHORITY_UNAVAILABLE" || errx.ExitCode(err) != errx.CodeInternal {
+				t.Fatalf("fresh v2 CAS authority refusal = %v", err)
+			}
+			after, readErr := os.ReadFile(path)
+			if readErr != nil || !bytes.Equal(after, raw) {
+				t.Fatalf("denied CAS changed fresh v2: %v", readErr)
+			}
+		})
+	}
+}
+
+func TestStoreCreateRefusesDuplicateWithoutChangingV2(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "journal"))
+	plan := journalPlan(t)
+	if _, err := store.Create(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store.directory, plan.PlanID+".json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.Create(context.Background(), plan)
+	var typed *errx.Error
+	if !errors.As(err, &typed) || typed.Reason != "JOURNAL_RECORD_EXISTS" || errx.ExitCode(err) != errx.CodeConflict {
+		t.Fatalf("duplicate Create refusal = %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("duplicate Create changed v2 bytes: %v", err)
 	}
 }
 
@@ -126,25 +206,22 @@ func TestStorePersistsPlanAboveFormerRecordLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Size() <= 256<<10 || info.Size() > maxRecordBytes {
-		t.Fatalf("journal record size = %d, want former limit < size <= %d", info.Size(), maxRecordBytes)
+	if info.Size() <= 256<<10 || info.Size() > maxPreparedV2Bytes {
+		t.Fatalf("journal record size = %d, want former limit < size <= %d", info.Size(), maxPreparedV2Bytes)
 	}
 }
 
-func TestStoreFrozenV1BudgetAndCreateRoundTrip(t *testing.T) {
+func TestStoreFrozenV1BudgetAndRead(t *testing.T) {
 	if maxRecordBytes != maxLegacyV1Bytes || maxLegacyV1Bytes != 1<<20 {
-		t.Fatalf("v1 Store budget changed: write=%d read=%d", maxRecordBytes, maxLegacyV1Bytes)
+		t.Fatalf("v1 Store budget changed: alias=%d read=%d", maxRecordBytes, maxLegacyV1Bytes)
 	}
 	store := New(filepath.Join(t.TempDir(), "journal"))
 	plan := journalPlan(t)
-	created, err := store.Create(context.Background(), plan)
-	if err != nil {
-		t.Fatal(err)
-	}
+	seedLegacyV1Journal(t, store, plan.PlanID, []byte(historicalV1Prepared))
 	loaded, err := store.Get(context.Background(), plan.PlanID)
-	if err != nil || loaded.Version != 1 || loaded.State != StatePrepared || loaded.Revision != created.Revision ||
-		loaded.Plan.IntentSHA256 != created.Plan.IntentSHA256 {
-		t.Fatalf("newly created v1 cannot be read by frozen decoder: %#v, %v", loaded, err)
+	if err != nil || loaded.Version != 1 || loaded.State != StatePrepared || loaded.Revision != 1 ||
+		loaded.Plan.IntentSHA256 != plan.IntentSHA256 {
+		t.Fatalf("historical v1 cannot be read by frozen decoder: %#v, %v", loaded, err)
 	}
 }
 
@@ -160,8 +237,10 @@ func TestStoreCreateRejectsV2UnrepresentableTimeBeforeCommit(t *testing.T) {
 			store := New(filepath.Join(t.TempDir(), "journal"))
 			store.now = func() time.Time { return test.at }
 			plan := journalPlan(t)
-			if _, err := store.Create(context.Background(), plan); err == nil {
-				t.Fatal("Create accepted record that prepared-v2 migration cannot encode")
+			_, err := store.Create(context.Background(), plan)
+			var typed *errx.Error
+			if !errors.As(err, &typed) || typed.Reason != "INTERNAL" || errx.ExitCode(err) != errx.CodeInternal {
+				t.Fatalf("Create invalid-time refusal = %v", err)
 			}
 			if _, err := os.Lstat(filepath.Join(store.directory, plan.PlanID+".json")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("unrepresentable Create committed journal bytes: %v", err)
@@ -170,12 +249,46 @@ func TestStoreCreateRejectsV2UnrepresentableTimeBeforeCommit(t *testing.T) {
 	}
 }
 
+func TestStoreCreateRejectsInvalidPlanFieldsWithoutJournalFile(t *testing.T) {
+	for _, test := range []struct {
+		name                   string
+		modify                 func(*intent.Plan)
+		sourceContainsSentinel bool
+	}{
+		{"unsupported operation kind", func(plan *intent.Plan) {
+			plan.Kind = intent.Kind("UNTRUSTED_SENTINEL")
+			plan.Policy.AuthorizedCapability = ""
+		}, true},
+		{"overlong profile name", func(plan *intent.Plan) { plan.Profile.Name = strings.Repeat("UNTRUSTED_SENTINEL", 36<<10) }, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := New(filepath.Join(t.TempDir(), "journal"))
+			plan := journalPlan(t)
+			test.modify(&plan)
+			if sourceErr := plan.Validate(); sourceErr == nil ||
+				(test.sourceContainsSentinel && !strings.Contains(sourceErr.Error(), "UNTRUSTED_SENTINEL")) {
+				t.Fatalf("invalid source plan did not exercise the expected validation path: %v", sourceErr)
+			}
+			_, err := store.Create(context.Background(), plan)
+			var typed *errx.Error
+			if !errors.As(err, &typed) || typed.Reason != "INTERNAL" || errx.ExitCode(err) != errx.CodeInternal {
+				t.Fatalf("Create %s refusal = %v", test.name, err)
+			}
+			if strings.Contains(typed.Message, "UNTRUSTED_SENTINEL") || strings.Contains(typed.Hint, "UNTRUSTED_SENTINEL") ||
+				strings.Contains(err.Error(), "UNTRUSTED_SENTINEL") {
+				t.Fatalf("Create %s exposed plan-controlled text: %v", test.name, err)
+			}
+			if _, statErr := os.Lstat(filepath.Join(store.directory, plan.PlanID+".json")); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("Create %s wrote journal file: %v", test.name, statErr)
+			}
+		})
+	}
+}
+
 func TestStoreReadsLegacyApprovalIncompatiblePlan(t *testing.T) {
 	store := New(filepath.Join(t.TempDir(), "journal"))
 	plan := journalPlan(t)
-	if _, err := store.Create(context.Background(), plan); err != nil {
-		t.Fatal(err)
-	}
+	path := seedLegacyV1Journal(t, store, plan.PlanID, []byte(historicalV1Prepared))
 	canonical, err := intent.CanonicalBytes(plan)
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +307,6 @@ func TestStoreReadsLegacyApprovalIncompatiblePlan(t *testing.T) {
 	}
 	digest := sha256.Sum256(legacyCanonical)
 	legacyDigest := hex.EncodeToString(digest[:])
-	path := filepath.Join(store.directory, plan.PlanID+".json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
