@@ -162,30 +162,47 @@ func TestStoreGetAndCASRejectUnsafeSourceFiles(t *testing.T) {
 }
 
 func TestStorePrivateSetgidDirectorySupportsCreateGetAndMigration(t *testing.T) {
-	store := New(filepath.Join(t.TempDir(), "journal"))
-	if err := os.Mkdir(store.directory, 0o700); err != nil {
-		t.Fatal(err)
+	newSetgidStore := func(t *testing.T) Store {
+		t.Helper()
+		store := New(filepath.Join(t.TempDir(), "journal"))
+		if err := os.Mkdir(store.directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(store.directory, 0o2700); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Lstat(store.directory)
+		if err != nil || info.Mode()&os.ModeSetgid == 0 {
+			t.Skipf("filesystem does not preserve setgid on private directory: %v, %v", info, err)
+		}
+		return store
 	}
-	if err := os.Chmod(store.directory, 0o2700); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Lstat(store.directory)
-	if err != nil || info.Mode()&os.ModeSetgid == 0 {
-		t.Skipf("filesystem does not preserve setgid on private directory: %v, %v", info, err)
-	}
-	plan := journalPlan(t)
-	created, err := store.Create(context.Background(), plan)
-	if err != nil || created.State != StatePrepared {
-		t.Fatalf("Create under setgid directory = %#v, %v", created, err)
-	}
-	loaded, err := store.Get(context.Background(), plan.PlanID)
-	if err != nil || loaded.State != StatePrepared || loaded.Revision != 1 {
-		t.Fatalf("Get under setgid directory = %#v, %v", loaded, err)
-	}
-	migrated, err := store.MigratePreparedV1(context.Background(), plan.PlanID, 1)
-	if err != nil || migrated.Revision != 2 {
-		t.Fatalf("Migrate under setgid directory = %#v, %v", migrated, err)
-	}
+	t.Run("fresh v2 Create and Get", func(t *testing.T) {
+		store := newSetgidStore(t)
+		plan := journalPlan(t)
+		created, err := store.Create(context.Background(), plan)
+		if err != nil || created.Version != 2 || created.State != StatePrepared || created.Revision != 1 {
+			t.Fatalf("Create under setgid directory = %#v, %v", created, err)
+		}
+		loaded, err := store.Get(context.Background(), plan.PlanID)
+		if err != nil || loaded.Version != 2 || loaded.State != StatePrepared || loaded.Revision != 1 {
+			t.Fatalf("Get under setgid directory = %#v, %v", loaded, err)
+		}
+	})
+	t.Run("historical v1 migration", func(t *testing.T) {
+		store := newSetgidStore(t)
+		planID := "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA"
+		seedLegacyV1Journal(t, store, planID, []byte(historicalV1Prepared))
+		loaded, err := store.Get(context.Background(), planID)
+		if err != nil || loaded.Version != 1 || loaded.Revision != 1 {
+			t.Fatalf("Get historical v1 under setgid directory = %#v, %v", loaded, err)
+		}
+		store.now = func() time.Time { return codecTime.Add(time.Second) }
+		migrated, err := store.MigratePreparedV1(context.Background(), planID, 1)
+		if err != nil || migrated.Revision != 2 || migrated.LegacyV1RecordSHA256 == nil {
+			t.Fatalf("Migrate historical v1 under setgid directory = %#v, %v", migrated, err)
+		}
+	})
 }
 
 func TestStoreRejectsOtherSpecialDirectoryBits(t *testing.T) {

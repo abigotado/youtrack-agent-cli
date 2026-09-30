@@ -28,43 +28,6 @@ func (store *trapCredentials) Exists(context.Context, string) (bool, error) {
 	return false, errors.New("credential trap called")
 }
 
-func TestMutationStatusAndExportNeverMigrateLegacyJournal(t *testing.T) {
-	service, credentials, transport := mutationService(t)
-	journalDir := filepath.Join(t.TempDir(), "journal")
-	service.Journal = journal.New(journalDir)
-	created, err := service.PrepareMutationInfo(context.Background(), validPrepareInput(""))
-	if err != nil {
-		t.Fatal(err)
-	}
-	journalPath := filepath.Join(journalDir, created.PlanID+".json")
-	before, err := os.ReadFile(journalPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	status, err := service.MutationStatus(context.Background(), created.PlanID)
-	if err != nil || status.Version != 1 || status.Revision != 1 {
-		t.Fatalf("status of v1 = %#v, %v", status, err)
-	}
-	exportPath := filepath.Join(t.TempDir(), "plan.json")
-	exported, err := service.ExportMutation(context.Background(), created.PlanID, exportPath)
-	if err != nil || exported.Version != 1 {
-		t.Fatalf("export of v1 = %#v, %v", exported, err)
-	}
-	if _, err := os.Stat(exportPath); err != nil {
-		t.Fatalf("export did not write plan: %v", err)
-	}
-	after, err := os.ReadFile(journalPath)
-	if err != nil || !bytes.Equal(after, before) {
-		t.Fatalf("status/export changed authoritative v1: %v", err)
-	}
-	markerPath := filepath.Join(journalDir, created.PlanID+".v1-quarantine.json")
-	if _, err := os.Lstat(markerPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("status/export created quarantine marker: %v", err)
-	}
-	if credentials.calls != 0 || transport.calls != 0 {
-		t.Fatalf("status/export contacted credentials=%d network=%d", credentials.calls, transport.calls)
-	}
-}
 func (store *trapCredentials) Load(context.Context, string) (auth.Credential, error) {
 	store.calls++
 	return auth.Credential{}, errors.New("credential trap called")
@@ -80,6 +43,145 @@ func (store *trapCredentials) Delete(context.Context, string) error {
 func (store *trapCredentials) MigrateKeychain(context.Context, string) error {
 	store.calls++
 	return errors.New("credential trap called")
+}
+
+func TestMutationStatusAndExportPreserveFreshV2(t *testing.T) {
+	service, credentials, transport := mutationService(t)
+	journalDir := filepath.Join(t.TempDir(), "journal")
+	service.Journal = journal.New(journalDir)
+	created, err := service.PrepareMutationInfo(context.Background(), validPrepareInput(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	journalPath := filepath.Join(journalDir, created.PlanID+".json")
+	before, err := os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.MutationStatus(context.Background(), created.PlanID)
+	if err != nil || status.Version != 2 || status.Revision != 1 || status.State != journal.StatePrepared {
+		t.Fatalf("status of fresh v2 = %#v, %v", status, err)
+	}
+	exportPath := filepath.Join(t.TempDir(), "plan.json")
+	exported, err := service.ExportMutation(context.Background(), created.PlanID, exportPath)
+	if err != nil || exported.Version != 2 || exported.Revision != 1 {
+		t.Fatalf("export of fresh v2 = %#v, %v", exported, err)
+	}
+	if _, err := os.Stat(exportPath); err != nil {
+		t.Fatalf("export did not write plan: %v", err)
+	}
+	after, err := os.ReadFile(journalPath)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("status/export changed authoritative v2: %v", err)
+	}
+	markerPath := filepath.Join(journalDir, created.PlanID+".v1-quarantine.json")
+	if _, err := os.Lstat(markerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("status/export created quarantine marker: %v", err)
+	}
+	if credentials.calls != 0 || transport.calls != 0 {
+		t.Fatalf("status/export contacted credentials=%d network=%d", credentials.calls, transport.calls)
+	}
+}
+
+// Captured from the historical v1 MarshalIndent-plus-LF writer. This is an
+// independent application-level fixture, not a projection of the live Record.
+const applicationHistoricalV1Prepared = `{
+  "version": 1,
+  "revision": 1,
+  "state": "prepared",
+  "plan": {
+    "schema_version": 1,
+    "plan_id": "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "kind": "issue.update",
+    "profile": {
+      "name": "work",
+      "instance": "https://acme.youtrack.cloud",
+      "rest_base_url": "https://acme.youtrack.cloud/api",
+      "oauth_issuer_url": "https://hub.example.test",
+      "identity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "credential_generation": "gen-1",
+      "account": {
+        "id": "1-2",
+        "login": "alice"
+      }
+    },
+    "policy": {
+      "project": {
+        "id": "0-1",
+        "key": "APP"
+      },
+      "policy_revision": 1,
+      "policy_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "schema_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "executor_assurance": "rest-best-effort",
+      "authorized_capability": "issue-update",
+      "notification_policy": "youtrack-default",
+      "reconciliation_strategy": "bounded-exact-and-marker"
+    },
+    "operation": {
+      "issue_update": {
+        "request": {
+          "issue_id": "APP-1",
+          "set": {
+            "summary": "new"
+          }
+        },
+        "expected": {
+          "issue_id": "APP-1",
+          "issue_state_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "touched_fields_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      }
+    },
+    "request_sha256": "9b4a6652ef2500c4d1e59669cadf6dcc8dc2e77224684cd7433c8d49d844955b",
+    "expected_sha256": "f17747d18c996141cb33aeba203a6635cffa8bd4fb178e14fb592af283ff77c9",
+    "intent_sha256": "56635c16b12d2b5b4849a76fa936fc8f04550509c9afc4afa1fbd06a568da341"
+  },
+  "mutation_attempts": 0,
+  "created_at": "2026-09-28T15:00:00Z",
+  "updated_at": "2026-09-28T15:00:00Z"
+}
+`
+
+func TestMutationStatusAndExportNeverMigrateLegacyJournal(t *testing.T) {
+	service, credentials, transport := mutationService(t)
+	journalDir := filepath.Join(t.TempDir(), "journal")
+	service.Journal = journal.New(journalDir)
+	if err := os.Mkdir(journalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const planID = "YTAP-AAAAAAAAAAAAAAAAAAAAAAAAAA"
+	journalPath := filepath.Join(journalDir, planID+".json")
+	before := []byte(applicationHistoricalV1Prepared)
+	if _, err := journal.ClassifyLegacyV1(before); err != nil {
+		t.Fatalf("historical v1 fixture is invalid: %v", err)
+	}
+	if err := os.WriteFile(journalPath, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.MutationStatus(context.Background(), planID)
+	if err != nil || status.Version != 1 || status.Revision != 1 || status.State != journal.StatePrepared {
+		t.Fatalf("status of historical v1 = %#v, %v", status, err)
+	}
+	exportPath := filepath.Join(t.TempDir(), "plan.json")
+	exported, err := service.ExportMutation(context.Background(), planID, exportPath)
+	if err != nil || exported.Version != 1 || exported.Revision != 1 {
+		t.Fatalf("export of historical v1 = %#v, %v", exported, err)
+	}
+	if _, err := os.Stat(exportPath); err != nil {
+		t.Fatalf("export did not write plan: %v", err)
+	}
+	after, err := os.ReadFile(journalPath)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("status/export changed authoritative v1: %v", err)
+	}
+	markerPath := filepath.Join(journalDir, planID+".v1-quarantine.json")
+	if _, err := os.Lstat(markerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("status/export created quarantine marker: %v", err)
+	}
+	if credentials.calls != 0 || transport.calls != 0 {
+		t.Fatalf("status/export contacted credentials=%d network=%d", credentials.calls, transport.calls)
+	}
 }
 
 type trapTransport struct{ calls int }
@@ -397,6 +499,42 @@ func TestCredentialReplacementConfirmationPrecedesTokenRead(t *testing.T) {
 	}
 	if reader.calls != 0 || transport.calls != 0 {
 		t.Fatalf("preflight touched reader=%d network=%d", reader.calls, transport.calls)
+	}
+}
+
+func TestTranslateErrorPreservesStoreInvalidPlanUsage(t *testing.T) {
+	service, credentials, transport := mutationService(t)
+	record, err := service.PrepareMutation(context.Background(), PrepareInput{
+		Profile: "work", Kind: intent.KindIssueUpdate, Project: writepolicy.Project{ID: "0-1", Key: "APP"},
+		SchemaSHA256: strings.Repeat("a", 64),
+		RequestJSON:  []byte(`{"issue_id":"APP-1","set":{"summary":"new"}}`),
+		ExpectedJSON: []byte(`{"issue_id":"APP-1","issue_state_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","touched_fields_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := record.Plan
+	plan.Kind = intent.Kind("UNTRUSTED_SENTINEL")
+	plan.Policy.AuthorizedCapability = ""
+	if sourceErr := plan.Validate(); sourceErr == nil || !strings.Contains(sourceErr.Error(), "UNTRUSTED_SENTINEL") {
+		t.Fatalf("invalid source plan did not exercise the sentinel-bearing validation path: %v", sourceErr)
+	}
+	_, storeErr := service.Journal.Create(context.Background(), plan)
+	if !errors.Is(storeErr, intent.ErrInvalidPlan) {
+		t.Fatalf("Store invalid plan error = %v", storeErr)
+	}
+	translated := TranslateError(storeErr, "work")
+	var typed *errx.Error
+	if !errors.As(translated, &typed) || typed.Code != errx.CodeUsage || typed.Reason != "USAGE" ||
+		typed.Message != "input failed strict validation" || typed.Hint != "check the flags against --help" {
+		t.Fatalf("translated Store error = %#v", translated)
+	}
+	if strings.Contains(translated.Error(), "UNTRUSTED_SENTINEL") ||
+		strings.Contains(typed.Message, "UNTRUSTED_SENTINEL") || strings.Contains(typed.Hint, "UNTRUSTED_SENTINEL") {
+		t.Fatalf("translated Store error exposed plan-controlled text: %v", translated)
+	}
+	if credentials.calls != 0 || transport.calls != 0 {
+		t.Fatalf("offline invalid plan touched credentials=%d network=%d", credentials.calls, transport.calls)
 	}
 }
 

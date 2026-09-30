@@ -177,14 +177,16 @@ persist a v3 receipt into that record. Do not bridge the schemas by copying
 metadata or treating the journal's validation as receipt verification. Full
 authority verification and the strict v2 record/migration below must land first.
 
-The Store still creates version 1 records, but only by a private frozen
-prepared-v1 encoder that verifies the exact historical bytes and refuses a
-live plan or record shape change it cannot represent. Its `Get` path strictly
-reads canonical historical v1 and prepared-only v2, and its internal
-`MigratePreparedV1` storage operation can replace one pristine prepared v1
-record with a prepared v2 record. `CompareAndSwap` validates the named record
-but refuses transitions for both versions until native authority verification
-exists. This migration does not admit either version to a coordinator or enable
+The Store now creates canonical fresh prepared v2 records at revision 1 through
+the frozen prepared-only codec. A plan that the codec cannot represent is
+refused before any journal filesystem write. Its `Get` path strictly reads
+canonical historical v1 and prepared-only v2, and its internal
+`MigratePreparedV1` storage operation can replace one pristine historical
+prepared v1 record with a prepared v2 record. The private frozen prepared-v1
+encoder remains for checking historical bytes; new records are not written as
+v1. `CompareAndSwap` validates the named record but refuses transitions for
+both versions until native authority verification exists. Neither fresh v2
+creation nor v1 migration admits a record to a coordinator or enables
 confirmation or dispatch. Native authority work must integrate the full strict
 v2 lifecycle before any v1 or prepared-only v2 record can enter it.
 

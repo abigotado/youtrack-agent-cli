@@ -254,14 +254,51 @@ func TestStoreMigratePreparedV1ConcurrentCallersProduceOneRecord(t *testing.T) {
 	}
 }
 
+func TestStoreMigratePreparedV1RefusesFreshV2WithoutWriting(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "journal"))
+	plan := journalPlan(t)
+	created, err := store.Create(context.Background(), plan)
+	if err != nil || created.Version != 2 || created.Revision != 1 {
+		t.Fatalf("fresh Create = %#v, %v", created, err)
+	}
+	path := filepath.Join(store.directory, plan.PlanID+".json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodePreparedV2(before)
+	if err != nil || decoded.LegacyV1RecordSHA256 != nil {
+		t.Fatalf("fresh v2 fixture = %#v, %v", decoded, err)
+	}
+	var renameCalls atomic.Int32
+	store.migrateRename = func(dirFD int, oldName, newName string) error {
+		renameCalls.Add(1)
+		return defaultMigrationRename(dirFD, oldName, newName)
+	}
+	_, err = store.MigratePreparedV1(context.Background(), plan.PlanID, 1)
+	var typed *errx.Error
+	if !errors.As(err, &typed) || typed.Reason != "JOURNAL_REVISION_CONFLICT" || errx.ExitCode(err) != errx.CodeConflict {
+		t.Fatalf("fresh v2 migration refusal = %v", err)
+	}
+	if renameCalls.Load() != 0 {
+		t.Fatal("fresh v2 migration attempted a rename")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("fresh v2 migration changed source: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(store.directory, plan.PlanID+".v1-quarantine.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("fresh v2 migration created marker: %v", err)
+	}
+}
+
 func TestStoreMigratePreparedV1AcceptsLargeValidLegacyPlan(t *testing.T) {
 	store := New(filepath.Join(t.TempDir(), "journal"))
 	store.now = func() time.Time { return codecTime }
 	plan := largeJournalPlan(t)
-	if _, err := store.Create(context.Background(), plan); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(store.directory, plan.PlanID+".json")
+	legacyRecord := legacyCodecRecord(t, StatePrepared)
+	legacyRecord.Plan = plan
+	path := seedLegacyV1Journal(t, store, plan.PlanID, legacyCodecBytes(t, legacyRecord))
 	legacy, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
