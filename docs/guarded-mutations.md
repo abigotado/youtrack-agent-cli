@@ -40,9 +40,10 @@ and authorization-context digest. Cross-language golden vectors pin the encoding
 The [Gate 1A protocol](gate1a-protocol.md) records
 the implemented pre-Gate v3 contract. Expected revision/context values are
 comparison claims, not verified authority. A pure prepared-only journal v2
-codec exists, but v2 storage/migration, full authority-chain verification,
-durable confirmation, and the native helper remain unimplemented; these codecs
-do not constitute a passed Gate 1A.
+codec and internal pristine-v1-to-prepared-v2 storage migration exist, but
+neither grants authority. Full authority-chain verification, durable
+confirmation, and the native helper remain unimplemented; these codecs and
+migration do not constitute a passed Gate 1A.
 The activation boundary also requires the exact event-ledger codec in
 [Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md) and a
 capability-specific, offline-root-signed provisional authorization plus
@@ -230,6 +231,31 @@ fractional zeros or timezone offset, and a representable year from 0001 through
 normalizes UTC and rejects out-of-range years; decoding rejects
 other timestamp spellings. The digest field is only a claim until migration
 compares it with a locked source record and durably replaces that record.
+The future v2 confirmation transition must check the complete expected
+`prepared` state/revision pair before incrementing: fresh revision 1 becomes
+`confirmed` revision 2, and migrated revision 2 becomes `confirmed` revision
+3. The fresh branch has null `legacy_v1_record_sha256`; the migrated branch
+retains the non-null digest validated during migration. After active acquisition,
+the CLI's apply coordinator validates the complete confirmed
+state/revision/provenance combination from the locked journal record before its
+`confirmed -> in_flight` CAS. The helper cannot independently prove migration
+provenance from that same-user-writable journal; it validates the protected
+registry, receipt, context, coordinator history, and active grammar and
+bindings, then requires the CLI's returned `in_flight` revision to be the
+active confirmed revision plus one. Neither a journal claim nor that returned
+revision independently grants send authority. A mismatch grants no permit or
+send and leaves the acquired active unclosed and
+quarantined pending a separately reviewed recovery path, with zero mutation
+bytes. A future CAS must check its expected
+state/revision pair before a checked revision increment; an impossible stored
+v2 pair or revision overflow is corrupt state and fails closed, never wraps or
+grants authority. The active and permit `journal_revision` fields both record
+the confirmed predecessor (`2` for fresh or `3` for migrated); the permit does
+not record the later `in_flight` revision (`3` or `4`). The closed record's
+journal-revision set remains deferred until the full v2 transition matrix is
+frozen. No confirmation or dispatch is enabled by this
+contract.
+
 Existing plan, receipt, outcome, and evidence values retain their bounded
 codecs. `authority_evidence` is null only for `prepared` and v2
 `canceled`/`expired` records reached before authority
