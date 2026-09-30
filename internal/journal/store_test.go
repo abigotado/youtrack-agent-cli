@@ -220,6 +220,28 @@ func TestStoreRefusesCanonicalPreparedCanceledV2WithoutChangingBytes(t *testing.
 				}
 			}
 			checkUnchanged()
+			if _, err := store.Create(context.Background(), plan); err == nil {
+				t.Fatal("Create overwrote canceled v2")
+			} else {
+				var typed *errx.Error
+				if !errors.As(err, &typed) || typed.Code != errx.CodeConflict || typed.Reason != "JOURNAL_RECORD_EXISTS" {
+					t.Fatalf("Create canceled v2 refusal is not a record-exists conflict: %v", err)
+				}
+			}
+			checkUnchanged()
+			if _, err := store.MigratePreparedV1(context.Background(), plan.PlanID, 1); err == nil {
+				t.Fatal("MigratePreparedV1 overwrote canceled v2")
+			} else {
+				var typed *errx.Error
+				wantReason := "INTERNAL"
+				if !migrationAvailable() {
+					wantReason = "JOURNAL_MIGRATION_UNSUPPORTED"
+				}
+				if !errors.As(err, &typed) || typed.Code != errx.CodeInternal || typed.Reason != wantReason {
+					t.Fatalf("MigratePreparedV1 canceled v2 refusal = %v, want typed %s", err, wantReason)
+				}
+			}
+			checkUnchanged()
 		})
 	}
 }
