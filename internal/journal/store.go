@@ -101,7 +101,7 @@ func (s Store) Create(ctx context.Context, plan intent.Plan) (Record, error) {
 		case !errors.Is(readErr, os.ErrNotExist):
 			return fmt.Errorf("inspect mutation journal record: %w", readErr)
 		}
-		return s.writeAtomic(path, raw, maxPreparedV2Bytes)
+		return s.writeAtomic(path, raw, maxPreparedLineageV2Bytes)
 	})
 	return record, err
 }

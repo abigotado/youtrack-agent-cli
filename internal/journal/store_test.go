@@ -249,8 +249,8 @@ func TestStorePersistsPlanAboveFormerRecordLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Size() <= 256<<10 || info.Size() > maxPreparedV2Bytes {
-		t.Fatalf("journal record size = %d, want former limit < size <= %d", info.Size(), maxPreparedV2Bytes)
+	if info.Size() <= 256<<10 || info.Size() > maxPreparedLineageV2Bytes {
+		t.Fatalf("journal record size = %d, want former limit < size <= %d", info.Size(), maxPreparedLineageV2Bytes)
 	}
 }
 

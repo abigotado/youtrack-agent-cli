@@ -39,11 +39,12 @@ profile identity, key generation/fingerprint, challenge digest, registry revisio
 and authorization-context digest. Cross-language golden vectors pin the encoding.
 The [Gate 1A protocol](gate1a-protocol.md) records
 the implemented pre-Gate v3 contract. Expected revision/context values are
-comparison claims, not verified authority. A pure prepared-only journal v2
-codec and internal pristine-v1-to-prepared-v2 storage migration exist, but
-neither grants authority. Full authority-chain verification, durable
-confirmation, and the native helper remain unimplemented; these codecs and
-migration do not constitute a passed Gate 1A.
+comparison claims, not verified authority. Pure journal v2 codecs for
+`prepared` and a claimed prepared-to-`canceled` terminal, plus internal
+pristine-v1-to-prepared-v2 storage migration, exist but grant no authority.
+Full authority-chain verification, durable confirmation, and the native helper
+remain unimplemented; these codecs and migration do not constitute a passed
+Gate 1A.
 The activation boundary also requires the exact event-ledger codec in
 [Gate 1A registry and ceremony protocol](gate1a-registry-protocol.md) and a
 capability-specific, offline-root-signed provisional authorization plus
@@ -178,13 +179,17 @@ metadata or treating the journal's validation as receipt verification. Full
 authority verification and the strict v2 record/migration below must land first.
 
 The Store now creates canonical fresh prepared v2 records at revision 1 through
-the frozen prepared-only codec. A plan that the codec cannot represent is
+the frozen prepared codec. A plan that the codec cannot represent is
 refused before any journal filesystem write. Its `Get` path strictly reads
 canonical historical v1 and prepared-only v2, and its internal
 `MigratePreparedV1` storage operation can replace one pristine historical
-prepared v1 record with a prepared v2 record. The private frozen prepared-v1
-encoder remains for checking historical bytes; new records are not written as
-v1. `CompareAndSwap` validates the named record but refuses transitions for
+prepared v1 record with a prepared v2 record. A separate pure codec accepts
+claimed prepared-to-`canceled` v2 bytes, but the Store neither reads nor writes
+those bytes, and no CLI command uses the codec. The codec cannot prove a
+predecessor, a valid transition, migration provenance, or authority to change
+the Store. The private frozen prepared-v1 encoder remains for checking
+historical bytes; new records are not written as v1. `CompareAndSwap` validates
+the named record but refuses transitions for
 both versions until native authority verification exists. Neither fresh v2
 creation nor v1 migration admits a record to a coordinator or enables
 confirmation or dispatch. Native authority work must integrate the full strict
@@ -218,10 +223,12 @@ A canonical v2 record contains these fields in order: `version`
 exactly `2`, `revision`, `state`, `plan`, `receipt`, `authority_evidence`,
 `coordinator_evidence`, `mutation_attempts`, `outcome`, `evidence`,
 `legacy_v1_record_sha256`, `created_at`, and `updated_at`. Nullable fields are
-present as literal `null` rather than omitted. The pure prepared-only codec
-accepts at most 655,360 bytes before JSON decoding, the same
+present as literal `null` rather than omitted. The pure prepared and
+prepared-to-`canceled` codecs share one frozen 13-field wire grammar and a
+655,360-byte cap applied before JSON decoding. Both require the same
 `json.MarshalIndent` two-space grammar and one LF as v1, and no trailing data
-or noncanonical alternate bytes. It accepts `state: "prepared"` and
+or noncanonical alternate bytes. The prepared codec accepts
+`state: "prepared"` and
 `mutation_attempts: 0` only, with `receipt`, `authority_evidence`,
 `coordinator_evidence`, `outcome`, and `evidence` all null. A fresh v2 prepared
 record has revision 1, null `legacy_v1_record_sha256`, and equal timestamps.
@@ -233,6 +240,18 @@ fractional zeros or timezone offset, and a representable year from 0001 through
 normalizes UTC and rejects out-of-range years; decoding rejects
 other timestamp spellings. The digest field is only a claim until migration
 compares it with a locked source record and durably replaces that record.
+The separate claimed prepared-to-`canceled` codec accepts only
+`state: "canceled"`, zero mutation attempts, and null receipt,
+`authority_evidence`, `coordinator_evidence`, outcome, and evidence. A fresh
+claim has revision 2 and a null legacy digest; a migrated claim has revision 3
+and retains a non-null lowercase SHA-256 legacy digest. Both require
+`updated_at >= created_at` and the same canonical UTC timestamp and frozen
+nested-plan rules as prepared v2. The prepared decoder rejects canceled bytes,
+and the canceled decoder rejects prepared bytes. No codec for `expired`,
+confirmed, or any authority-bearing state is introduced here. These rules
+validate a byte shape only; they do not establish that a preceding prepared
+record existed, that a CAS occurred, or that the digest names an actual v1
+record.
 The future v2 confirmation transition must check the complete expected
 `prepared` state/revision pair before incrementing: fresh revision 1 becomes
 `confirmed` revision 2, and migrated revision 2 becomes `confirmed` revision

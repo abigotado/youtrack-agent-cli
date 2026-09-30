@@ -316,8 +316,8 @@ func TestStoreMigratePreparedV1AcceptsLargeValidLegacyPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(v2) > maxPreparedV2Bytes {
-		t.Fatalf("migrated v2 is %d bytes, above cap %d", len(v2), maxPreparedV2Bytes)
+	if len(v2) > maxPreparedLineageV2Bytes {
+		t.Fatalf("migrated v2 is %d bytes, above cap %d", len(v2), maxPreparedLineageV2Bytes)
 	}
 	if _, err := DecodePreparedV2(v2); err != nil {
 		t.Fatalf("large migrated v2 is not canonical: %v", err)
