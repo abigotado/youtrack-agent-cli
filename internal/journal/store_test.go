@@ -160,6 +160,92 @@ func TestStoreCreatePersistsCanonicalPreparedV2WithoutLegacyProvenance(t *testin
 	}
 }
 
+func TestStoreRefusesCanonicalPreparedCanceledV2WithoutChangingBytes(t *testing.T) {
+	plan := journalPlan(t)
+	legacyDigest := historicalV1PreparedSHA256
+	for _, tc := range []struct {
+		name       string
+		revision   uint64
+		provenance *string
+	}{
+		{"fresh", 2, nil},
+		{"migrated", 3, &legacyDigest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := New(filepath.Join(t.TempDir(), "journal"))
+			if err := store.ensureDirectory(); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := EncodePreparedCanceledV2(PreparedCanceledV2Record{
+				Revision: tc.revision, Plan: plan, LegacyV1RecordSHA256: tc.provenance,
+				CreatedAt: codecTime, UpdatedAt: codecTime.Add(time.Second),
+			})
+			if err != nil || len(raw) == 0 || raw[len(raw)-1] != '\n' {
+				t.Fatalf("canonical canceled bytes = %d, %v", len(raw), err)
+			}
+			decoded, err := DecodePreparedCanceledV2(raw)
+			if err != nil || decoded.Revision != tc.revision || decoded.Plan.PlanID != plan.PlanID {
+				t.Fatalf("codec rejected canceled fixture: %#v, %v", decoded, err)
+			}
+			path := filepath.Join(store.directory, plan.PlanID+".json")
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Lstat(path)
+			if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+				t.Fatalf("seeded canceled file is not an owned private regular file: %v, %v", info, err)
+			}
+			checkUnchanged := func() {
+				t.Helper()
+				after, readErr := os.ReadFile(path)
+				if readErr != nil || !bytes.Equal(after, raw) {
+					t.Fatalf("denied Store operation changed canceled bytes: %v", readErr)
+				}
+			}
+			if _, err := store.Get(context.Background(), plan.PlanID); err == nil {
+				t.Fatal("Get admitted canceled v2 as an active journal record")
+			} else {
+				var typed *errx.Error
+				if !errors.As(err, &typed) || typed.Code != errx.CodeInternal || typed.Reason != "INTERNAL" {
+					t.Fatalf("Get canceled v2 refusal is not typed internal: %v", err)
+				}
+			}
+			checkUnchanged()
+			if _, err := store.CompareAndSwap(context.Background(), plan.PlanID, tc.revision, Transition{To: StateConfirmed}); err == nil {
+				t.Fatal("CompareAndSwap admitted canceled v2")
+			} else {
+				var typed *errx.Error
+				if !errors.As(err, &typed) || typed.Code != errx.CodeInternal || typed.Reason != "INTERNAL" {
+					t.Fatalf("CompareAndSwap canceled v2 refusal is not typed internal: %v", err)
+				}
+			}
+			checkUnchanged()
+			if _, err := store.Create(context.Background(), plan); err == nil {
+				t.Fatal("Create overwrote canceled v2")
+			} else {
+				var typed *errx.Error
+				if !errors.As(err, &typed) || typed.Code != errx.CodeConflict || typed.Reason != "JOURNAL_RECORD_EXISTS" {
+					t.Fatalf("Create canceled v2 refusal is not a record-exists conflict: %v", err)
+				}
+			}
+			checkUnchanged()
+			if _, err := store.MigratePreparedV1(context.Background(), plan.PlanID, 1); err == nil {
+				t.Fatal("MigratePreparedV1 overwrote canceled v2")
+			} else {
+				var typed *errx.Error
+				wantReason := "INTERNAL"
+				if !migrationAvailable() {
+					wantReason = "JOURNAL_MIGRATION_UNSUPPORTED"
+				}
+				if !errors.As(err, &typed) || typed.Code != errx.CodeInternal || typed.Reason != wantReason {
+					t.Fatalf("MigratePreparedV1 canceled v2 refusal = %v, want typed %s", err, wantReason)
+				}
+			}
+			checkUnchanged()
+		})
+	}
+}
+
 func TestStoreCreateReturnsCanonicalRecordReadBackFromDisk(t *testing.T) {
 	store := New(filepath.Join(t.TempDir(), "journal"))
 	stamp := time.Date(2026, 9, 29, 9, 34, 56, 123000000, time.FixedZone("west-three", -3*60*60))
@@ -249,8 +335,8 @@ func TestStorePersistsPlanAboveFormerRecordLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Size() <= 256<<10 || info.Size() > maxPreparedV2Bytes {
-		t.Fatalf("journal record size = %d, want former limit < size <= %d", info.Size(), maxPreparedV2Bytes)
+	if info.Size() <= 256<<10 || info.Size() > maxPreparedLineageV2Bytes {
+		t.Fatalf("journal record size = %d, want former limit < size <= %d", info.Size(), maxPreparedLineageV2Bytes)
 	}
 }
 

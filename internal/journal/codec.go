@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	maxLegacyV1Bytes   = 1 << 20 // historical maxRecordBytes at the v1 boundary
-	maxPreparedV2Bytes = 640 << 10
-	maxQuarantineBytes = 1024
-	quarantineReason   = "unsafe_v1_migration_state"
+	maxLegacyV1Bytes          = 1 << 20 // historical maxRecordBytes at the v1 boundary
+	maxPreparedLineageV2Bytes = 640 << 10
+	maxQuarantineBytes        = 1024
+	quarantineReason          = "unsafe_v1_migration_state"
 )
 
 var (
@@ -305,8 +305,8 @@ func (w legacyV1Wire) record() (Record, error) {
 	return r, nil
 }
 
-// PreparedV2Record is the only v2 branch admitted by this isolated codec.
-// It contains no authority, receipt, coordinator, outcome, or evidence.
+// PreparedV2Record is the authority-free prepared branch. It contains no
+// receipt, coordinator, outcome, or evidence.
 type PreparedV2Record struct {
 	Revision             uint64
 	Plan                 intent.Plan
@@ -315,10 +315,10 @@ type PreparedV2Record struct {
 	UpdatedAt            time.Time
 }
 
-// preparedV2Wire freezes all 13 fields, including literal null placeholders
-// for future authority-bearing phases. An empty struct pointer allows strict
-// decoding to reject any non-null value without json.RawMessage.
-type preparedV2Wire struct {
+// preparedLineageV2Wire freezes all 13 fields shared by the prepared and
+// claimed prepared-to-canceled branches. An empty struct pointer rejects
+// non-null authority-bearing values without json.RawMessage.
+type preparedLineageV2Wire struct {
 	Version              int          `json:"version"`
 	Revision             uint64       `json:"revision"`
 	State                State        `json:"state"`
@@ -334,10 +334,70 @@ type preparedV2Wire struct {
 	UpdatedAt            string       `json:"updated_at"`
 }
 
+type preparedLineageV2Record struct {
+	Revision             uint64
+	Plan                 intent.Plan
+	LegacyV1RecordSHA256 *string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
 // EncodePreparedV2 returns canonical indented JSON with a single terminal LF.
 func EncodePreparedV2(record PreparedV2Record) (encoded []byte, err error) {
 	defer func() { err = typedJournalWireError(err) }()
-	if err := validatePreparedV2(record); err != nil {
+	return encodePreparedLineageV2(preparedLineageV2Record{Revision: record.Revision, Plan: record.Plan,
+		LegacyV1RecordSHA256: record.LegacyV1RecordSHA256, CreatedAt: record.CreatedAt,
+		UpdatedAt: record.UpdatedAt}, StatePrepared)
+}
+
+// DecodePreparedV2 rejects oversized input before JSON decoding and admits
+// only the canonical, authority-free prepared branch.
+func DecodePreparedV2(raw []byte) (record PreparedV2Record, err error) {
+	defer func() { err = typedJournalWireError(err) }()
+	decoded, err := decodePreparedLineageV2(raw, StatePrepared)
+	if err != nil {
+		return PreparedV2Record{}, err
+	}
+	return PreparedV2Record{Revision: decoded.Revision, Plan: decoded.Plan,
+		LegacyV1RecordSHA256: decoded.LegacyV1RecordSHA256, CreatedAt: decoded.CreatedAt,
+		UpdatedAt: decoded.UpdatedAt}, nil
+}
+
+// PreparedCanceledV2Record is a canonical, authority-free claim that a
+// prepared record was canceled. Its bytes alone do not prove the predecessor,
+// a valid transition, or any authorization to change the Store.
+type PreparedCanceledV2Record struct {
+	Revision             uint64
+	Plan                 intent.Plan
+	LegacyV1RecordSHA256 *string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+// EncodePreparedCanceledV2 returns canonical indented JSON with one terminal
+// LF for the claimed prepared-to-canceled branch only.
+func EncodePreparedCanceledV2(record PreparedCanceledV2Record) (encoded []byte, err error) {
+	defer func() { err = typedJournalWireError(err) }()
+	return encodePreparedLineageV2(preparedLineageV2Record{Revision: record.Revision, Plan: record.Plan,
+		LegacyV1RecordSHA256: record.LegacyV1RecordSHA256, CreatedAt: record.CreatedAt,
+		UpdatedAt: record.UpdatedAt}, StateCanceled)
+}
+
+// DecodePreparedCanceledV2 rejects oversized input before JSON decoding and
+// admits only canonical, authority-free claimed prepared-to-canceled bytes.
+func DecodePreparedCanceledV2(raw []byte) (record PreparedCanceledV2Record, err error) {
+	defer func() { err = typedJournalWireError(err) }()
+	decoded, err := decodePreparedLineageV2(raw, StateCanceled)
+	if err != nil {
+		return PreparedCanceledV2Record{}, err
+	}
+	return PreparedCanceledV2Record{Revision: decoded.Revision, Plan: decoded.Plan,
+		LegacyV1RecordSHA256: decoded.LegacyV1RecordSHA256, CreatedAt: decoded.CreatedAt,
+		UpdatedAt: decoded.UpdatedAt}, nil
+}
+
+func encodePreparedLineageV2(record preparedLineageV2Record, state State) ([]byte, error) {
+	if err := validatePreparedLineageV2(record, state); err != nil {
 		return nil, err
 	}
 	createdAt, err := canonicalJournalTime(record.CreatedAt)
@@ -352,68 +412,80 @@ func EncodePreparedV2(record PreparedV2Record) (encoded []byte, err error) {
 	if err != nil {
 		return nil, errInvalidJournalWire
 	}
-	wire := preparedV2Wire{Version: 2, Revision: record.Revision, State: State("prepared"),
+	wire := preparedLineageV2Wire{Version: 2, Revision: record.Revision, State: state,
 		Plan: planWire, LegacyV1RecordSHA256: record.LegacyV1RecordSHA256,
 		CreatedAt: createdAt, UpdatedAt: updatedAt}
 	raw, err := encodeJournalWire(wire)
 	if err != nil {
 		return nil, errInvalidJournalWire
 	}
-	if len(raw) > maxPreparedV2Bytes {
+	if len(raw) > maxPreparedLineageV2Bytes {
 		return nil, errJournalWireTooLarge
 	}
 	return raw, nil
 }
 
-// DecodePreparedV2 rejects oversized input before JSON decoding and admits
-// only the canonical, authority-free prepared branch.
-func DecodePreparedV2(raw []byte) (record PreparedV2Record, err error) {
-	defer func() { err = typedJournalWireError(err) }()
-	if len(raw) > maxPreparedV2Bytes {
-		return PreparedV2Record{}, errJournalWireTooLarge
+func decodePreparedLineageV2(raw []byte, expectedState State) (preparedLineageV2Record, error) {
+	if len(raw) > maxPreparedLineageV2Bytes {
+		return preparedLineageV2Record{}, errJournalWireTooLarge
 	}
 	if len(raw) == 0 {
-		return PreparedV2Record{}, errInvalidJournalWire
+		return preparedLineageV2Record{}, errInvalidJournalWire
 	}
-	var wire preparedV2Wire
+	var wire preparedLineageV2Wire
 	if err := decodeExactJournalWire(raw, &wire); err != nil {
-		return PreparedV2Record{}, err
+		return preparedLineageV2Record{}, err
 	}
-	if wire.Version != 2 || wire.State != State("prepared") || wire.Receipt != nil ||
+	if wire.Version != 2 || wire.State != expectedState || wire.Receipt != nil ||
 		wire.AuthorityEvidence != nil || wire.CoordinatorEvidence != nil ||
 		wire.MutationAttempts != 0 || wire.Outcome != nil || wire.Evidence != nil {
-		return PreparedV2Record{}, errInvalidJournalWire
+		return preparedLineageV2Record{}, errInvalidJournalWire
 	}
 	created, err := parseCanonicalJournalTime(wire.CreatedAt)
 	if err != nil {
-		return PreparedV2Record{}, errInvalidJournalWire
+		return preparedLineageV2Record{}, errInvalidJournalWire
 	}
 	updated, err := parseCanonicalJournalTime(wire.UpdatedAt)
 	if err != nil {
-		return PreparedV2Record{}, errInvalidJournalWire
+		return preparedLineageV2Record{}, errInvalidJournalWire
 	}
-	record = PreparedV2Record{Revision: wire.Revision, Plan: wire.Plan.toIntent(),
+	record := preparedLineageV2Record{Revision: wire.Revision, Plan: wire.Plan.toIntent(),
 		LegacyV1RecordSHA256: wire.LegacyV1RecordSHA256, CreatedAt: created, UpdatedAt: updated}
-	canonical, err := EncodePreparedV2(record)
+	canonical, err := encodePreparedLineageV2(record, expectedState)
 	if err != nil || !bytes.Equal(raw, canonical) {
-		return PreparedV2Record{}, errInvalidJournalWire
+		return preparedLineageV2Record{}, errInvalidJournalWire
 	}
 	return record, nil
 }
 
-func validatePreparedV2(record PreparedV2Record) error {
-	if record.UpdatedAt.Before(record.CreatedAt) {
+func validatePreparedLineageV2(record preparedLineageV2Record, state State) error {
+	// UTC drops monotonic readings; compare the wall times that reach the wire.
+	if record.UpdatedAt.UTC().Before(record.CreatedAt.UTC()) {
 		return errInvalidJournalWire
 	}
 	planWire, err := legacyPlanFromIntent(record.Plan)
 	if err != nil || validateLegacyPlan(planWire) != nil {
 		return errInvalidJournalWire
 	}
-	if record.LegacyV1RecordSHA256 == nil {
-		if record.Revision != 1 || !record.CreatedAt.Equal(record.UpdatedAt) {
+	switch state {
+	case StatePrepared:
+		if record.LegacyV1RecordSHA256 == nil {
+			// Fresh prepared records preserve the same serialized wall timestamp.
+			if record.Revision != 1 || !record.CreatedAt.UTC().Equal(record.UpdatedAt.UTC()) {
+				return errInvalidJournalWire
+			}
+		} else if record.Revision != 2 || !isDigest(*record.LegacyV1RecordSHA256) {
 			return errInvalidJournalWire
 		}
-	} else if record.Revision != 2 || !isDigest(*record.LegacyV1RecordSHA256) {
+	case StateCanceled:
+		if record.LegacyV1RecordSHA256 == nil {
+			if record.Revision != 2 {
+				return errInvalidJournalWire
+			}
+		} else if record.Revision != 3 || !isDigest(*record.LegacyV1RecordSHA256) {
+			return errInvalidJournalWire
+		}
+	default:
 		return errInvalidJournalWire
 	}
 	return nil

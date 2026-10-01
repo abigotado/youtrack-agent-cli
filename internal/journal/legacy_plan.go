@@ -17,7 +17,7 @@ import (
 
 // All values in this file describe the journal-v1 plan as it existed when
 // journal v2 was introduced. Neither the v1 classifier nor the v2 prepared
-// codec may delegate semantic validation to the evolving intent package.
+// lineage codecs may delegate semantic validation to the evolving intent package.
 const (
 	legacyPlanSchemaVersion = 1
 	legacyPlanMaxBytes      = 512 << 10

@@ -217,7 +217,7 @@ func TestJournalCodecMaximumShapedPreparedBranchesFitV2(t *testing.T) {
 			v2, err := EncodePreparedV2(PreparedV2Record{
 				Revision: 1, Plan: plan, CreatedAt: codecTime, UpdatedAt: codecTime,
 			})
-			if err != nil || len(v2) <= 300<<10 || len(v2) > maxPreparedV2Bytes {
+			if err != nil || len(v2) <= 300<<10 || len(v2) > maxPreparedLineageV2Bytes {
 				t.Fatalf("largest-shaped valid branch v2 size=%d, error=%v", len(v2), err)
 			}
 			if _, err := DecodePreparedV2(v2); err != nil {
