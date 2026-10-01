@@ -396,6 +396,21 @@ func TestSuppliedRegistryHistoryRawCanonicalAndNulls(t *testing.T) {
 	}
 }
 
+func TestSuppliedRegistryHistoryHTMLPhase(t *testing.T) {
+	records := historyTestRecords(t, "enroll1", "rotate2")
+	earlierGrammar := bytes.Replace(records[0], []byte(`"registry_revision":1`), []byte(`"registry_revision":257`), 1)
+	for _, value := range []string{"<", ">", "&"} {
+		t.Run(value, func(t *testing.T) {
+			laterEncoding := bytes.Replace(records[1], []byte(`"record_type":"approval_registry_transition"`), []byte(`"record_type":"`+value+`"`), 1)
+			if bytes.Equal(laterEncoding, records[1]) {
+				t.Fatal("HTML regression mutation not exercised")
+			}
+			historyTestFailure(t, [][]byte{laterEncoding}, "encoding")
+			historyTestFailure(t, [][]byte{earlierGrammar, laterEncoding}, "encoding")
+		})
+	}
+}
+
 func TestSuppliedRegistryHistorySignedTimes(t *testing.T) {
 	base := historyTestRecords(t, "enroll1")[0]
 	key, _ := historyTestKey(t, 1)

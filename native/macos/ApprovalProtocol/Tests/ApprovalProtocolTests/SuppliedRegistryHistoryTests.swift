@@ -394,6 +394,27 @@ private func suppliedHistoryRecords(_ names: [String]) throws -> [Data] {
   }
 }
 
+@Test func suppliedRegistryHistoryHTMLPhase() throws {
+  let records = try suppliedHistoryRecords(["enroll1", "rotate2"])
+  let earlierGrammar = Data(
+    String(decoding: records[0], as: UTF8.self).replacingOccurrences(
+      of: "\"registry_revision\":1", with: "\"registry_revision\":257"
+    ).utf8)
+  for value in ["<", ">", "&"] {
+    let laterEncoding = Data(
+      String(decoding: records[1], as: UTF8.self).replacingOccurrences(
+        of: "\"record_type\":\"approval_registry_transition\"",
+        with: "\"record_type\":\"" + value + "\""
+      ).utf8)
+    #expect(laterEncoding != records[1])
+    for supplied in [[laterEncoding], [earlierGrammar, laterEncoding]] {
+      #expect(throws: SuppliedRegistryHistoryError.encoding, "raw \(value)") {
+        try SuppliedRegistryHistory.verify(suppliedRecords: supplied)
+      }
+    }
+  }
+}
+
 @Test func suppliedRegistryHistorySignedRecoveryAndHistoryOrder() throws {
   let records = try suppliedHistoryRecords(["enroll1", "rotate2", "recover-active3"])
   var object = try suppliedHistoryObject(records[2])

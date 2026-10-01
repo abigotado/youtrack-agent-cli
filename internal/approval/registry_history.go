@@ -179,23 +179,11 @@ func suppliedRegistryDecode(raw []byte, wire *suppliedRegistryWire) bool {
 		// Decoder text can echo untrusted bytes; this boundary returns only a stage.
 		return false
 	}
-	canonical, err := suppliedRegistryEncode(wire)
+	canonical, err := json.Marshal(wire)
 	if err != nil {
 		return false
 	}
 	return bytes.Equal(raw, canonical)
-}
-
-func suppliedRegistryEncode(wire *suppliedRegistryWire) ([]byte, error) {
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	// Printable ASCII is not HTML: unescaped <, >, and & remain canonical
-	// encoding even if a particular field later rejects them as bad grammar.
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(wire); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(buffer.Bytes(), []byte{'\n'}), nil
 }
 
 func suppliedRegistryPrimitives(record *suppliedRegistryRecord) bool {
