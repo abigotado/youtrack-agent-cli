@@ -210,7 +210,7 @@ private func suppliedHistoryRecords(_ names: [String]) throws -> [Data] {
     ("count257", Array(repeating: base[0], count: 257), .bounds),
     ("aggregate-at", Array(repeating: Data(repeating: 120, count: 4352), count: 256), .encoding),
     (
-      "aggregate-over",
+      "late-item-over-cap",
       Array(repeating: Data(repeating: 120, count: 4352), count: 255) + [
         Data(repeating: 120, count: 4353)
       ], .bounds
@@ -245,10 +245,10 @@ private func suppliedHistoryRecords(_ names: [String]) throws -> [Data] {
   #expect(throws: ApprovalProtocolError.duplicateField("UNTRUSTED_SENTINEL")) { try parser.parse() }
 }
 
-@Test func suppliedRegistryHistoryRecordCryptoGrammar() throws {
-  let base = try suppliedHistoryRecords(["enroll1"])[0]
-  let object = try suppliedHistoryObject(base)
-  let encoded = try #require(object["new_signature"])
+private func suppliedHistoryHighSignature(
+  _ object: [String: String], field: String, role: String, scalar: Int
+) throws -> Data {
+  let encoded = try #require(object[field])
   let low = try P256Signature(derBase64URL: String(encoded.dropFirst().dropLast()))
   let raw = Array(try P256.Signing.ECDSASignature(derRepresentation: low.der).rawRepresentation)
   let order: [UInt8] = [
@@ -269,13 +269,21 @@ private func suppliedHistoryRecords(_ names: [String]) throws -> [Data] {
   }
   let integers = derInteger(Array(raw.prefix(32))) + derInteger(twin)
   let high = Data([0x30, UInt8(integers.count)] + integers)
-  let key = try suppliedHistoryKey(1)
+  let key = try suppliedHistoryKey(scalar)
   let body = try suppliedHistoryEncode(object, body: true)
-  var message = Data("YTA-REGISTRY-RECORD-NEW-V1\0".utf8)
+  var message = Data(("YTA-REGISTRY-RECORD-" + role + "-V1\0").utf8)
   message.append(body)
   #expect(
     key.publicKey.isValidSignature(
       try P256.Signing.ECDSASignature(derRepresentation: high), for: message))
+  return high
+}
+
+@Test func suppliedRegistryHistoryRecordCryptoGrammar() throws {
+  let base = try suppliedHistoryRecords(["enroll1"])[0]
+  let object = try suppliedHistoryObject(base)
+  let high = try suppliedHistoryHighSignature(
+    object, field: "new_signature", role: "NEW", scalar: 1)
   let cases: [(String, String)] = [
     ("new_signature", suppliedHistoryQuote(suppliedHistoryBase64(high))),
     ("new_signature", suppliedHistoryQuote(suppliedHistoryBase64(Data([0x30, 0])))),
@@ -455,4 +463,128 @@ private func suppliedHistoryRecords(_ names: [String]) throws -> [Data] {
       try SuppliedRegistryHistory.verify(suppliedRecords: [records[0], bytes])
     }
   }
+}
+
+@Test func suppliedRegistryHistoryGenerationTokenGrammar() throws {
+  let records = try suppliedHistoryRecords(["enroll1", "rotate2"])
+  let values = [
+    ("short", "YTAG-" + String(repeating: "0", count: 18) + "1"),
+    ("long", "YTAG-" + String(repeating: "0", count: 20) + "1"),
+    ("sign", "YTAG-+" + String(repeating: "0", count: 18) + "1"),
+    ("nondigit", "YTAG-" + String(repeating: "0", count: 19) + "x"),
+  ]
+  for field in ["new_generation", "target_generation"] {
+    for (name, value) in values {
+      var object = try suppliedHistoryObject(records[1])
+      object[field] = suppliedHistoryQuote(value)
+      // All other tuple members remain populated; partial-null rejection cannot
+      // substitute for the generation token's own width/digit validation.
+      let bytes = try suppliedHistoryEncode(object)
+      #expect(throws: SuppliedRegistryHistoryError.grammar, "\(field)/\(name)") {
+        try SuppliedRegistryHistory.verify(suppliedRecords: [records[0], bytes])
+      }
+    }
+  }
+}
+
+@Test func suppliedRegistryHistoryForbiddenSignatureRolesAndRevokeTuple() throws {
+  let records = try suppliedHistoryRecords(["enroll1", "rotate2", "revoke3"])
+  let one = try suppliedHistoryKey(1)
+  let two = try suppliedHistoryKey(2)
+  let three = try suppliedHistoryKey(3)
+  let enrollOld = try suppliedHistorySign(suppliedHistoryObject(records[0]), old: one, fresh: one)
+  let recovery = try suppliedHistoryRecords(["recover-active3"])[0]
+  let recoverOld = try suppliedHistorySign(suppliedHistoryObject(recovery), old: two, fresh: three)
+  let revokeNew = try suppliedHistorySign(suppliedHistoryObject(records[2]), old: two, fresh: three)
+  var tuple = try suppliedHistoryObject(records[2])
+  let id = String(format: "%032x", 3)
+  let spki = suppliedHistorySPKI(three)
+  tuple["new_generation"] = suppliedHistoryQuote(String(format: "YTAG-%020d", 3))
+  tuple["new_key_id"] = suppliedHistoryQuote(id)
+  tuple["new_key_tag"] = suppliedHistoryQuote(
+    "io.github.abigotado.youtrack-agent.approval.signing.v1/" + id)
+  tuple["new_spki"] = suppliedHistoryQuote(suppliedHistoryBase64(spki))
+  tuple["new_fingerprint_sha256"] = suppliedHistoryQuote(suppliedHistoryHash(spki))
+  tuple["new_status"] = suppliedHistoryQuote("active")
+  // Generation 3 is valid at revision 3, and the changed body is signed by
+  // current old key 2. Only the revoke field combination is forbidden.
+  let revokeTuple = try suppliedHistorySign(tuple, old: two, fresh: nil)
+  for (name, supplied) in [
+    ("enroll-old", [enrollOld]), ("recover-old", [records[0], records[1], recoverOld]),
+    ("revoke-new", [records[0], records[1], revokeNew]),
+    ("revoke-tuple", [records[0], records[1], revokeTuple]),
+  ] {
+    #expect(throws: SuppliedRegistryHistoryError.replay, "\(name)") {
+      try SuppliedRegistryHistory.verify(suppliedRecords: supplied)
+    }
+  }
+  var oldHigh = try suppliedHistoryObject(records[1])
+  let high = try suppliedHistoryHighSignature(
+    oldHigh, field: "old_signature", role: "OLD", scalar: 1)
+  oldHigh["old_signature"] = suppliedHistoryQuote(suppliedHistoryBase64(high))
+  let raw = try suppliedHistoryEncode(oldHigh)
+  #expect(throws: SuppliedRegistryHistoryError.grammar) {
+    try SuppliedRegistryHistory.verify(suppliedRecords: [records[0], raw])
+  }
+}
+
+@Test func suppliedRegistryHistoryMaximalLedgerDescriptorUpgradeAndValueCopies() throws {
+  let base = try suppliedHistoryObject(suppliedHistoryRecords(["enroll1"])[0])
+  var records: [Data] = []
+  var previous: [String: String]?
+  var old: P256.Signing.PrivateKey?
+  for revision in 1...256 {
+    let fresh = try suppliedHistoryKey(revision)
+    let spki = suppliedHistorySPKI(fresh)
+    let id = String(format: "%032x", revision)
+    var object = base
+    object["registry_revision"] = String(revision)
+    object["new_generation"] = suppliedHistoryQuote(String(format: "YTAG-%020d", revision))
+    object["new_key_id"] = suppliedHistoryQuote(id)
+    object["new_key_tag"] = suppliedHistoryQuote(
+      "io.github.abigotado.youtrack-agent.approval.signing.v1/" + id)
+    object["new_spki"] = suppliedHistoryQuote(suppliedHistoryBase64(spki))
+    object["new_fingerprint_sha256"] = suppliedHistoryQuote(suppliedHistoryHash(spki))
+    if let previous {
+      object["transition_kind"] = suppliedHistoryQuote("rotate")
+      object["previous_record_sha256"] = suppliedHistoryQuote(
+        suppliedHistoryHash(try #require(records.last)))
+      for suffix in ["generation", "key_id", "key_tag", "spki", "fingerprint_sha256"] {
+        let value: String = try #require(previous["new_" + suffix])
+        object["target_" + suffix] = value
+      }
+      object["target_previous_status"] = suppliedHistoryQuote("active")
+      object["target_new_status"] = suppliedHistoryQuote("retained")
+    }
+    if revision == 256 {
+      object["artifact_descriptor_sha256"] = suppliedHistoryQuote(String(repeating: "b", count: 64))
+    }
+    records.append(try suppliedHistorySign(object, old: old, fresh: fresh))
+    old = fresh
+    previous = object
+  }
+  let last = try #require(records.last)
+  let expectedTip = suppliedHistoryHash(last)
+  let result = try SuppliedRegistryHistory.verify(suppliedRecords: records)
+  #expect(result.suppliedRevision == 256)
+  try #require(result.keys.count == 256)
+  #expect(result.suppliedTipSHA256 == expectedTip)
+  #expect(result.suppliedTipDescriptorSHA256 == String(repeating: "b", count: 64))
+  #expect(result.keys.dropLast().allSatisfy({ $0.status == "retained" }))
+  #expect(result.keys.last?.status == "active")
+  #expect(result.keys.last?.generation == String(format: "YTAG-%020d", 256))
+  #expect(throws: SuppliedRegistryHistoryError.bounds) {
+    try SuppliedRegistryHistory.verify(suppliedRecords: records + [last])
+  }
+  let expectedKeys = result.keys
+  var copiedKeys = result.keys
+  copiedKeys.removeAll()
+  records[0][0] = 120
+  records[255][0] = 120
+  records.removeLast()
+  #expect(copiedKeys.isEmpty)
+  #expect(result.keys == expectedKeys)
+  #expect(result.suppliedRevision == 256)
+  #expect(result.suppliedTipSHA256 == expectedTip)
+  #expect(result.suppliedTipDescriptorSHA256 == String(repeating: "b", count: 64))
 }

@@ -17,7 +17,6 @@ const (
 	suppliedRegistryMaxRecords  = 256
 	suppliedRegistryRecordBytes = 4352
 	suppliedRegistryBodyBytes   = 4096
-	suppliedRegistryTotalBytes  = 1114112
 	suppliedRegistryEmptyTip    = "0000000000000000000000000000000000000000000000000000000000000000"
 	suppliedRegistryKeyTag      = "io.github.abigotado.youtrack-agent.approval.signing.v1/"
 	suppliedRegistryTimeLayout  = "2006-01-02T15:04:05Z"
@@ -126,12 +125,12 @@ func VerifySuppliedRegistryHistory(records [][]byte) (SuppliedRegistryHistory, e
 	if len(records) > suppliedRegistryMaxRecords {
 		return SuppliedRegistryHistory{}, suppliedRegistryError("bounds")
 	}
-	total := 0
+	// The joint count/item caps also enforce the normative aggregate bound:
+	// 256 * 4,352 = 1,114,112 bytes, before any input is cloned or parsed.
 	for _, raw := range records {
-		if len(raw) == 0 || len(raw) > suppliedRegistryRecordBytes || len(raw) > suppliedRegistryTotalBytes-total {
+		if len(raw) == 0 || len(raw) > suppliedRegistryRecordBytes {
 			return SuppliedRegistryHistory{}, suppliedRegistryError("bounds")
 		}
-		total += len(raw)
 	}
 	owned := make([][]byte, len(records))
 	for i, raw := range records {

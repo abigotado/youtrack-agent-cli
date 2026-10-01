@@ -617,7 +617,7 @@ caller-supplied complete stored records. They are pure prerequisite code: no
 network, Keychain, clock, journal, signing, user interface or authority lookup is
 performed. There is no cached-state seed, continuation, append or signing API.
 
-Verification has four global phases: all raw count/per-record/aggregate bounds;
+Verification has four global phases: all raw count and per-record bounds;
 canonical decoding and exact re-encoding of every record; primitive grammar,
 tuple, SPKI, fingerprint and strict low-S DER checks for every record; then
 predecessor hashing, ECDSA signatures and genesis-to-tip state replay. A later
@@ -627,6 +627,10 @@ those copies afterwards; callers must not mutate input buffers during the call.
 Swift retains only value-owned data. Invalid input returns no partial history.
 Errors identify only a static validation phase, never decoder diagnostics or
 caller-controlled strings.
+
+The count cap of 256 and per-record cap of 4,352 jointly enforce the normative
+aggregate bound of 1,114,112 bytes before copying or parsing. That aggregate is
+a derived invariant, not an independently tighter limit.
 
 Input order is significant and is never sorted. Every supplied record must be
 present from revision 1 to the supplied tip, with exact plain-byte predecessor
@@ -639,7 +643,11 @@ An empty input is an internally consistent empty supplied history: revision 0,
 the zero predecessor digest, no descriptor and no keys. Every proper valid
 prefix also succeeds. **Neither an empty nor a nonempty result establishes
 completeness, protected-registry absence or the current protected tip.** An
-attacker can supply a self-signed genesis or an older valid prefix. Results
+attacker can supply a self-signed genesis or an older valid prefix. They can
+also copy a valid prefix and append a self-signed recovery record introducing
+their own key: recovery has no old-key signature, and the supplied evidence
+digest does not prove eligibility. Even a supplied tip derived from a genuine
+prefix therefore does not establish authorized key continuity. Results
 must not seed `ExpectedReceiptBinding`, signing, confirmation, registry commit
 or a trusted authority cache. Future protected enumeration, artifact/root
 authorization and native integration must independently establish those facts.
@@ -649,9 +657,11 @@ proposal, acceptance, recovery evidence or expiry. Verification checks the
 recorded order `requested_at <= accepted_at <= committed_at` and the necessary
 whole-second bound `committed_at - requested_at < 300`: the actual request
 expires at most 300 seconds after request and commit must precede expiry. This
-does not reconstruct exact expiry, establish freshness or validate the missing
-transcript objects. Registry calendar grammar retains year zero, unlike the
-receipt-specific timestamp grammar. A signed recovery digest is a declaration,
+does not reconstruct exact expiry, establish freshness, check nonce entropy or
+nonce/transcript-digest claim uniqueness, or validate the missing transcript
+objects. This is not full ceremony validation. Registry calendar grammar retains
+year zero, unlike the receipt-specific timestamp grammar. A signed recovery
+digest is a declaration,
 not evidence of native key absence or recovery eligibility.
 
 ## Helper-owned apply authority coordinator

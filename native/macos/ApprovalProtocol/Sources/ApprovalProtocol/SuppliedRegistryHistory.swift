@@ -1,5 +1,11 @@
 import struct Foundation.Data
 
+private enum SuppliedRegistryBounds {
+    static let maximumRecords = 256
+    static let maximumRecordBytes = 4_352
+    static let maximumBodyBytes = 4_096
+}
+
 /// Static phase failures. Untrusted record text and parser diagnostics never escape.
 public enum SuppliedRegistryHistoryError: Error, Equatable, Sendable {
     case bounds
@@ -46,13 +52,13 @@ public struct SuppliedRegistryHistory: Equatable, Sendable {
 
     public static func verify(suppliedRecords: [Data]) throws -> Self {
         // Complete all bounds before copying, parsing, hashing, or cryptography.
-        guard suppliedRecords.count <= 256 else { throw SuppliedRegistryHistoryError.bounds }
-        var total = 0
+        guard suppliedRecords.count <= SuppliedRegistryBounds.maximumRecords else { throw SuppliedRegistryHistoryError.bounds }
         for bytes in suppliedRecords {
-            guard !bytes.isEmpty, bytes.count <= 4_352,
-                  total <= 1_114_112 - bytes.count else { throw SuppliedRegistryHistoryError.bounds }
-            total += bytes.count
+            guard !bytes.isEmpty, bytes.count <= SuppliedRegistryBounds.maximumRecordBytes
+            else { throw SuppliedRegistryHistoryError.bounds }
         }
+        // These bounds imply the frozen 1,114,112-byte aggregate cap
+        // (256 * 4,352), without summing untrusted lengths.
         // Data has value semantics. The private snapshot never borrows mutable
         // caller storage and is retained unchanged for hashes and signatures.
         let snapshot = suppliedRecords.map { Data(Array($0)) }
@@ -79,6 +85,8 @@ public struct SuppliedRegistryHistory: Equatable, Sendable {
                       (record.recoveryDigest != nil) == (record.kind == "recover")
                 else { throw SuppliedRegistryHistoryError.replay }
 
+                guard statuses.lazy.filter({ $0 == "active" }).count <= 1
+                else { throw SuppliedRegistryHistoryError.replay }
                 let activeIndex = statuses.firstIndex(of: "active")
                 let active = activeIndex.map { introduced[$0] }
                 guard record.target == active,
@@ -157,7 +165,7 @@ private struct SuppliedRegistryCanonicalRecord {
     init(bytes: Data) throws {
         guard bytes.allSatisfy({ (0x20...0x7E).contains($0) && $0 != 0x5C })
         else { throw SuppliedRegistryHistoryError.encoding }
-        var parser = try BoundedJSONParser(data: bytes, maximumBytes: 4_352)
+        var parser = try BoundedJSONParser(data: bytes, maximumBytes: SuppliedRegistryBounds.maximumRecordBytes)
         let node = try parser.parse()
         let fields = try node.exactObject(Self.fieldNames)
         guard JSONCanonicalEncoder.encode(node) == bytes, case let .object(members) = node
@@ -214,9 +222,10 @@ private struct SuppliedRegistryRecord {
     let newSignature: P256Signature?
 
     init(object: SuppliedRegistryCanonicalRecord) throws {
-        guard object.body.count <= 4_096, object.fields["schema_version"]?.uint64 == 1,
+        guard object.body.count <= SuppliedRegistryBounds.maximumBodyBytes, object.fields["schema_version"]?.uint64 == 1,
               try object.string("record_type") == "approval_registry_transition",
-              let revision = object.fields["registry_revision"]?.uint64, (1...256).contains(revision),
+              let revision = object.fields["registry_revision"]?.uint64,
+              (1...UInt64(SuppliedRegistryBounds.maximumRecords)).contains(revision),
               case let .boolean(revokesAll)? = object.fields["revokes_all_prior"]
         else { throw SuppliedRegistryHistoryError.grammar }
         let kind = try object.string("transition_kind")
@@ -264,6 +273,8 @@ private struct SuppliedRegistryRecord {
 }
 
 fileprivate struct SuppliedRegistryTuple: Equatable {
+    private static let spkiBase64URLByteCount = (P256PublicKeyCodec.spkiByteCount * 8 + 5) / 6
+
     let generation: String
     let keyID: String
     let keyTag: String
@@ -280,11 +291,12 @@ fileprivate struct SuppliedRegistryTuple: Equatable {
         guard ProtocolGrammar.isKeyGeneration(generation), keyID.utf8.count == 32,
               keyID.utf8.allSatisfy({ (0x30...0x39).contains($0) || (0x61...0x66).contains($0) }),
               keyTag == "io.github.abigotado.youtrack-agent.approval.signing.v1/" + keyID,
-              ProtocolGrammar.isDigest(fingerprint), spki.utf8.count == 122,
+              ProtocolGrammar.isDigest(fingerprint), spki.utf8.count == Self.spkiBase64URLByteCount,
               spki.utf8.allSatisfy({ ProtocolGrammar.isASCIIAlphanumeric($0) || $0 == 0x2D || $0 == 0x5F })
         else { throw SuppliedRegistryHistoryError.grammar }
-        let padded = spki.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/") + "=="
-        guard let der = Data(base64Encoded: padded), der.count == 91,
+        let padded = spki.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/") +
+            String(repeating: "=", count: (4 - Self.spkiBase64URLByteCount % 4) % 4)
+        guard let der = Data(base64Encoded: padded), der.count == P256PublicKeyCodec.spkiByteCount,
               der.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") == spki,
               ProtocolGrammar.sha256(der) == fingerprint
         else { throw SuppliedRegistryHistoryError.grammar }

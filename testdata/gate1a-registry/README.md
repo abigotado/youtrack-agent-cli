@@ -121,7 +121,8 @@ verification, durable journal confirmation, protected native integration,
 guarded-write Gates and distribution remain separate work. Pure supplied-history
 verification is permitted as a prerequisite only; it is not wired into any
 command, journal transition or authority consumer. `approval.Unsupported`,
-production package dependencies and the CLI contract are unchanged.
+journal v1/v2 behavior, production package dependencies and the CLI contract
+are unchanged.
 
 ## Native signature compatibility regression
 

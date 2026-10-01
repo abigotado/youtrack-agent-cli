@@ -282,13 +282,13 @@ func TestSuppliedRegistryHistoryPhasesAndRedaction(t *testing.T) {
 		{"item-over-cap", [][]byte{bytes.Repeat([]byte{'x'}, 4353)}, "bounds"},
 		{"count257", make([][]byte, 257), "bounds"},
 		{"aggregate-at", make([][]byte, 256), "encoding"},
-		{"composite-size-over", make([][]byte, 256), "bounds"},
+		{"late-item-over-cap", make([][]byte, 256), "bounds"},
 	} {
-		if test.name == "aggregate-at" || test.name == "composite-size-over" {
+		if test.name == "aggregate-at" || test.name == "late-item-over-cap" {
 			for i := range test.records {
 				test.records[i] = bytes.Repeat([]byte{'x'}, 4352)
 			}
-			if test.name == "composite-size-over" {
+			if test.name == "late-item-over-cap" {
 				test.records[255] = bytes.Repeat([]byte{'x'}, 4353)
 			}
 		}
@@ -491,6 +491,85 @@ func TestSuppliedRegistryHistorySeparatelyRejectsIdentityAndPublicKeyReuse(t *te
 			historyTestFailure(t, [][]byte{records[0], historyTestSign(t, object, old, signer)}, "replay")
 		})
 	}
+}
+
+func TestSuppliedRegistryHistoryGenerationTokenGrammar(t *testing.T) {
+	records := historyTestRecords(t, "enroll1", "rotate2")
+	values := []struct{ name, value string }{
+		{"short", "YTAG-" + strings.Repeat("0", 18) + "1"},
+		{"long", "YTAG-" + strings.Repeat("0", 20) + "1"},
+		{"sign", "YTAG-+" + strings.Repeat("0", 18) + "1"},
+		{"nondigit", "YTAG-" + strings.Repeat("0", 19) + "x"},
+	}
+	for _, field := range []string{"new_generation", "target_generation"} {
+		for _, value := range values {
+			t.Run(field+"/"+value.name, func(t *testing.T) {
+				object := historyTestObject(t, records[1])
+				object[field] = historyTestString(value.value)
+				// The other four tuple members remain populated, avoiding a partial-tuple
+				// refusal that would mask the generation token's own validation.
+				historyTestFailure(t, [][]byte{records[0], historyTestEncode(object, false)}, "grammar")
+			})
+		}
+	}
+}
+
+func TestSuppliedRegistryHistoryForbiddenSignatureRolesAndRevokeTuple(t *testing.T) {
+	records := historyTestRecords(t, "enroll1", "rotate2", "revoke3")
+	one, _ := historyTestKey(t, 1)
+	two, _ := historyTestKey(t, 2)
+	three, newTuple := historyTestKey(t, 3)
+	t.Run("enroll-old-signature", func(t *testing.T) {
+		object := historyTestObject(t, records[0])
+		historyTestFailure(t, [][]byte{historyTestSign(t, object, one, one)}, "replay")
+	})
+	t.Run("recover-old-signature", func(t *testing.T) {
+		recovery := historyTestRecords(t, "recover-active3")[0]
+		object := historyTestObject(t, recovery)
+		historyTestFailure(t, [][]byte{records[0], records[1], historyTestSign(t, object, two, three)}, "replay")
+	})
+	t.Run("revoke-new-signature", func(t *testing.T) {
+		object := historyTestObject(t, records[2])
+		historyTestFailure(t, [][]byte{records[0], records[1], historyTestSign(t, object, two, three)}, "replay")
+	})
+	t.Run("revoke-new-tuple-and-status", func(t *testing.T) {
+		object := historyTestObject(t, records[2])
+		object["new_generation"] = historyTestString(newTuple.Generation)
+		object["new_key_id"] = historyTestString(newTuple.KeyID)
+		object["new_key_tag"] = historyTestString(newTuple.KeyTag)
+		object["new_spki"] = historyTestString(newTuple.SPKI)
+		object["new_fingerprint_sha256"] = historyTestString(newTuple.FingerprintSHA256)
+		object["new_status"] = historyTestString("active")
+		// Generation 3 is grammatically legal at revision 3; a fresh valid old-key
+		// signature ensures the revoke event's field combination causes refusal.
+		historyTestFailure(t, [][]byte{records[0], records[1], historyTestSign(t, object, two, nil)}, "replay")
+	})
+	t.Run("old-high-s-valid-alias", func(t *testing.T) {
+		object := historyTestObject(t, records[1])
+		var encoded string
+		if err := json.Unmarshal(object["old_signature"], &encoded); err != nil {
+			t.Fatal(err)
+		}
+		der, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var signature struct{ R, S *big.Int }
+		if rest, err := asn1.Unmarshal(der, &signature); err != nil || len(rest) != 0 {
+			t.Fatalf("fixture signature: %v", err)
+		}
+		signature.S.Sub(elliptic.P256().Params().N, signature.S)
+		high, err := asn1.Marshal(signature)
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(append([]byte("YTA-REGISTRY-RECORD-OLD-V1\x00"), historyTestEncode(object, true)...))
+		if !ecdsa.VerifyASN1(&one.PublicKey, digest[:], high) {
+			t.Fatal("old high-S alias is not mathematically valid")
+		}
+		object["old_signature"] = historyTestString(base64.RawURLEncoding.EncodeToString(high))
+		historyTestFailure(t, [][]byte{records[0], historyTestEncode(object, false)}, "grammar")
+	})
 }
 
 func TestSuppliedRegistryHistoryMaximalLedgerAndDescriptorUpgrade(t *testing.T) {
