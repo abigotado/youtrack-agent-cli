@@ -1,10 +1,10 @@
 # Gate 1A approval-registry protocol
 
-Status: normative design for Gate 1A; pure offline supplied-history verification
-is implemented in Go and Swift, but protected registry integration is not
-implemented or production enabled. This document freezes the helper-private
-approval-key ledger and the four authority ceremonies and quarantine-only
-coordinator recovery.
+Status: normative design for Gate 1A; pure offline supplied-history and
+supplied-ceremony verification are implemented in Go and Swift, but protected
+registry integration is not implemented or production enabled. This document
+freezes the helper-private approval-key ledger and the four authority ceremonies
+and quarantine-only coordinator recovery.
 It does not make `approval.Unsupported` usable.
 
 The [trust-root ADR](gate1a-trust-root.md) owns the Keychain access group,
@@ -665,6 +665,47 @@ year zero, unlike the receipt-specific timestamp grammar. A signed recovery
 digest is a declaration, not evidence of native key absence or recovery
 eligibility.
 
+### Offline verification of a supplied ceremony
+
+`approval.VerifySuppliedRegistryCeremony(prefixRecords, ceremony)` in Go and
+`SuppliedRegistryCeremony.verify(prefixRecords:ceremony:)` in Swift additionally
+check a complete supplied ceremony against its supplied genesis-to-tip prefix.
+Inputs retain the exact request, optional recovery evidence, unsigned and signed
+proposal, acceptance, final body and complete candidate record. This is a pure
+consistency check, not an append, signing, protected-storage or admission API.
+
+Verification uses the same global phase order: raw bounds for all objects;
+canonical decoding and exact re-encoding for every prefix and ceremony object;
+primitive grammar for every object; then prefix replay and ceremony verification.
+The prefix plus candidate is bounded to 256 complete records of at most 4,352
+bytes each. Request, acceptance and present recovery evidence are nonempty and
+at most 2,048 bytes; each proposal and final body is nonempty and at most 4,096
+bytes. Absent recovery evidence is distinct from a present empty object. Go
+snapshots every input buffer after raw preflight; callers must not mutate them
+during the call. Swift inputs are value-owned. Errors disclose only a static
+phase and return no partial result.
+
+The check recomputes all transcript digests and proposal/final signatures,
+binds revisions, predecessor, descriptor and key tuples across all objects, and
+requires the redundant unsigned proposal and final body to equal their exact
+signed-object projections. It checks the supplied request's exact lifetime
+`0 < expires_at - requested_at <= 300`, repeated timestamps and expiry, and
+`requested_at <= proposed_at <= accepted_at <= committed_at`, with proposal,
+acceptance and commit strictly before expiry. A recovery probe declaration must
+fall between request and proposal and before expiry; its exact eligibility,
+lookup and continuity-probe claims must agree with the prefix-derived state.
+The candidate is replayed once and the result is a `SuppliedRegistryHistory`.
+
+All supplied-history non-authority restrictions apply unchanged. In particular,
+consistent recovery evidence does not establish an actual native lookup or key
+absence; accepted transcript bytes do not prove user presence or intent. A
+self-signed genesis, self-signed recovery, valid older prefix or expired
+historical ceremony can be internally consistent. The result proves neither
+protected completeness/current tip, trusted time or freshness, artifact/root
+authorization, coordinator ownership nor permission to sign, confirm, commit
+or send. It must not seed `ExpectedReceiptBinding` or any trusted authority
+cache. No native, journal or command integration is enabled by this verifier.
+
 ## Helper-owned apply authority coordinator
 
 The signed helper normally runs as the embedded launchd user agent described
@@ -1260,9 +1301,9 @@ domain-prefixed signing input, every digest, predecessor chain, DER SPKIs, and
 strict low-S signatures. At least one vector must form a multi-event chain
 `enroll -> rotate -> revoke -> recover` and derive the exact final state.
 
-The pure offline supplied-history verifier above is a prerequisite exception
-to this implementation block, not satisfaction of it. It does not enable
-confirmation, commit, apply or a write-capable release.
+The pure offline supplied-history and supplied-ceremony verifiers above are
+prerequisite exceptions to this implementation block, not satisfaction of it.
+They do not enable confirmation, commit, apply or a write-capable release.
 
 Another positive vector covers recovery from an active valid ledger after the
 exact `errSecItemNotFound:-25300` result. Both Go and Swift must decode and

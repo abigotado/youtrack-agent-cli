@@ -22,8 +22,8 @@ Three evidence levels must not be confused:
 
 1. A complete supplied core transcript can establish consistency among its
    canonical bytes, digests, signatures, tuples, times, and resulting state.
-2. Stored-record replay verifies signed declarations, predecessor linkage and
-   state under the protocol's protected-helper assumptions. Stored records do
+2. Supplied stored-record replay verifies signed declarations, predecessor
+   linkage and derived state, not protected-helper provenance. Stored records do
    not retain full requests, proposals, acceptances or recovery evidence; their
    digests do not reconstruct those missing objects.
 3. Neither test proves actual Keychain absence, trusted user presence, live peer
@@ -36,6 +36,14 @@ test-only transcript oracles. They check only a supplied genesis-to-tip prefix:
 even a valid nonempty prefix cannot establish the complete or current protected
 registry. The result is not an authority binding or a signing/send capability.
 See the [offline verification contract](../../docs/gate1a-registry-protocol.md#offline-verification-of-a-supplied-history).
+
+The pure supplied-ceremony verifiers additionally consume the complete core
+transcripts against a supplied prefix, checking proposal signatures, all
+transcript bindings, exact request expiry and recovery declarations. The
+production-boundary tests retain independent test-only transcript oracles. Their
+results remain caller-supplied consistency only, never native lookup evidence,
+protected-root continuity, user intent or runtime authority. See the
+[supplied-ceremony contract](../../docs/gate1a-registry-protocol.md#offline-verification-of-a-supplied-ceremony).
 
 All times are synthetic historical transcript times. Passing these tests cannot
 make an expired transcript live or grant a new confirmation/send capability.
@@ -80,6 +88,9 @@ their named base. Later semantic faults are re-signed and have dependent hashes
 recomputed so an earlier accidental signature/digest failure cannot satisfy a
 state-transition expectation. Positive manifest comparisons are separate from
 negative validation; stale baseline manifest metadata is not a rejection oracle.
+These seven categories belong to the independent test-only transcript oracles.
+Production verifiers report only static bounds, encoding, grammar or verification
+phases; their tests do not impose the oracle's finer composite-fault taxonomy.
 All raw caps and canonical/primitive checks run before cryptographic work.
 The complete supplied prefix is then validated before the candidate's digest,
 signature, temporal, recovery-eligibility and state checks. After prefix
@@ -104,6 +115,7 @@ statuses as success or satisfy the coordinator-result classification requirement
 | --- | --- |
 | Core transcript bytes, signatures, hashes, history and state | This corpus; synthetic data only |
 | Offline supplied stored-history verification | Go and Swift production-code boundary tests; no protected completeness, native provenance or authority |
+| Offline supplied complete-ceremony verification | Go and Swift production-code boundary tests; exact transcript bindings and recovery declarations, no native eligibility, freshness or authority |
 | OSStatus scalar grammar | Fixture consistency only; no production parser coverage or native status classification |
 | Registry intent canonical bytes/hash and supplied intent/request binding | [Supplemental fixture consistency](../gate1a-registry-intent/README.md); no production parser coverage |
 | Registry-commit active canonical bytes/hash and supplied active/intent binding | [Supplemental fixture consistency](../gate1a-registry-active/README.md); no acquisition or ownership evidence |
@@ -119,8 +131,8 @@ This directory does **not** satisfy the complete conformance prerequisite.
 Protected registry storage/replay integration, closed authority-evidence
 verification, durable journal confirmation, protected native integration,
 guarded-write Gates and distribution remain separate work. Pure supplied-history
-verification is permitted as a prerequisite only; it is not wired into any
-command, journal transition or authority consumer. `approval.Unsupported`,
+and supplied-ceremony verification are permitted as prerequisites only; neither
+is wired into any command, journal transition or authority consumer. `approval.Unsupported`,
 journal v1/v2 behavior, production package dependencies and the CLI contract
 are unchanged.
 
