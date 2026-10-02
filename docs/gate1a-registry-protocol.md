@@ -657,12 +657,13 @@ proposal, acceptance, recovery evidence or expiry. Verification checks the
 recorded order `requested_at <= accepted_at <= committed_at` and the necessary
 whole-second bound `committed_at - requested_at < 300`: the actual request
 expires at most 300 seconds after request and commit must precede expiry. This
-does not reconstruct exact expiry, establish freshness, check nonce entropy or
+does not check chronology between different records, reconstruct exact expiry,
+establish freshness, check nonce entropy or
 nonce/transcript-digest claim uniqueness, or validate the missing transcript
 objects. This is not full ceremony validation. Registry calendar grammar retains
 year zero, unlike the receipt-specific timestamp grammar. A signed recovery
-digest is a declaration,
-not evidence of native key absence or recovery eligibility.
+digest is a declaration, not evidence of native key absence or recovery
+eligibility.
 
 ## Helper-owned apply authority coordinator
 

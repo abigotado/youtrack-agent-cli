@@ -180,6 +180,10 @@ private struct SuppliedRegistryCanonicalRecord {
             }
         }
         self.bytes = bytes
+        // exactObject pins the full order; keep the signed-body extraction's
+        // signature-suffix assumption explicit at the point of use.
+        guard members.suffix(2).map(\.name) == ["old_signature", "new_signature"]
+        else { throw SuppliedRegistryHistoryError.encoding }
         body = JSONCanonicalEncoder.encode(.object(Array(members.dropLast(2))))
         self.fields = fields
     }

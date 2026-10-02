@@ -266,6 +266,7 @@ func TestSuppliedRegistryHistoryPhasesAndRedaction(t *testing.T) {
 	badSignature := historyTestObject(t, base[0])
 	key, _ := historyTestKey(t, 2)
 	first := historyTestSign(t, badSignature, nil, key)
+	historyTestFailure(t, [][]byte{first}, "replay")
 	lateGrammar := historyTestObject(t, base[1])
 	lateGrammar["registry_revision"] = json.RawMessage("257")
 	lateEncoding := append(append([]byte{}, base[1]...), '\n')
@@ -496,6 +497,7 @@ func TestSuppliedRegistryHistorySeparatelyRejectsIdentityAndPublicKeyReuse(t *te
 func TestSuppliedRegistryHistoryGenerationTokenGrammar(t *testing.T) {
 	records := historyTestRecords(t, "enroll1", "rotate2")
 	values := []struct{ name, value string }{
+		{"zero", "YTAG-" + strings.Repeat("0", 20)},
 		{"short", "YTAG-" + strings.Repeat("0", 18) + "1"},
 		{"long", "YTAG-" + strings.Repeat("0", 20) + "1"},
 		{"sign", "YTAG-+" + strings.Repeat("0", 18) + "1"},

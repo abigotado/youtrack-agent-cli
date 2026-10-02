@@ -199,6 +199,9 @@ private func suppliedHistoryRecords(_ names: [String]) throws -> [Data] {
   let base = try suppliedHistoryRecords(["enroll1", "rotate2"])
   let first = try suppliedHistorySign(
     try suppliedHistoryObject(base[0]), fresh: suppliedHistoryKey(2))
+  #expect(throws: SuppliedRegistryHistoryError.replay) {
+    try SuppliedRegistryHistory.verify(suppliedRecords: [first])
+  }
   var later = try suppliedHistoryObject(base[1])
   later["registry_revision"] = "257"
   let cases: [(String, [Data], SuppliedRegistryHistoryError)] = [
@@ -468,6 +471,7 @@ private func suppliedHistoryHighSignature(
 @Test func suppliedRegistryHistoryGenerationTokenGrammar() throws {
   let records = try suppliedHistoryRecords(["enroll1", "rotate2"])
   let values = [
+    ("zero", "YTAG-" + String(repeating: "0", count: 20)),
     ("short", "YTAG-" + String(repeating: "0", count: 18) + "1"),
     ("long", "YTAG-" + String(repeating: "0", count: 20) + "1"),
     ("sign", "YTAG-+" + String(repeating: "0", count: 18) + "1"),
