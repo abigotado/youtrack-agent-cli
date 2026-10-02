@@ -1,6 +1,6 @@
 import struct Foundation.Data
 
-private enum SuppliedRegistryBounds {
+enum SuppliedRegistryBounds {
     static let maximumRecords = 256
     static let maximumRecordBytes = 4_352
     static let maximumBodyBytes = 4_096
@@ -62,9 +62,9 @@ public struct SuppliedRegistryHistory: Equatable, Sendable {
         // Data has value semantics. The private snapshot never borrows mutable
         // caller storage and is retained unchanged for hashes and signatures.
         let snapshot = suppliedRecords.map { Data(Array($0)) }
-        var canonical: [SuppliedRegistryCanonicalRecord] = []
+        var canonical: [SuppliedRegistryCanonicalObject] = []
         do {
-            for bytes in snapshot { canonical.append(try SuppliedRegistryCanonicalRecord(bytes: bytes)) }
+            for bytes in snapshot { canonical.append(try SuppliedRegistryCanonicalObject(bytes: bytes)) }
         } catch { throw SuppliedRegistryHistoryError.encoding }
 
         var records: [SuppliedRegistryRecord] = []
@@ -72,6 +72,15 @@ public struct SuppliedRegistryHistory: Equatable, Sendable {
             for object in canonical { records.append(try SuppliedRegistryRecord(object: object)) }
         } catch { throw SuppliedRegistryHistoryError.grammar }
 
+        return try verifyParsedRecords(records)
+    }
+
+    // Package-internal replay accepts only globally parsed/validated records.
+    // It does not skip the supplied-only trust boundary or produce live authority.
+    static func verifyParsedRecords(
+        _ records: [SuppliedRegistryRecord],
+        validateBeforeFinalRecord: ((Self) throws -> Void)? = nil
+    ) throws -> Self {
         // No prefix result escapes if any signature, predecessor, or event fails.
         do {
             var introduced: [SuppliedRegistryTuple] = []
@@ -79,6 +88,10 @@ public struct SuppliedRegistryHistory: Equatable, Sendable {
             var tip = String(repeating: "0", count: 64)
             var descriptor: String?
             for (index, record) in records.enumerated() {
+                if index == records.count - 1, let validateBeforeFinalRecord {
+                    let prefixKeys = zip(introduced, statuses).map { SuppliedRegistryKey(tuple: $0.0, status: $0.1) }
+                    try validateBeforeFinalRecord(Self(revision: index, tip: tip, descriptor: descriptor, keys: prefixKeys))
+                }
                 guard record.revision == index + 1, record.previous == tip,
                       record.requested <= record.accepted, record.accepted <= record.committed,
                       record.committed - record.requested < 300,
@@ -147,7 +160,7 @@ public struct SuppliedRegistryHistory: Equatable, Sendable {
     }
 }
 
-private struct SuppliedRegistryCanonicalRecord {
+struct SuppliedRegistryCanonicalObject {
     static let fieldNames = [
         "schema_version", "record_type", "transition_kind", "registry_revision",
         "previous_record_sha256", "request_sha256", "proposal_sha256", "acceptance_sha256",
@@ -162,29 +175,34 @@ private struct SuppliedRegistryCanonicalRecord {
     let body: Data
     let fields: [String: JSONNode]
 
-    init(bytes: Data) throws {
+    init(
+        bytes: Data,
+        fieldNames: [String] = Self.fieldNames,
+        maximumBytes: Int = SuppliedRegistryBounds.maximumRecordBytes,
+        signatureFields: [String] = ["old_signature", "new_signature"]
+    ) throws {
         guard bytes.allSatisfy({ (0x20...0x7E).contains($0) && $0 != 0x5C })
         else { throw SuppliedRegistryHistoryError.encoding }
-        var parser = try BoundedJSONParser(data: bytes, maximumBytes: SuppliedRegistryBounds.maximumRecordBytes)
+        var parser = try BoundedJSONParser(data: bytes, maximumBytes: maximumBytes)
         let node = try parser.parse()
-        let fields = try node.exactObject(Self.fieldNames)
+        let fields = try node.exactObject(fieldNames)
         guard JSONCanonicalEncoder.encode(node) == bytes, case let .object(members) = node
         else { throw SuppliedRegistryHistoryError.encoding }
         for member in members {
             switch (member.name, member.value) {
             case (_, .null): break
-            case ("schema_version", .unsigned), ("registry_revision", .unsigned): break
-            case ("revokes_all_prior", .boolean): break
-            case (let name, .string) where name != "schema_version" && name != "registry_revision" && name != "revokes_all_prior": break
+            case ("schema_version", .unsigned), ("registry_revision", .unsigned), ("expected_registry_revision", .unsigned): break
+            case ("revokes_all_prior", .boolean), ("accepted", .boolean): break
+            case (let name, .string) where !["schema_version", "registry_revision", "expected_registry_revision", "revokes_all_prior", "accepted"].contains(name): break
             default: throw SuppliedRegistryHistoryError.encoding
             }
         }
         self.bytes = bytes
         // exactObject pins the full order; keep the signed-body extraction's
         // signature-suffix assumption explicit at the point of use.
-        guard members.suffix(2).map(\.name) == ["old_signature", "new_signature"]
+        guard members.suffix(signatureFields.count).map(\.name) == signatureFields
         else { throw SuppliedRegistryHistoryError.encoding }
-        body = JSONCanonicalEncoder.encode(.object(Array(members.dropLast(2))))
+        body = JSONCanonicalEncoder.encode(.object(Array(members.dropLast(signatureFields.count))))
         self.fields = fields
     }
 
@@ -205,7 +223,7 @@ private struct SuppliedRegistryCanonicalRecord {
     }
 }
 
-private struct SuppliedRegistryRecord {
+struct SuppliedRegistryRecord {
     let bytes: Data
     let body: Data
     let kind: String
@@ -225,7 +243,7 @@ private struct SuppliedRegistryRecord {
     let oldSignature: P256Signature?
     let newSignature: P256Signature?
 
-    init(object: SuppliedRegistryCanonicalRecord) throws {
+    init(object: SuppliedRegistryCanonicalObject) throws {
         guard object.body.count <= SuppliedRegistryBounds.maximumBodyBytes, object.fields["schema_version"]?.uint64 == 1,
               try object.string("record_type") == "approval_registry_transition",
               let revision = object.fields["registry_revision"]?.uint64,
@@ -276,7 +294,7 @@ private struct SuppliedRegistryRecord {
     }
 }
 
-fileprivate struct SuppliedRegistryTuple: Equatable {
+struct SuppliedRegistryTuple: Equatable {
     private static let spkiBase64URLByteCount = (P256PublicKeyCodec.spkiByteCount * 8 + 5) / 6
 
     let generation: String
@@ -286,7 +304,7 @@ fileprivate struct SuppliedRegistryTuple: Equatable {
     let fingerprintSHA256: String
     private let x963: Data
 
-    static func decodeTuple(object: SuppliedRegistryCanonicalRecord, prefix: String) throws -> Self? {
+    static func decodeTuple(object: SuppliedRegistryCanonicalObject, prefix: String) throws -> Self? {
         let names = ["generation", "key_id", "key_tag", "spki", "fingerprint_sha256"]
         let values = try names.map { try object.optionalString(prefix + "_" + $0) }
         if values.allSatisfy({ $0 == nil }) { return nil }
@@ -319,7 +337,7 @@ fileprivate struct SuppliedRegistryTuple: Equatable {
 
 /// Registry-only four-digit proleptic Gregorian whole-second UTC grammar.
 /// Year zero is valid here; receipt calendars intentionally have another range.
-private enum SuppliedRegistryCalendar {
+enum SuppliedRegistryCalendar {
     static func seconds(_ value: String) -> Int64? {
         let bytes = Array(value.utf8)
         guard bytes.count == 20, bytes[4] == 45, bytes[7] == 45, bytes[10] == 84,
