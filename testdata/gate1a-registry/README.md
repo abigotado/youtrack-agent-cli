@@ -1,7 +1,7 @@
 # Registry transcript core conformance corpus
 
-**Partial prerequisite evidence only. Production registry implementation remains
-blocked.** These test-only vectors do not activate approval, writes, a native
+**Partial prerequisite evidence only. Protected registry integration remains
+blocked.** These synthetic vectors do not activate approval, writes, a native
 helper, or a release. The [registry protocol](../../docs/gate1a-registry-protocol.md)
 is the normative source; this fixture container is not a new authority object.
 
@@ -30,6 +30,13 @@ Three evidence levels must not be confused:
    authentication, Secure Enclave use, coordinator ownership or quiescence.
    A signed synthetic missing-item declaration is not a native lookup result.
 
+The pure Go and Swift supplied-history verifiers now consume stored-record
+fixtures at their production-code boundary, without replacing the independent
+test-only transcript oracles. They check only a supplied genesis-to-tip prefix:
+even a valid nonempty prefix cannot establish the complete or current protected
+registry. The result is not an authority binding or a signing/send capability.
+See the [offline verification contract](../../docs/gate1a-registry-protocol.md#offline-verification-of-a-supplied-history).
+
 All times are synthetic historical transcript times. Passing these tests cannot
 make an expired transcript live or grant a new confirmation/send capability.
 
@@ -47,7 +54,9 @@ From the repository root:
 go run ./testdata/gate1a-registry/generate.go
 go run ./testdata/gate1a-registry/generate.go -check
 go test ./internal/approval -run 'TestSharedRegistry'
+go test ./internal/approval -run 'TestSuppliedRegistry'
 swift test --package-path native/macos/ApprovalProtocol --filter 'sharedRegistry'
+swift test --package-path native/macos/ApprovalProtocol --filter 'suppliedRegistry'
 ```
 
 Go and Swift independently validate the protocol schemas and recompute exact
@@ -94,6 +103,7 @@ statuses as success or satisfy the coordinator-result classification requirement
 | Surface | Status |
 | --- | --- |
 | Core transcript bytes, signatures, hashes, history and state | This corpus; synthetic data only |
+| Offline supplied stored-history verification | Go and Swift production-code boundary tests; no protected completeness, native provenance or authority |
 | OSStatus scalar grammar | Fixture consistency only; no production parser coverage or native status classification |
 | Registry intent canonical bytes/hash and supplied intent/request binding | [Supplemental fixture consistency](../gate1a-registry-intent/README.md); no production parser coverage |
 | Registry-commit active canonical bytes/hash and supplied active/intent binding | [Supplemental fixture consistency](../gate1a-registry-active/README.md); no acquisition or ownership evidence |
@@ -106,10 +116,13 @@ statuses as success or satisfy the coordinator-result classification requirement
 | Native anti-replay/capacity schedules and signed execution evidence | Pending; [conformance requirements](../../docs/gate1a-registry-protocol.md#cross-language-conformance-evidence) |
 
 This directory does **not** satisfy the complete conformance prerequisite.
-Production registry codecs/replay, closed authority-evidence verification,
-journal v2/durable confirmation, protected native integration, guarded-write
-Gates and distribution remain separate work. `approval.Unsupported`, journal
-v1, production package dependencies and the CLI contract are unchanged.
+Protected registry storage/replay integration, closed authority-evidence
+verification, durable journal confirmation, protected native integration,
+guarded-write Gates and distribution remain separate work. Pure supplied-history
+verification is permitted as a prerequisite only; it is not wired into any
+command, journal transition or authority consumer. `approval.Unsupported`,
+journal v1/v2 behavior, production package dependencies and the CLI contract
+are unchanged.
 
 ## Native signature compatibility regression
 

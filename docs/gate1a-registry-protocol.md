@@ -1,8 +1,10 @@
 # Gate 1A approval-registry protocol
 
-Status: normative design for Gate 1A; not implemented and not production
-enabled. This document freezes the helper-private approval-key ledger and the
-four authority ceremonies and quarantine-only coordinator recovery.
+Status: normative design for Gate 1A; pure offline supplied-history verification
+is implemented in Go and Swift, but protected registry integration is not
+implemented or production enabled. This document freezes the helper-private
+approval-key ledger and the four authority ceremonies and quarantine-only
+coordinator recovery.
 It does not make `approval.Unsupported` usable.
 
 The [trust-root ADR](gate1a-trust-root.md) owns the Keychain access group,
@@ -72,7 +74,7 @@ The common grammar is:
 | digest | 64 lowercase hexadecimal characters |
 | empty predecessor | 64 ASCII `0` characters |
 | challenge | unpadded RFC 4648 base64url of exactly 32 bytes; 43 characters; decode/re-encode equality required |
-| time | UTC RFC 3339 whole seconds, `YYYY-MM-DDTHH:MM:SSZ` |
+| time | UTC RFC 3339 whole seconds, `YYYY-MM-DDTHH:MM:SSZ`, four-digit proleptic Gregorian year `0000..9999` |
 | key generation | `YTAG-` followed by a 20-digit positive revision; it equals the revision that introduced the key |
 | key ID | 32 lowercase hexadecimal characters encoding 128 random bits |
 | key tag | `io.github.abigotado.youtrack-agent.approval.signing.v1/` followed by the key ID |
@@ -606,6 +608,62 @@ check. Any resulting receipt still confers no send capability and must pass
 fresh serialized apply validation; changed registry/context cancels it. A
 helper that has observed quarantine performs no confirmation signature or
 journal write. No alternate confirmation endpoint bypasses these checks.
+
+### Offline verification of a supplied history
+
+`approval.VerifySuppliedRegistryHistory(records)` in Go and
+`SuppliedRegistryHistory.verify(suppliedRecords:)` in Swift verify only the
+caller-supplied complete stored records. They are pure prerequisite code: no
+network, Keychain, clock, journal, signing, user interface or authority lookup is
+performed. There is no cached-state seed, continuation, append or signing API.
+
+Verification has four global phases: all raw count and per-record bounds;
+canonical decoding and exact re-encoding of every record; primitive grammar,
+tuple, SPKI, fingerprint and strict low-S DER checks for every record; then
+predecessor hashing, ECDSA signatures and genesis-to-tip state replay. A later
+encoding or grammar failure therefore precedes an earlier signature failure.
+Go takes bounded owned copies after the complete raw preflight and uses only
+those copies afterwards; callers must not mutate input buffers during the call.
+Swift retains only value-owned data. Invalid input returns no partial history.
+Errors identify only a static validation phase, never decoder diagnostics or
+caller-controlled strings.
+
+The count cap of 256 and per-record cap of 4,352 jointly enforce the normative
+aggregate bound of 1,114,112 bytes before copying or parsing. That aggregate is
+a derived invariant, not an independently tighter limit.
+
+Input order is significant and is never sorted. Every supplied record must be
+present from revision 1 to the supplied tip, with exact plain-byte predecessor
+hashes and no reused key-tuple component. The result exposes only the supplied
+tip revision, its plain SHA-256, its descriptor digest claim and the derived key
+tuples/statuses in introduction order. Returned Go key slices are copies.
+Historical descriptor claims may differ between ceremonies.
+
+An empty input is an internally consistent empty supplied history: revision 0,
+the zero predecessor digest, no descriptor and no keys. Every proper valid
+prefix also succeeds. **Neither an empty nor a nonempty result establishes
+completeness, protected-registry absence or the current protected tip.** An
+attacker can supply a self-signed genesis or an older valid prefix. They can
+also copy a valid prefix and append a self-signed recovery record introducing
+their own key: recovery has no old-key signature, and the supplied evidence
+digest does not prove eligibility. Even a supplied tip derived from a genuine
+prefix therefore does not establish authorized key continuity. Results
+must not seed `ExpectedReceiptBinding`, signing, confirmation, registry commit
+or a trusted authority cache. Future protected enumeration, artifact/root
+authorization and native integration must independently establish those facts.
+
+Stored records contain only transcript digests, not the original request,
+proposal, acceptance, recovery evidence or expiry. Verification checks the
+recorded order `requested_at <= accepted_at <= committed_at` and the necessary
+whole-second bound `committed_at - requested_at < 300`: the actual request
+expires at most 300 seconds after request and commit must precede expiry. This
+does not check chronology between different records, reconstruct exact expiry,
+establish freshness, check nonce entropy or
+nonce/transcript-digest claim uniqueness, or validate the missing transcript
+objects. This is not full ceremony validation. Registry calendar grammar retains
+year zero, unlike the receipt-specific timestamp grammar. A signed recovery
+digest is a declaration, not evidence of native key absence or recovery
+eligibility.
 
 ## Helper-owned apply authority coordinator
 
@@ -1194,12 +1252,18 @@ key-creating transition.
 
 ## Cross-language conformance evidence
 
-Implementation is blocked until one shared fixture directory contains Go- and
-Swift-consumed vectors for each transition. Each positive vector includes
-request, signed proposal, acceptance, final body, complete record, every
+Protected registry storage, native ceremonies, coordinator integration, durable
+confirmation and runtime authority remain blocked until one shared fixture
+directory contains Go- and Swift-consumed vectors for each transition. Each
+positive vector includes request, signed proposal, acceptance, final body, complete record, every
 domain-prefixed signing input, every digest, predecessor chain, DER SPKIs, and
 strict low-S signatures. At least one vector must form a multi-event chain
 `enroll -> rotate -> revoke -> recover` and derive the exact final state.
+
+The pure offline supplied-history verifier above is a prerequisite exception
+to this implementation block, not satisfaction of it. It does not enable
+confirmation, commit, apply or a write-capable release.
+
 Another positive vector covers recovery from an active valid ledger after the
 exact `errSecItemNotFound:-25300` result. Both Go and Swift must decode and
 byte-for-byte re-encode status codec vectors for `-2147483648`, `-25300`, `-1`,
