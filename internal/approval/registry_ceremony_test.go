@@ -318,13 +318,11 @@ func ceremonyTestRebuild(t *testing.T, c SuppliedRegistryCeremony, target, fresh
 		}
 	}
 	request := ceremonyTestEncode(q, ceremonyTestRequestFields)
-	challenge := []byte{}
 	var text string
 	if err := json.Unmarshal(q["challenge"], &text); err != nil {
 		t.Fatal(err)
 	}
-	var err error
-	challenge, err = base64.RawURLEncoding.DecodeString(text)
+	challenge, err := base64.RawURLEncoding.DecodeString(text)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +340,6 @@ func ceremonyTestRebuild(t *testing.T, c SuppliedRegistryCeremony, target, fresh
 			p[prefix+field] = r[prefix+field]
 		}
 	}
-	unsigned := ceremonyTestEncode(p, ceremonyTestProposalFields)
 	signer := fresh
 	role := "new"
 	if string(q["transition_kind"]) == `"revoke"` {
@@ -350,7 +347,7 @@ func ceremonyTestRebuild(t *testing.T, c SuppliedRegistryCeremony, target, fresh
 		role = "old"
 	}
 	p["proposal_signer_role"] = historyTestString(role)
-	unsigned = ceremonyTestEncode(p, ceremonyTestProposalFields)
+	unsigned := ceremonyTestEncode(p, ceremonyTestProposalFields)
 	p["proposal_signature"] = ceremonyTestSignature(t, append([]byte("YTA-REGISTRY-PROPOSAL-V1\x00"), unsigned...), signer)
 	proposal := ceremonyTestEncode(p, ceremonyTestProposalFields+" proposal_signature")
 	for _, o := range []map[string]json.RawMessage{a, r} {
@@ -364,6 +361,53 @@ func ceremonyTestRebuild(t *testing.T, c SuppliedRegistryCeremony, target, fresh
 	}
 	record := historyTestSign(t, r, oldSigner, fresh)
 	return SuppliedRegistryCeremony{Request: request, RecoveryEvidence: c.RecoveryEvidence, UnsignedProposal: unsigned, SignedProposal: proposal, Acceptance: acceptance, FinalBody: historyTestEncode(r, true), Record: record}
+}
+
+func TestSuppliedRegistryCeremonyUnsignedProjectionEquality(t *testing.T) {
+	positive := registryPositiveMap(t, readRegistryCorpus(t))["enroll1"].registryTranscript
+	candidate := ceremonyTestInput(positive)
+	key, tuple := historyTestKey(t, 1)
+	unsigned := historyTestObject(t, candidate.UnsignedProposal)
+	unsigned["proposed_at"] = historyTestString("2026-09-01T12:00:02Z")
+	candidate.UnsignedProposal = ceremonyTestEncode(unsigned, ceremonyTestProposalFields)
+	proposal := historyTestObject(t, candidate.SignedProposal)
+	proposal["proposal_signature"] = ceremonyTestSignature(t, append([]byte("YTA-REGISTRY-PROPOSAL-V1\x00"), candidate.UnsignedProposal...), key)
+	candidate.SignedProposal = ceremonyTestEncode(proposal, ceremonyTestProposalFields+" proposal_signature")
+	var signature string
+	if err := json.Unmarshal(proposal["proposal_signature"], &signature); err != nil {
+		t.Fatal(err)
+	}
+	if !registryVerifySignature(tuple.SPKI, signature, "YTA-REGISTRY-PROPOSAL-V1\x00", string(candidate.UnsignedProposal)) {
+		t.Fatal("projection control's proposal signature is not valid over supplied unsigned bytes")
+	}
+	if registryVerifySignature(tuple.SPKI, signature, "YTA-REGISTRY-PROPOSAL-V1\x00", positive.UnsignedProposal) {
+		t.Fatal("projection control still signs original projection")
+	}
+	acceptance := historyTestObject(t, candidate.Acceptance)
+	record := historyTestObject(t, candidate.Record)
+	proposalDigest := historyTestString(historyTestHash(append([]byte("YTA-REGISTRY-PROPOSAL-DIGEST-V1\x00"), candidate.SignedProposal...)))
+	acceptance["proposal_sha256"], record["proposal_sha256"] = proposalDigest, proposalDigest
+	candidate.Acceptance = ceremonyTestEncode(acceptance, ceremonyTestAcceptanceFields)
+	record["acceptance_sha256"] = historyTestString(historyTestHash(append([]byte("YTA-REGISTRY-ACCEPTANCE-V1\x00"), candidate.Acceptance...)))
+	candidate.Record = historyTestSign(t, record, nil, key)
+	candidate.FinalBody = historyTestEncode(record, true)
+	// Repair only downstream digest bindings: rebuilding the whole ceremony
+	// would erase the deliberately different redundant unsigned projection.
+	ceremonyTestFailure(t, nil, candidate, "verification")
+}
+
+func TestSuppliedRegistryCeremonyFinalBodyProjectionEquality(t *testing.T) {
+	positive := registryPositiveMap(t, readRegistryCorpus(t))["enroll1"].registryTranscript
+	candidate := ceremonyTestInput(positive)
+	if _, err := VerifySuppliedRegistryCeremony(nil, candidate); err != nil {
+		t.Fatal(err)
+	}
+	candidate.FinalBody = bytes.Replace(candidate.FinalBody, []byte(`"revokes_all_prior":false`), []byte(`"revokes_all_prior":true`), 1)
+	if bytes.Equal(candidate.FinalBody, []byte(positive.FinalBody)) {
+		t.Fatal("projection mutation not exercised")
+	}
+	// The complete signed record and all digest bindings stay unchanged.
+	ceremonyTestFailure(t, nil, candidate, "verification")
 }
 
 func TestSuppliedRegistryCeremonyMaximalCandidateAndDescriptorUpgrade(t *testing.T) {

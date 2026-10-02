@@ -486,3 +486,59 @@ private func ceremonyRebuild(
     }
   }
 }
+
+@Test func suppliedRegistryCeremonyUnsignedProjectionEquality() throws {
+  let corpus = try registryCorpus()
+  let positive = try #require(corpus.positives.first { $0.id == "enroll1" })
+  let original = ceremonyInput(positive.transcript)
+  let key = try ceremonyKey(1)
+  var unsigned = try ceremonyObject(original.unsignedProposal)
+  unsigned["proposed_at"] = ceremonyQuote("2026-09-01T12:00:02Z")
+  let suppliedUnsigned = try ceremonyEncode(unsigned, ceremonyProposalFields)
+  var proposal = try ceremonyObject(original.signedProposal)
+  proposal["proposal_signature"] = try ceremonySign(
+    Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + suppliedUnsigned, key)
+  let signedProposal = try ceremonyEncode(proposal, ceremonyProposalFields + " proposal_signature")
+  let rawSignature = try #require(proposal["proposal_signature"]).replacingOccurrences(
+    of: "\"", with: "")
+  let signature = try P256.Signing.ECDSASignature(
+    derRepresentation: P256Signature(derBase64URL: rawSignature).der)
+  #expect(
+    key.publicKey.isValidSignature(
+      signature, for: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + suppliedUnsigned))
+  #expect(
+    !key.publicKey.isValidSignature(
+      signature, for: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + original.unsignedProposal))
+  var acceptance = try ceremonyObject(original.acceptance)
+  var record = try ceremonyObject(original.record)
+  let digest = ceremonyQuote(
+    ceremonyHash(Data("YTA-REGISTRY-PROPOSAL-DIGEST-V1\0".utf8) + signedProposal))
+  acceptance["proposal_sha256"] = digest
+  record["proposal_sha256"] = digest
+  let accepted = try ceremonyEncode(acceptance, ceremonyAcceptanceFields)
+  record["acceptance_sha256"] = ceremonyQuote(
+    ceremonyHash(Data("YTA-REGISTRY-ACCEPTANCE-V1\0".utf8) + accepted))
+  let candidate = SuppliedRegistryCeremony(
+    request: original.request, recoveryEvidence: nil, unsignedProposal: suppliedUnsigned,
+    signedProposal: signedProposal, acceptance: accepted,
+    finalBody: try ceremonyEncode(
+      record, ceremonyRecordFields.split(separator: " ").prefix(28).joined(separator: " ")),
+    record: try ceremonyRecord(record, nil, key))
+  // Do not use ceremonyRebuild: it would resynchronize the projection under test.
+  ceremonyFailure([], candidate, .verification)
+}
+
+@Test func suppliedRegistryCeremonyFinalBodyProjectionEquality() throws {
+  let corpus = try registryCorpus()
+  let original = ceremonyInput(
+    try #require(corpus.positives.first { $0.id == "enroll1" }).transcript)
+  _ = try SuppliedRegistryCeremony.verify(prefixRecords: [], ceremony: original)
+  let changedBody = try ceremonyReplace(
+    original.finalBody, "\"revokes_all_prior\":false", "\"revokes_all_prior\":true")
+  let candidate = SuppliedRegistryCeremony(
+    request: original.request, recoveryEvidence: nil, unsignedProposal: original.unsignedProposal,
+    signedProposal: original.signedProposal, acceptance: original.acceptance,
+    finalBody: changedBody, record: original.record)
+  // Preserve the original full record, signatures, and digest bindings.
+  ceremonyFailure([], candidate, .verification)
+}
