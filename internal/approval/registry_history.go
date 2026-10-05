@@ -152,10 +152,7 @@ func VerifySuppliedRegistryHistory(records [][]byte) (SuppliedRegistryHistory, e
 		if !suppliedRegistryReplay(&history, &parsed[i], i+1) {
 			return SuppliedRegistryHistory{}, suppliedRegistryError("replay")
 		}
-		digest := sha256.Sum256(owned[i])
-		history.tip = hex.EncodeToString(digest[:])
-		history.revision = i + 1
-		history.descriptor = *parsed[i].wire.ArtifactDescriptorSHA256
+		suppliedRegistryAdvance(&history, owned[i], &parsed[i])
 	}
 	return history, nil
 }
@@ -169,6 +166,10 @@ func suppliedRegistryError(stage string) error {
 }
 
 func suppliedRegistryDecode(raw []byte, wire *suppliedRegistryWire) bool {
+	return suppliedRegistryCanonicalDecode(raw, wire)
+}
+
+func suppliedRegistryCanonicalDecode[T suppliedRegistryCanonicalWire](raw []byte, wire *T) bool {
 	for _, value := range raw {
 		if value < 0x20 || value > 0x7e || value == '\\' {
 			return false
@@ -183,6 +184,13 @@ func suppliedRegistryDecode(raw []byte, wire *suppliedRegistryWire) bool {
 		return false
 	}
 	return bytes.Equal(raw, canonical)
+}
+
+func suppliedRegistryAdvance(history *SuppliedRegistryHistory, raw []byte, record *suppliedRegistryRecord) {
+	digest := sha256.Sum256(raw)
+	history.tip = hex.EncodeToString(digest[:])
+	history.revision = int(*record.wire.RegistryRevision)
+	history.descriptor = *record.wire.ArtifactDescriptorSHA256
 }
 
 func suppliedRegistryPrimitives(record *suppliedRegistryRecord) bool {
