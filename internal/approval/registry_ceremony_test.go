@@ -22,6 +22,7 @@ import (
 const ceremonyTestRequestFields = "schema_version message_type transition_kind recovery_mode challenge expected_registry_revision previous_record_sha256 artifact_descriptor_sha256 target_generation new_generation requested_at expires_at"
 const ceremonyTestProposalFields = "schema_version message_type transition_kind request_sha256 challenge_sha256 registry_revision previous_record_sha256 artifact_descriptor_sha256 recovery_evidence_sha256 target_generation target_key_id target_key_tag target_spki target_fingerprint_sha256 new_generation new_key_id new_key_tag new_spki new_fingerprint_sha256 proposed_at expires_at proposal_signer_role"
 const ceremonyTestAcceptanceFields = "schema_version message_type transition_kind request_sha256 proposal_sha256 challenge_sha256 registry_revision previous_record_sha256 artifact_descriptor_sha256 recovery_evidence_sha256 target_generation new_generation accepted_at expires_at accepted"
+const ceremonyTestEvidenceFields = "schema_version message_type request_sha256 challenge_sha256 registry_revision previous_record_sha256 artifact_descriptor_sha256 target_generation target_key_tag eligibility key_lookup_result continuity_probe_result probed_at"
 
 func ceremonyTestInput(tr registryTranscript) SuppliedRegistryCeremony {
 	c := SuppliedRegistryCeremony{Request: []byte(tr.Request), UnsignedProposal: []byte(tr.UnsignedProposal), SignedProposal: []byte(tr.Proposal), Acceptance: []byte(tr.Acceptance), FinalBody: []byte(tr.FinalBody), Record: []byte(tr.Record)}
@@ -505,6 +506,229 @@ func TestSuppliedRegistryCeremonySignedCalendarAndExpiry(t *testing.T) {
 			}
 			if result.SuppliedRevision() != 1 || result.SuppliedTipSHA256() != historyTestHash(candidate.Record) {
 				t.Fatal("calendar result differs")
+			}
+		})
+	}
+}
+
+type ceremonyTestBindingMutation struct {
+	name, fixture, object, field string
+	value                        json.RawMessage
+}
+
+// Each mutation runs after its upstream hashes have been repaired. Literal
+// bindings are never synchronized: doing so would erase the mismatch under test.
+func ceremonyTestStagedBinding(t *testing.T, original SuppliedRegistryCeremony, mutation ceremonyTestBindingMutation, target, fresh *ecdsa.PrivateKey) SuppliedRegistryCeremony {
+	t.Helper()
+	q, p := historyTestObject(t, original.Request), historyTestObject(t, original.SignedProposal)
+	a, r := historyTestObject(t, original.Acceptance), historyTestObject(t, original.Record)
+	change := func(stage string, object map[string]json.RawMessage) {
+		if mutation.object == stage {
+			if bytes.Equal(object[mutation.field], mutation.value) {
+				t.Fatal("binding mutation did not change its field")
+			}
+			object[mutation.field] = mutation.value
+		}
+	}
+	change("request", q)
+	request := ceremonyTestEncode(q, ceremonyTestRequestFields)
+	requestDigest := historyTestString(historyTestHash(append([]byte("YTA-REGISTRY-REQUEST-V1\x00"), request...)))
+	for _, object := range []map[string]json.RawMessage{p, a, r} {
+		object["request_sha256"] = requestDigest
+	}
+	var evidence []byte
+	if original.RecoveryEvidence != nil {
+		e := historyTestObject(t, original.RecoveryEvidence)
+		e["request_sha256"] = requestDigest
+		change("evidence", e)
+		evidence = ceremonyTestEncode(e, ceremonyTestEvidenceFields)
+		digest := historyTestString(historyTestHash(append([]byte("YTA-REGISTRY-RECOVERY-EVIDENCE-V1\x00"), evidence...)))
+		for _, object := range []map[string]json.RawMessage{p, a, r} {
+			object["recovery_evidence_sha256"] = digest
+		}
+	}
+	change("proposal", p)
+	unsigned := ceremonyTestEncode(p, ceremonyTestProposalFields)
+	signer := fresh
+	if string(p["proposal_signer_role"]) == `"old"` {
+		signer = target
+	}
+	p["proposal_signature"] = ceremonyTestSignature(t, append([]byte("YTA-REGISTRY-PROPOSAL-V1\x00"), unsigned...), signer)
+	proposal := ceremonyTestEncode(p, ceremonyTestProposalFields+" proposal_signature")
+	proposalDigest := historyTestString(historyTestHash(append([]byte("YTA-REGISTRY-PROPOSAL-DIGEST-V1\x00"), proposal...)))
+	a["proposal_sha256"], r["proposal_sha256"] = proposalDigest, proposalDigest
+	change("acceptance", a)
+	acceptance := ceremonyTestEncode(a, ceremonyTestAcceptanceFields)
+	r["acceptance_sha256"] = historyTestString(historyTestHash(append([]byte("YTA-REGISTRY-ACCEPTANCE-V1\x00"), acceptance...)))
+	change("body", r)
+	oldSigner := target
+	if string(q["transition_kind"]) == `"enroll"` || string(q["transition_kind"]) == `"recover"` {
+		oldSigner = nil
+	}
+	record := historyTestSign(t, r, oldSigner, fresh)
+	candidate := SuppliedRegistryCeremony{Request: request, RecoveryEvidence: evidence, UnsignedProposal: unsigned, SignedProposal: proposal, Acceptance: acceptance, FinalBody: historyTestEncode(r, true), Record: record}
+	if mutation.object != "" {
+		objects := map[string][]byte{"request": request, "evidence": evidence, "proposal": proposal, "acceptance": acceptance, "body": candidate.FinalBody}
+		if !bytes.Equal(historyTestObject(t, objects[mutation.object])[mutation.field], mutation.value) {
+			t.Fatal("downstream repair erased the binding mutation")
+		}
+	}
+	// Verify the complete transmitted signatures with standard crypto, separately
+	// from the verifier under test, including old-role revocation proposals.
+	for _, signature := range []struct {
+		value  json.RawMessage
+		body   []byte
+		domain string
+		key    *ecdsa.PrivateKey
+	}{
+		{p["proposal_signature"], unsigned, "YTA-REGISTRY-PROPOSAL-V1\x00", signer},
+		{r["old_signature"], candidate.FinalBody, "YTA-REGISTRY-RECORD-OLD-V1\x00", oldSigner},
+		{r["new_signature"], candidate.FinalBody, "YTA-REGISTRY-RECORD-NEW-V1\x00", fresh},
+	} {
+		if signature.key == nil {
+			if string(signature.value) != "null" {
+				t.Fatal("unexpected signature in binding control")
+			}
+			continue
+		}
+		var encoded string
+		if err := json.Unmarshal(signature.value, &encoded); err != nil {
+			t.Fatal(err)
+		}
+		der, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(append([]byte(signature.domain), signature.body...))
+		if !ecdsa.VerifyASN1(&signature.key.PublicKey, digest[:], der) {
+			t.Fatal("binding control has an invalid transmitted signature")
+		}
+	}
+	return candidate
+}
+
+func TestSuppliedRegistryCeremonySignedBindings(t *testing.T) {
+	positives := registryPositiveMap(t, readRegistryCorpus(t))
+	fixtures := []struct {
+		name          string
+		target, fresh int
+		generations   []int
+		statuses      []string
+	}{
+		{"enroll1", 0, 1, []int{1}, []string{"active"}},
+		{"rotate2", 1, 2, []int{1, 2}, []string{"retained", "active"}},
+		{"revoke3", 2, 0, []int{1, 2}, []string{"retained", "revoked"}},
+		{"recover-active3", 2, 3, []int{1, 2, 3}, []string{"revoked", "revoked", "active"}},
+		{"recover-disabled4", 0, 4, []int{1, 2, 4}, []string{"revoked", "revoked", "active"}},
+	}
+	build := func(t *testing.T, name string, mutation ceremonyTestBindingMutation) ([][]byte, SuppliedRegistryCeremony) {
+		t.Helper()
+		for _, fixture := range fixtures {
+			if fixture.name != name {
+				continue
+			}
+			var target, fresh *ecdsa.PrivateKey
+			if fixture.target != 0 {
+				target, _ = historyTestKey(t, fixture.target)
+			}
+			if fixture.fresh != 0 {
+				fresh, _ = historyTestKey(t, fixture.fresh)
+			}
+			positive := positives[name]
+			return historyTestRecords(t, positive.Prefix...), ceremonyTestStagedBinding(t, ceremonyTestInput(positive.registryTranscript), mutation, target, fresh)
+		}
+		t.Fatalf("unknown binding fixture %s", name)
+		return nil, SuppliedRegistryCeremony{}
+	}
+	for _, fixture := range fixtures {
+		t.Run("control-"+fixture.name, func(t *testing.T) {
+			prefix, candidate := build(t, fixture.name, ceremonyTestBindingMutation{})
+			result, err := VerifySuppliedRegistryCeremony(prefix, candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var expected []SuppliedRegistryKey
+			for i, generation := range fixture.generations {
+				_, key := historyTestKey(t, generation)
+				key.Status = fixture.statuses[i]
+				expected = append(expected, key)
+			}
+			if result.SuppliedRevision() != len(prefix)+1 || result.SuppliedTipSHA256() != historyTestHash(candidate.Record) || !reflect.DeepEqual(result.Keys(), expected) {
+				t.Fatal("rebuilt binding control changed the expected history")
+			}
+		})
+	}
+	wrongDigest := historyTestString(strings.Repeat("b", 64))
+	_, other := historyTestKey(t, 1)
+	generation, tag := historyTestString(other.Generation), historyTestString(other.KeyTag)
+	for _, mutation := range []ceremonyTestBindingMutation{
+		{"recovery-request-digest", "recover-active3", "evidence", "request_sha256", wrongDigest},
+		{"recovery-challenge-digest", "recover-active3", "evidence", "challenge_sha256", wrongDigest},
+		{"recovery-revision", "recover-active3", "evidence", "registry_revision", json.RawMessage("1")},
+		{"recovery-predecessor", "recover-active3", "evidence", "previous_record_sha256", wrongDigest},
+		{"recovery-descriptor", "recover-active3", "evidence", "artifact_descriptor_sha256", wrongDigest},
+		{"recovery-active-target-generation", "recover-active3", "evidence", "target_generation", generation},
+		{"recovery-active-target-tag", "recover-active3", "evidence", "target_key_tag", tag},
+		{"recovery-active-eligibility", "recover-active3", "evidence", "eligibility", historyTestString("registry_disabled")},
+		{"recovery-active-lookup", "recover-active3", "evidence", "key_lookup_result", historyTestString("not_attempted:registry_disabled")},
+		{"recovery-active-continuity", "recover-active3", "evidence", "continuity_probe_result", historyTestString("not_attempted:no_active_generation")},
+		{"recovery-disabled-target-generation", "recover-disabled4", "evidence", "target_generation", generation},
+		{"recovery-disabled-target-tag", "recover-disabled4", "evidence", "target_key_tag", tag},
+		{"recovery-disabled-eligibility", "recover-disabled4", "evidence", "eligibility", historyTestString("active_key_item_not_found")},
+		{"recovery-disabled-lookup", "recover-disabled4", "evidence", "key_lookup_result", historyTestString("errSecItemNotFound:-25300")},
+		{"recovery-disabled-continuity", "recover-disabled4", "evidence", "continuity_probe_result", historyTestString("not_attempted:no_key")},
+		{"recovery-probe-before-request", "recover-active3", "evidence", "probed_at", historyTestString("2026-09-01T11:59:59Z")},
+		{"recovery-probe-after-proposal", "recover-active3", "evidence", "probed_at", historyTestString("2026-09-01T12:00:02Z")},
+		{"acceptance-kind", "rotate2", "acceptance", "transition_kind", historyTestString("enroll")},
+		{"acceptance-request-digest", "rotate2", "acceptance", "request_sha256", wrongDigest},
+		{"acceptance-challenge", "rotate2", "acceptance", "challenge_sha256", wrongDigest},
+		{"acceptance-revision", "rotate2", "acceptance", "registry_revision", json.RawMessage("1")},
+		{"acceptance-predecessor", "rotate2", "acceptance", "previous_record_sha256", wrongDigest},
+		{"acceptance-target-generation", "rotate2", "acceptance", "target_generation", json.RawMessage("null")},
+		{"acceptance-new-generation", "rotate2", "acceptance", "new_generation", json.RawMessage("null")},
+		{"proposal-kind", "rotate2", "proposal", "transition_kind", historyTestString("enroll")},
+		{"proposal-challenge", "rotate2", "proposal", "challenge_sha256", wrongDigest},
+		// Revocation has no fresh tuple whose grammar already fixes the revision.
+		{"proposal-revision", "revoke3", "proposal", "registry_revision", json.RawMessage("1")},
+		{"body-challenge", "rotate2", "body", "challenge_sha256", wrongDigest},
+		{"proposal-recovery-digest", "recover-active3", "proposal", "recovery_evidence_sha256", wrongDigest},
+		{"acceptance-recovery-digest", "recover-active3", "acceptance", "recovery_evidence_sha256", wrongDigest},
+		{"body-recovery-digest", "recover-active3", "body", "recovery_evidence_sha256", wrongDigest},
+		{"acceptance-proposal-digest", "rotate2", "acceptance", "proposal_sha256", wrongDigest},
+		{"body-proposal-digest", "rotate2", "body", "proposal_sha256", wrongDigest},
+		{"request-revision", "rotate2", "request", "expected_registry_revision", json.RawMessage("0")},
+		{"request-predecessor", "rotate2", "request", "previous_record_sha256", wrongDigest},
+		{"proposal-expiry", "rotate2", "proposal", "expires_at", historyTestString("2026-09-01T12:04:59Z")},
+		{"acceptance-expiry", "rotate2", "acceptance", "expires_at", historyTestString("2026-09-01T12:04:59Z")},
+		{"body-requested-at", "rotate2", "body", "requested_at", historyTestString("2026-09-01T12:00:01Z")},
+		{"body-accepted-at", "rotate2", "body", "accepted_at", historyTestString("2026-09-01T12:00:03Z")},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			prefix, candidate := build(t, mutation.fixture, mutation)
+			if mutation.object == "request" {
+				if _, err := VerifySuppliedRegistryHistory(append(prefix, candidate.Record)); err != nil {
+					t.Fatalf("request-only mismatch changed the valid candidate history: %v", err)
+				}
+			}
+			ceremonyTestFailure(t, prefix, candidate, "verification")
+		})
+	}
+	for _, endpoint := range []struct{ name, time string }{
+		{"recovery-probe-at-request", "2026-09-01T12:00:00Z"},
+		{"recovery-probe-at-proposal", "2026-09-01T12:00:01Z"},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			mutation := ceremonyTestBindingMutation{object: "evidence", field: "probed_at", value: historyTestString(endpoint.time)}
+			// The proposal endpoint equals the pinned evidence time already.
+			if endpoint.name == "recovery-probe-at-proposal" {
+				mutation = ceremonyTestBindingMutation{}
+			}
+			prefix, candidate := build(t, "recover-active3", mutation)
+			if !bytes.Equal(historyTestObject(t, candidate.RecoveryEvidence)["probed_at"], historyTestString(endpoint.time)) {
+				t.Fatal("probe endpoint control did not exercise the requested boundary")
+			}
+			if _, err := VerifySuppliedRegistryCeremony(prefix, candidate); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

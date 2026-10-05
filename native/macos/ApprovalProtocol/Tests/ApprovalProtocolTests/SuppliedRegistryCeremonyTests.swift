@@ -247,6 +247,8 @@ private let ceremonyProposalFields =
   "schema_version message_type transition_kind request_sha256 challenge_sha256 registry_revision previous_record_sha256 artifact_descriptor_sha256 recovery_evidence_sha256 target_generation target_key_id target_key_tag target_spki target_fingerprint_sha256 new_generation new_key_id new_key_tag new_spki new_fingerprint_sha256 proposed_at expires_at proposal_signer_role"
 private let ceremonyAcceptanceFields =
   "schema_version message_type transition_kind request_sha256 proposal_sha256 challenge_sha256 registry_revision previous_record_sha256 artifact_descriptor_sha256 recovery_evidence_sha256 target_generation new_generation accepted_at expires_at accepted"
+private let ceremonyEvidenceFields =
+  "schema_version message_type request_sha256 challenge_sha256 registry_revision previous_record_sha256 artifact_descriptor_sha256 target_generation target_key_tag eligibility key_lookup_result continuity_probe_result probed_at"
 private let ceremonyRecordFields =
   "schema_version record_type transition_kind registry_revision previous_record_sha256 request_sha256 proposal_sha256 acceptance_sha256 challenge_sha256 artifact_descriptor_sha256 recovery_evidence_sha256 requested_at accepted_at committed_at target_generation target_key_id target_key_tag target_spki target_fingerprint_sha256 target_previous_status target_new_status new_generation new_key_id new_key_tag new_spki new_fingerprint_sha256 new_status revokes_all_prior old_signature new_signature"
 
@@ -541,4 +543,244 @@ private func ceremonyRebuild(
     finalBody: changedBody, record: original.record)
   // Preserve the original full record, signatures, and digest bindings.
   ceremonyFailure([], candidate, .verification)
+}
+
+private enum CeremonyBindingStage {
+  case request, evidence, proposal, acceptance, body
+}
+
+private struct CeremonyBindingFault {
+  let id: String
+  let fixture: String
+  let stage: CeremonyBindingStage
+  let field: String
+  let value: String
+}
+
+// Repair only computed dependencies, in wire order. Literal binding fields stay
+// independent so repairing a digest or signature cannot erase the tested fault.
+private func ceremonyBindingBuild(
+  _ original: SuppliedRegistryCeremony, fault: CeremonyBindingFault? = nil
+) throws -> SuppliedRegistryCeremony {
+  var q = try ceremonyObject(original.request)
+  let e = try original.recoveryEvidence.map(ceremonyObject)
+  var p = try ceremonyObject(original.signedProposal)
+  var a = try ceremonyObject(original.acceptance)
+  var r = try ceremonyObject(original.record)
+  func mutate(_ object: inout [String: String], _ stage: CeremonyBindingStage) {
+    if let fault, fault.stage == stage { object[fault.field] = fault.value }
+  }
+  func key(_ generation: String?) throws -> P256.Signing.PrivateKey {
+    let generation = try #require(generation)
+    let revision = try #require(Int(generation.replacingOccurrences(of: "\"", with: "").dropFirst(5)))
+    return try ceremonyKey(revision)
+  }
+  let old = try r["old_signature"] == "null" ? nil : key(r["target_generation"])
+  let fresh = try r["new_signature"] == "null" ? nil : key(r["new_generation"])
+  let signer = try #require(p["proposal_signer_role"] == ceremonyQuote("old") ? old : fresh)
+  mutate(&q, .request)
+  let request = try ceremonyEncode(q, ceremonyRequestFields)
+  let requestHash = ceremonyQuote(ceremonyHash(Data("YTA-REGISTRY-REQUEST-V1\0".utf8) + request))
+  p["request_sha256"] = requestHash
+  a["request_sha256"] = requestHash
+  r["request_sha256"] = requestHash
+  var evidence: Data?
+  if var fields = e {
+    fields["request_sha256"] = requestHash
+    mutate(&fields, .evidence)
+    evidence = try ceremonyEncode(fields, ceremonyEvidenceFields)
+  }
+  let evidenceHash = evidence.map {
+    ceremonyQuote(ceremonyHash(Data("YTA-REGISTRY-RECOVERY-EVIDENCE-V1\0".utf8) + $0))
+  } ?? "null"
+  p["recovery_evidence_sha256"] = evidenceHash
+  a["recovery_evidence_sha256"] = evidenceHash
+  r["recovery_evidence_sha256"] = evidenceHash
+  mutate(&p, .proposal)
+  let unsigned = try ceremonyEncode(p, ceremonyProposalFields)
+  p["proposal_signature"] = try ceremonySign(
+    Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + unsigned, signer)
+  let signed = try ceremonyEncode(p, ceremonyProposalFields + " proposal_signature")
+  let proposalHash = ceremonyQuote(
+    ceremonyHash(Data("YTA-REGISTRY-PROPOSAL-DIGEST-V1\0".utf8) + signed))
+  a["proposal_sha256"] = proposalHash
+  r["proposal_sha256"] = proposalHash
+  mutate(&a, .acceptance)
+  let acceptance = try ceremonyEncode(a, ceremonyAcceptanceFields)
+  r["acceptance_sha256"] = ceremonyQuote(
+    ceremonyHash(Data("YTA-REGISTRY-ACCEPTANCE-V1\0".utf8) + acceptance))
+  mutate(&r, .body)
+  let bodyFields = ceremonyRecordFields.split(separator: " ").prefix(28).joined(separator: " ")
+  return SuppliedRegistryCeremony(
+    request: request, recoveryEvidence: evidence, unsignedProposal: unsigned, signedProposal: signed,
+    acceptance: acceptance, finalBody: try ceremonyEncode(r, bodyFields),
+    record: try ceremonyRecord(r, old, fresh))
+}
+
+private func ceremonyBindingSignatures(_ input: SuppliedRegistryCeremony) throws {
+  let p = try ceremonyObject(input.signedProposal)
+  let r = try ceremonyObject(input.record)
+  func text(_ value: String?) throws -> String {
+    try #require(value).replacingOccurrences(of: "\"", with: "")
+  }
+  let role = p["proposal_signer_role"] == ceremonyQuote("old") ? "target" : "new"
+  try ceremonySignatureControl(
+    text(p[role + "_spki"]), text(p["proposal_signature"]), "YTA-REGISTRY-PROPOSAL-V1\0",
+    #require(String(data: input.unsignedProposal, encoding: .utf8)))
+  for (field, tuple, domain) in [
+    ("old_signature", "target", "YTA-REGISTRY-RECORD-OLD-V1\0"),
+    ("new_signature", "new", "YTA-REGISTRY-RECORD-NEW-V1\0"),
+  ] where r[field] != "null" {
+    try ceremonySignatureControl(
+      text(r[tuple + "_spki"]), text(r[field]), domain,
+      #require(String(data: input.finalBody, encoding: .utf8)))
+  }
+}
+
+private func ceremonyBindingBytes(
+  _ input: SuppliedRegistryCeremony, _ stage: CeremonyBindingStage
+) throws -> Data {
+  switch stage {
+  case .request: return input.request
+  case .evidence: return try #require(input.recoveryEvidence)
+  case .proposal: return input.unsignedProposal
+  case .acceptance: return input.acceptance
+  case .body: return input.finalBody
+  }
+}
+
+private func ceremonyBindingFaults() -> [CeremonyBindingFault] {
+  let digest = ceremonyQuote(String(repeating: "b", count: 64))
+  let generation = ceremonyQuote("YTAG-00000000000000000001")
+  let tag = ceremonyQuote("io.github.abigotado.youtrack-agent.approval.signing.v1/" + String(repeating: "0", count: 31) + "1")
+  var cases: [CeremonyBindingFault] = []
+  func add(_ fixture: String, _ stage: CeremonyBindingStage, _ rows: [(String, String, String)]) {
+    for (id, field, value) in rows {
+      cases.append(CeremonyBindingFault(id: id, fixture: fixture, stage: stage, field: field, value: value))
+    }
+  }
+  add("recover-active3", .evidence, [
+    ("recovery-request-digest", "request_sha256", digest),
+    ("recovery-challenge-digest", "challenge_sha256", digest),
+    ("recovery-revision", "registry_revision", "1"),
+    ("recovery-predecessor", "previous_record_sha256", digest),
+    ("recovery-descriptor", "artifact_descriptor_sha256", digest),
+    ("recovery-active-target-generation", "target_generation", generation),
+    ("recovery-active-target-tag", "target_key_tag", tag),
+    ("recovery-active-eligibility", "eligibility", ceremonyQuote("registry_disabled")),
+    ("recovery-active-lookup", "key_lookup_result", ceremonyQuote("not_attempted:registry_disabled")),
+    ("recovery-active-continuity", "continuity_probe_result", ceremonyQuote("not_attempted:no_active_generation")),
+    ("recovery-probe-before-request", "probed_at", ceremonyQuote("2026-09-01T11:59:59Z")),
+    ("recovery-probe-after-proposal", "probed_at", ceremonyQuote("2026-09-01T12:00:02Z")),
+  ])
+  add("recover-disabled4", .evidence, [
+    ("recovery-disabled-target-generation", "target_generation", generation),
+    ("recovery-disabled-target-tag", "target_key_tag", tag),
+    ("recovery-disabled-eligibility", "eligibility", ceremonyQuote("active_key_item_not_found")),
+    ("recovery-disabled-lookup", "key_lookup_result", ceremonyQuote("errSecItemNotFound:-25300")),
+    ("recovery-disabled-continuity", "continuity_probe_result", ceremonyQuote("not_attempted:no_key")),
+  ])
+  add("rotate2", .acceptance, [
+    ("acceptance-kind", "transition_kind", ceremonyQuote("enroll")),
+    ("acceptance-request-digest", "request_sha256", digest),
+    ("acceptance-challenge", "challenge_sha256", digest),
+    ("acceptance-revision", "registry_revision", "1"),
+    ("acceptance-predecessor", "previous_record_sha256", digest),
+    ("acceptance-target-generation", "target_generation", "null"),
+    ("acceptance-new-generation", "new_generation", "null"),
+    ("acceptance-proposal-digest", "proposal_sha256", digest),
+    ("acceptance-expiry", "expires_at", ceremonyQuote("2026-09-01T12:04:59Z")),
+  ])
+  add("rotate2", .proposal, [
+    ("proposal-kind", "transition_kind", ceremonyQuote("enroll")),
+    ("proposal-challenge", "challenge_sha256", digest),
+    ("proposal-expiry", "expires_at", ceremonyQuote("2026-09-01T12:04:59Z")),
+  ])
+  // Revoke has no fresh tuple whose generation would impose a grammar failure.
+  add("revoke3", .proposal, [("proposal-revision", "registry_revision", "1")])
+  add("rotate2", .body, [
+    ("body-challenge", "challenge_sha256", digest),
+    ("body-proposal-digest", "proposal_sha256", digest),
+    ("body-requested-at", "requested_at", ceremonyQuote("2026-09-01T12:00:01Z")),
+    ("body-accepted-at", "accepted_at", ceremonyQuote("2026-09-01T12:00:03Z")),
+  ])
+  for (id, stage) in [
+    ("proposal-recovery-digest", CeremonyBindingStage.proposal),
+    ("acceptance-recovery-digest", .acceptance), ("body-recovery-digest", .body),
+  ] {
+    add("recover-active3", stage, [(id, "recovery_evidence_sha256", digest)])
+  }
+  add("rotate2", .request, [
+    ("request-revision", "expected_registry_revision", "0"),
+    ("request-predecessor", "previous_record_sha256", digest),
+  ])
+  return cases
+}
+
+@Test func suppliedRegistryCeremonyBindingRebuildControls() throws {
+  let corpus = try registryCorpus()
+  for id in ["enroll1", "rotate2", "revoke3", "recover-active3", "recover-disabled4"] {
+    let positive = try #require(corpus.positives.first { $0.id == id })
+    let prefix = try ceremonyPrefix(positive.prefix, corpus)
+    let original = ceremonyInput(positive.transcript)
+    let expected = try SuppliedRegistryCeremony.verify(prefixRecords: prefix, ceremony: original)
+    let rebuilt = try ceremonyBindingBuild(original)
+    try ceremonyBindingSignatures(rebuilt)
+    let result = try SuppliedRegistryCeremony.verify(prefixRecords: prefix, ceremony: rebuilt)
+    #expect(result.suppliedRevision == expected.suppliedRevision, "\(id)")
+    #expect(result.keys == expected.keys, "\(id)")
+    #expect(result.suppliedTipDescriptorSHA256 == expected.suppliedTipDescriptorSHA256, "\(id)")
+    #expect(result.suppliedTipSHA256 == ceremonyHash(rebuilt.record), "\(id)")
+  }
+  let positive = try #require(corpus.positives.first { $0.id == "recover-active3" })
+  let prefix = try ceremonyPrefix(positive.prefix, corpus)
+  let original = ceremonyInput(positive.transcript)
+  let expected = try SuppliedRegistryCeremony.verify(prefixRecords: prefix, ceremony: original)
+  for (id, timestamp) in [
+    ("recovery-probe-at-request", "2026-09-01T12:00:00Z"),
+    ("recovery-probe-at-proposal", "2026-09-01T12:00:01Z"),
+  ] {
+    let fault = CeremonyBindingFault(
+      id: id, fixture: positive.id, stage: .evidence, field: "probed_at", value: ceremonyQuote(timestamp))
+    let rebuilt = try ceremonyBindingBuild(original, fault: fault)
+    #expect(try ceremonyObject(#require(rebuilt.recoveryEvidence))[fault.field] == fault.value, "\(id)")
+    try ceremonyBindingSignatures(rebuilt)
+    let result = try SuppliedRegistryCeremony.verify(prefixRecords: prefix, ceremony: rebuilt)
+    #expect(result.suppliedRevision == expected.suppliedRevision, "\(id)")
+    #expect(result.keys == expected.keys, "\(id)")
+    #expect(result.suppliedTipDescriptorSHA256 == expected.suppliedTipDescriptorSHA256, "\(id)")
+    #expect(result.suppliedTipSHA256 == ceremonyHash(rebuilt.record), "\(id)")
+  }
+}
+
+@Test func suppliedRegistryCeremonySignedBindingMismatches() throws {
+  let corpus = try registryCorpus()
+  let faults = ceremonyBindingFaults()
+  #expect(faults.count == 39)
+  #expect(Set(faults.map(\.id)).count == faults.count)
+  for fault in faults {
+    let positive = try #require(corpus.positives.first { $0.id == fault.fixture })
+    let prefix = try ceremonyPrefix(positive.prefix, corpus)
+    let original = ceremonyInput(positive.transcript)
+    #expect(try ceremonyObject(ceremonyBindingBytes(original, fault.stage))[fault.field] != fault.value, "\(fault.id)")
+    let candidate = try ceremonyBindingBuild(original, fault: fault)
+    #expect(try ceremonyObject(ceremonyBindingBytes(candidate, fault.stage))[fault.field] == fault.value, "\(fault.id)")
+    if fault.stage == .proposal {
+      #expect(try ceremonyObject(candidate.signedProposal)[fault.field] == fault.value, "\(fault.id)")
+    }
+    if fault.stage == .body {
+      #expect(try ceremonyObject(candidate.record)[fault.field] == fault.value, "\(fault.id)")
+    }
+    try ceremonyBindingSignatures(candidate)
+    if fault.stage == .request {
+      let replay = try SuppliedRegistryHistory.verify(suppliedRecords: prefix + [candidate.record])
+      let expected = try SuppliedRegistryCeremony.verify(prefixRecords: prefix, ceremony: original)
+      #expect(replay.keys == expected.keys, "\(fault.id)")
+      #expect(replay.suppliedRevision == expected.suppliedRevision, "\(fault.id)")
+      #expect(replay.suppliedTipSHA256 == ceremonyHash(candidate.record), "\(fault.id)")
+    }
+    #expect(throws: SuppliedRegistryCeremonyError.verification, "\(fault.id)") {
+      try SuppliedRegistryCeremony.verify(prefixRecords: prefix, ceremony: candidate)
+    }
+  }
 }
