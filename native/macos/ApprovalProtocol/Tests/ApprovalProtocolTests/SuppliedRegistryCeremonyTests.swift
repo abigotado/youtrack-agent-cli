@@ -185,7 +185,7 @@ private func ceremonySignatureControl(
   let x963 = try P256PublicKeyCodec.x963(fromSPKIDER: raw)
   let sig = try P256Signature(derBase64URL: signature)
   #expect(
-    try P256PublicKeyCodec.verify(
+    try registrySignatureControl(
       message: Data((domain + body).utf8), derSignature: sig.der, x963: x963))
 }
 
@@ -310,11 +310,12 @@ private func ceremonyTuple(_ revision: Int, _ key: P256.Signing.PrivateKey) -> [
 }
 private func ceremonySign(_ message: Data, _ key: P256.Signing.PrivateKey) throws -> String {
   let signature = try key.signature(for: message)
-  #expect(key.publicKey.isValidSignature(signature, for: message))
+  #expect(try registrySignatureControl(
+    message: message, derSignature: signature.derRepresentation,
+    x963: key.publicKey.x963Representation))
   let low = try P256Signature.normalizeLowS(der: signature.derRepresentation)
-  #expect(
-    key.publicKey.isValidSignature(
-      try P256.Signing.ECDSASignature(derRepresentation: low.der), for: message))
+  #expect(try registrySignatureControl(
+    message: message, derSignature: low.der, x963: key.publicKey.x963Representation))
   return ceremonyQuote(low.base64URL)
 }
 private func ceremonyRecord(
@@ -503,14 +504,15 @@ private func ceremonyRebuild(
   let signedProposal = try ceremonyEncode(proposal, ceremonyProposalFields + " proposal_signature")
   let rawSignature = try #require(proposal["proposal_signature"]).replacingOccurrences(
     of: "\"", with: "")
-  let signature = try P256.Signing.ECDSASignature(
-    derRepresentation: P256Signature(derBase64URL: rawSignature).der)
+  let signature = try P256Signature(derBase64URL: rawSignature).der
   #expect(
-    key.publicKey.isValidSignature(
-      signature, for: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + suppliedUnsigned))
+    try registrySignatureControl(
+      message: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + suppliedUnsigned,
+      derSignature: signature, x963: key.publicKey.x963Representation))
   #expect(
-    !key.publicKey.isValidSignature(
-      signature, for: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + original.unsignedProposal))
+    try !registrySignatureControl(
+      message: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + original.unsignedProposal,
+      derSignature: signature, x963: key.publicKey.x963Representation))
   var acceptance = try ceremonyObject(original.acceptance)
   var record = try ceremonyObject(original.record)
   let digest = ceremonyQuote(

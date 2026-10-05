@@ -77,7 +77,9 @@ private func suppliedHistorySign(
     var message = Data(domain.utf8)
     message.append(body)
     let signature = try key.signature(for: message)
-    #expect(key.publicKey.isValidSignature(signature, for: message))
+    #expect(try registrySignatureControl(
+      message: message, derSignature: signature.derRepresentation,
+      x963: key.publicKey.x963Representation))
     let low = try P256Signature.normalizeLowS(der: signature.derRepresentation)
     object[field] = suppliedHistoryQuote(low.base64URL)
   }
@@ -276,9 +278,8 @@ private func suppliedHistoryHighSignature(
   let body = try suppliedHistoryEncode(object, body: true)
   var message = Data(("YTA-REGISTRY-RECORD-" + role + "-V1\0").utf8)
   message.append(body)
-  #expect(
-    key.publicKey.isValidSignature(
-      try P256.Signing.ECDSASignature(derRepresentation: high), for: message))
+  #expect(try registrySignatureControl(
+    message: message, derSignature: high, x963: key.publicKey.x963Representation))
   return high
 }
 
