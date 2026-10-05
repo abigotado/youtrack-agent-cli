@@ -184,9 +184,11 @@ private func ceremonySignatureControl(
   let raw = try registryBase64(spki, count: 91)
   let x963 = try P256PublicKeyCodec.x963(fromSPKIDER: raw)
   let sig = try P256Signature(derBase64URL: signature)
+  let message = Data((domain + body).utf8)
   #expect(
     try registrySignatureControl(
-      message: Data((domain + body).utf8), derSignature: sig.der, x963: x963))
+      message: message, derSignature: sig.der, x963: x963))
+  #expect(try P256PublicKeyCodec.verify(message: message, derSignature: sig.der, x963: x963))
 }
 
 @Test func suppliedRegistryCeremonyPhasesEvidenceAndRedaction() throws {

@@ -191,9 +191,11 @@ tests reproduced the same disagreement for public fixture scalar 9: the exact
 `0d76c17d481b96dcfb6c8bcf2ff3fae316858e0b0f6af5db7c3519eb655835ba`.
 Independent Go verification accepted its original low-S DER and high-S twin,
 while CryptoKit and Security rejected the original and accepted the twin,
-including in a fresh process. The internal cause remains unknown. A frozen
-test-only control now checks bounded canonical DER, scalar ranges and the exact
-public point, then permits one equivalent-twin verification only after native
-rejection. It is independent of production codecs and verdicts, but uses the same
-native backend. Signing, strict production high-S refusal and protocol fixtures
-remain unchanged.
+including in a fresh process. Tests pin CryptoKit's raw scalars to the
+independently Go-accepted DER fixture, excluding a DER-decoding mismatch for this
+input; the internal cause remains unknown. A frozen test-only control checks
+bounded canonical DER, scalar ranges and the exact public point, then permits
+one equivalent-twin verification only after native rejection. Its verification
+step is independent of production codecs and verdicts, but uses the same native
+backend; callers also retain production grammar and verification checks.
+Signing, strict production high-S refusal and protocol fixtures remain unchanged.

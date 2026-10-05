@@ -17,6 +17,8 @@ private struct RegistrySignatureControlFixture {
     let message: Data
     let low: Data
     let high: Data
+    let lowRaw: Data
+    let highRaw: Data
     let key: Data
     let wrongKey: Data
 
@@ -54,6 +56,8 @@ private struct RegistrySignatureControlFixture {
             "3035313338222c226e65775f737461747573223a22616374697665222c227265766f6b65735f616c6c5f7072696f72223a66616c73657d")
         low = try signatureControlHex("3044022051569648e91fee2b4e947ebbef3756773a51bf1c321d31d6419d11f51d48264a02206a1bfeb307a994ea558c3065bf46e4b0693bcc6bfdedfb531615092b0c0908f2")
         high = try signatureControlHex("3045022051569648e91fee2b4e947ebbef3756773a51bf1c321d31d6419d11f51d48264a02210095e4014bf8566b16aa73cf9a40b91b4f53ab2e41a929a331dda4c197f05a1c5f")
+        lowRaw = try signatureControlHex("51569648e91fee2b4e947ebbef3756773a51bf1c321d31d6419d11f51d48264a6a1bfeb307a994ea558c3065bf46e4b0693bcc6bfdedfb531615092b0c0908f2")
+        highRaw = try signatureControlHex("51569648e91fee2b4e947ebbef3756773a51bf1c321d31d6419d11f51d48264a95e4014bf8566b16aa73cf9a40b91b4f53ab2e41a929a331dda4c197f05a1c5f")
         key = try signatureControlHex("04ea68d7b6fedf0b71878938d51d71f8729e0acb8c2c6df8b3d79e8a4b90949ee02a2744c972c9fce787014a964a8ea0c84d714feaa4de823fe85a224a4dd048fa")
         wrongKey = try signatureControlHex("046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")
         try #require(message.count == 1_795)
@@ -73,6 +77,71 @@ private struct RegistrySignatureControlFixture {
     let fixture = try RegistrySignatureControlFixture()
     for (name, der) in [("low-S", fixture.low), ("high-S", fixture.high)] {
         #expect(try registrySignatureControl(message: fixture.message, derSignature: der, x963: fixture.key), "\(name)")
+    }
+}
+
+@Test func registrySignatureControlFrozenDERMatchesRawScalars() throws {
+    let fixture = try RegistrySignatureControlFixture()
+    try #require(fixture.low.count == 70)
+    try #require(fixture.high.count == 71)
+    #expect(fixture.low.prefix(4) == Data([0x30, 0x44, 0x02, 0x20]))
+    #expect(fixture.low[36..<38] == Data([0x02, 0x20]))
+    #expect(fixture.high.prefix(4) == Data([0x30, 0x45, 0x02, 0x20]))
+    #expect(fixture.high[36..<39] == Data([0x02, 0x21, 0]))
+    // Fixed DER offsets expose the two independently verified scalar magnitudes.
+    #expect(Data(fixture.low[4..<36]) + Data(fixture.low[38..<70]) == fixture.lowRaw)
+    #expect(Data(fixture.high[4..<36]) + Data(fixture.high[39..<71]) == fixture.highRaw)
+    #expect(try P256.Signing.ECDSASignature(derRepresentation: fixture.low).rawRepresentation == fixture.lowRaw)
+    #expect(try P256.Signing.ECDSASignature(derRepresentation: fixture.high).rawRepresentation == fixture.highRaw)
+    #expect(try P256Signature(der: fixture.low).der == fixture.low)
+}
+
+@Test func registrySignatureControlTwinPreservesFrozenScalars() throws {
+    let fixture = try RegistrySignatureControlFixture()
+    #expect(try registrySignatureControlTwin(raw: fixture.lowRaw) == fixture.highRaw)
+    #expect(try registrySignatureControlTwin(raw: fixture.highRaw) == fixture.lowRaw)
+    for raw in [fixture.lowRaw, fixture.highRaw] {
+        let twin = try registrySignatureControlTwin(raw: raw)
+        #expect(twin.prefix(32) == raw.prefix(32))
+        #expect(try registrySignatureControlTwin(raw: twin) == raw)
+    }
+}
+
+@Test func registrySignatureControlTwinHandlesScalarBoundaries() throws {
+    // Expected N-s values were calculated independently with Go math/big.
+    let r = try signatureControlHex("0000000000000000000000000000000000000000000000000000000000000001")
+    let cases = [
+        ("one", "0000000000000000000000000000000000000000000000000000000000000001", "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632550"),
+        ("order minus one", "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632550", "0000000000000000000000000000000000000000000000000000000000000001"),
+        ("byte boundary", "0000000000000000000000000000000000000000000000000000000000000100", "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632451"),
+        ("borrow across zeros", "0000000000000001000000000000000000000000000000000000000000000000", "fffffffeffffffffffffffffffffffffbce6faada7179e84f3b9cac2fc632551"),
+    ]
+    for (name, scalar, expectedScalar) in cases {
+        let raw = r + (try signatureControlHex(scalar))
+        let expected = r + (try signatureControlHex(expectedScalar))
+        let twin = try registrySignatureControlTwin(raw: raw)
+        #expect(twin == expected, "\(name)")
+        #expect(try registrySignatureControlTwin(raw: twin) == raw, "\(name)")
+    }
+}
+
+@Test func registrySignatureControlTwinRejectsInvalidRawScalars() throws {
+    let fixture = try RegistrySignatureControlFixture()
+    let zero = Data(repeating: 0, count: 32)
+    let one = try signatureControlHex("0000000000000000000000000000000000000000000000000000000000000001")
+    let order = try signatureControlHex("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551")
+    let cases: [(String, Data)] = [
+        ("short", Data(fixture.lowRaw.dropLast())),
+        ("long", fixture.lowRaw + Data([0])),
+        ("zero r", zero + one),
+        ("zero s", one + zero),
+        ("out-of-range r", order + one),
+        ("out-of-range s", one + order),
+    ]
+    for (name, raw) in cases {
+        #expect(throws: RegistrySignatureControlError.invalidSignature, "\(name)") {
+            try registrySignatureControlTwin(raw: raw)
+        }
     }
 }
 

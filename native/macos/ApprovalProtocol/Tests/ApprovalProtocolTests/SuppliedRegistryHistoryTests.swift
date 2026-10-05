@@ -81,6 +81,8 @@ private func suppliedHistorySign(
       message: message, derSignature: signature.derRepresentation,
       x963: key.publicKey.x963Representation))
     let low = try P256Signature.normalizeLowS(der: signature.derRepresentation)
+    #expect(try P256PublicKeyCodec.verify(
+      message: message, derSignature: low.der, x963: key.publicKey.x963Representation))
     object[field] = suppliedHistoryQuote(low.base64URL)
   }
   return try suppliedHistoryEncode(object)
