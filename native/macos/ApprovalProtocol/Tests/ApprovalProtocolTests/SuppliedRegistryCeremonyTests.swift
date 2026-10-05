@@ -318,6 +318,8 @@ private func ceremonySign(_ message: Data, _ key: P256.Signing.PrivateKey) throw
   let low = try P256Signature.normalizeLowS(der: signature.derRepresentation)
   #expect(try registrySignatureControl(
     message: message, derSignature: low.der, x963: key.publicKey.x963Representation))
+  #expect(try P256PublicKeyCodec.verify(
+    message: message, derSignature: low.der, x963: key.publicKey.x963Representation))
   return ceremonyQuote(low.base64URL)
 }
 private func ceremonyRecord(
@@ -511,10 +513,16 @@ private func ceremonyRebuild(
     try registrySignatureControl(
       message: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + suppliedUnsigned,
       derSignature: signature, x963: key.publicKey.x963Representation))
+  #expect(try P256PublicKeyCodec.verify(
+    message: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + suppliedUnsigned,
+    derSignature: signature, x963: key.publicKey.x963Representation))
   #expect(
     try !registrySignatureControl(
       message: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + original.unsignedProposal,
       derSignature: signature, x963: key.publicKey.x963Representation))
+  #expect(try !P256PublicKeyCodec.verify(
+    message: Data("YTA-REGISTRY-PROPOSAL-V1\0".utf8) + original.unsignedProposal,
+    derSignature: signature, x963: key.publicKey.x963Representation))
   var acceptance = try ceremonyObject(original.acceptance)
   var record = try ceremonyObject(original.record)
   let digest = ceremonyQuote(

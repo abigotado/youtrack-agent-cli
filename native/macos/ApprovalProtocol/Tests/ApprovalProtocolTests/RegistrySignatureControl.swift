@@ -6,6 +6,12 @@ enum RegistrySignatureControlError: Error, Equatable {
   case invalidPublicKey
 }
 
+enum RegistrySignatureControlOutcome: Equatable {
+  case original
+  case equivalent
+  case rejected
+}
+
 private let registrySignatureControlOrder: [UInt8] = [
   0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
   0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9, 0xca, 0xc2, 0xfc, 0x63, 0x25, 0x51,
@@ -32,7 +38,9 @@ func registrySignatureControlTwin(raw: Data) throws -> Data {
 // Mathematical test control, independent of production codecs and verdicts.
 // Native rejection permits only the equivalent (r, N-s), with the same key and
 // message. High-S acceptance here never changes strict production ingress.
-func registrySignatureControl(message: Data, derSignature: Data, x963: Data) throws -> Bool {
+func registrySignatureControlOutcome(
+  message: Data, derSignature: Data, x963: Data
+) throws -> RegistrySignatureControlOutcome {
   guard (8...72).contains(derSignature.count) else {
     throw RegistrySignatureControlError.invalidSignature
   }
@@ -58,13 +66,22 @@ func registrySignatureControl(message: Data, derSignature: Data, x963: Data) thr
   guard key.x963Representation == x963 else {
     throw RegistrySignatureControlError.invalidPublicKey
   }
-  if key.isValidSignature(signature, for: message) { return true }
+  if key.isValidSignature(signature, for: message) { return .original }
 
   let equivalent: P256.Signing.ECDSASignature
   do {
     equivalent = try P256.Signing.ECDSASignature(rawRepresentation: twin)
   } catch {
-    return false
+    return .rejected
   }
-  return key.isValidSignature(equivalent, for: message)
+  return key.isValidSignature(equivalent, for: message) ? .equivalent : .rejected
+}
+
+func registrySignatureControl(message: Data, derSignature: Data, x963: Data) throws -> Bool {
+  let outcome = try registrySignatureControlOutcome(
+    message: message, derSignature: derSignature, x963: x963)
+  if outcome == .equivalent {
+    print("registrySignatureControl: equivalent representation verified")
+  }
+  return outcome != .rejected
 }

@@ -141,10 +141,13 @@ If CryptoKit cannot construct the alternate signature after the original
 verification returned `false`, the result remains `false`. Strict ingress,
 key/original-signature construction and internal DER invariant failures retain
 their closed error behavior; no supplied content is included in diagnostics.
-The [preserved synthetic regression](../testdata/gate1a-registry/README.md#native-signature-compatibility-regression)
-motivates this compatibility path. Its observed concentration on synthetic key
-and nonce values does not prove that other keys can never encounter it; the
-internal platform cause remains unknown.
+The [two preserved synthetic regression pairs](../testdata/gate1a-registry/README.md#native-signature-compatibility-regression)
+motivate this compatibility path: a fixed corpus signature for public scalar 3
+and a fresh CryptoKit signature for public scalar 9 captured on 2026-10-05.
+Independent verification accepts both pairs' original low-S representation and
+equivalent twin. Their observed concentration on synthetic fixture values does
+not prove that other keys can never encounter it; the internal platform cause
+remains unknown.
 
 The future native factory uses an exact two-minute receipt lifetime. This is a
 minting policy; the five-minute bound remains the verifier safety ceiling.

@@ -75,7 +75,14 @@ private struct RegistrySignatureControlFixture {
 
 @Test func registrySignatureControlAcceptsFrozenEquivalentSignatures() throws {
     let fixture = try RegistrySignatureControlFixture()
+    let nativeKey = try P256.Signing.PublicKey(x963Representation: fixture.key)
     for (name, der) in [("low-S", fixture.low), ("high-S", fixture.high)] {
+        let nativeSignature = try P256.Signing.ECDSASignature(derRepresentation: der)
+        let originalAccepted = nativeKey.isValidSignature(nativeSignature, for: fixture.message)
+        let outcome = try registrySignatureControlOutcome(message: fixture.message, derSignature: der, x963: fixture.key)
+        let expected: RegistrySignatureControlOutcome = originalAccepted ? .original : .equivalent
+        #expect(outcome == expected, "\(name)")
+        print("registry_signature_control form=\(name) outcome=\(outcome)")
         #expect(try registrySignatureControl(message: fixture.message, derSignature: der, x963: fixture.key), "\(name)")
     }
 }
@@ -159,6 +166,7 @@ private struct RegistrySignatureControlFixture {
             ("s", fixture.message, wrongS, fixture.key),
         ]
         for (name, message, signature, key) in cases {
+            #expect(try registrySignatureControlOutcome(message: message, derSignature: signature, x963: key) == .rejected, "\(form) changed \(name)")
             #expect(try !registrySignatureControl(message: message, derSignature: signature, x963: key), "\(form) changed \(name)")
         }
     }
