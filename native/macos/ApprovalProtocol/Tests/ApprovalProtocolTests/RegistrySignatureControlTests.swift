@@ -137,6 +137,7 @@ private struct RegistrySignatureControlFixture {
 @Test func registrySignatureControlTwinHandlesScalarBoundaries() throws {
     // Expected N-s values were calculated independently with Go math/big.
     let r = try signatureControlHex("0000000000000000000000000000000000000000000000000000000000000001")
+    try #require(r.count == 32, "fixed boundary r must contain 32 bytes")
     let cases = [
         ("one", "0000000000000000000000000000000000000000000000000000000000000001", "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632550"),
         ("order minus one", "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632550", "0000000000000000000000000000000000000000000000000000000000000001"),
@@ -144,8 +145,14 @@ private struct RegistrySignatureControlFixture {
         ("borrow across zeros", "0000000000000001000000000000000000000000000000000000000000000000", "fffffffeffffffffffffffffffffffffbce6faada7179e84f3b9cac2fc632551"),
     ]
     for (name, scalar, expectedScalar) in cases {
-        let raw = r + (try signatureControlHex(scalar))
-        let expected = r + (try signatureControlHex(expectedScalar))
+        try #require(scalar.utf8.count == 64, "\(name) scalar must contain 64 hex characters")
+        try #require(expectedScalar.utf8.count == 64, "\(name) expected scalar must contain 64 hex characters")
+        let scalarBytes: Data = try signatureControlHex(scalar)
+        let expectedScalarBytes: Data = try signatureControlHex(expectedScalar)
+        try #require(scalarBytes.count == 32, "\(name) scalar must contain 32 bytes")
+        try #require(expectedScalarBytes.count == 32, "\(name) expected scalar must contain 32 bytes")
+        let raw = r + scalarBytes
+        let expected = r + expectedScalarBytes
         let twin = try registrySignatureControlTwin(raw: raw)
         #expect(twin == expected, "\(name)")
         #expect(try registrySignatureControlTwin(raw: twin) == raw, "\(name)")

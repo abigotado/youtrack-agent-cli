@@ -181,27 +181,34 @@ The original fixture and strict expected reason remain intact. Dedicated
 public-API tests pin the exact message hash, key and signature, reject high-S
 ingress through both parser and verifier, and reject changed message/key/r/s.
 They assert correctness rather than requiring the native defect to persist on
-future operating systems. No backend fallback, skipped test, or weakened reason
-assertion is used. This compatibility correction does not complete the remaining
-production prerequisites above.
+future operating systems. For this earlier public-API regression, the equivalent
+representation is checked by CryptoKit again: there is no backend switch,
+skipped test, or weakened reason assertion. This compatibility correction does
+not complete the remaining production prerequisites above.
+
+The supplied-history/ceremony stress tests construct keys from known public
+revision scalars and ask CryptoKit to sign with a fresh nonce for each signature.
+Here, fresh key construction creates a new key object with the revision's fixed
+public scalar. The scalar-9 native rejection below arose on this exact fresh
+signing path before its bytes were frozen as a regression control.
 
 A historical CryptoKit signature capture on 2026-10-05 with macOS 26.6.2 (build
-25G83) / Apple Swift 6.3.3 in the supplied-history/ceremony stress tests
-reproduced the same disagreement for public fixture scalar 9: the exact
-1,795-byte message has SHA-256
+25G83) / Apple Swift 6.3.3 reproduced the same disagreement for public fixture
+scalar 9: the exact 1,795-byte message has SHA-256
 `0d76c17d481b96dcfb6c8bcf2ff3fae316858e0b0f6af5db7c3519eb655835ba`.
 Independent Go verification accepted its original low-S DER and high-S twin,
 while CryptoKit and Security rejected the original and accepted the twin,
 including in a fresh process. Tests pin CryptoKit's raw scalars to the
 independently Go-accepted DER fixture, excluding a DER-decoding mismatch for this
-input; the internal cause remains unknown. A frozen test-only control checks
-bounded canonical DER, scalar ranges and the exact public point, then permits
-one equivalent-twin verification only after native rejection. Its verification
-step is independent of production codecs and verdicts, but uses the same native
-backend; callers also retain production grammar and verification checks.
-Tests report the original or equivalent verification path without requiring a
-particular native verdict on future hosts.
-Signing, strict production high-S refusal and protocol fixtures remain unchanged.
+input; the internal cause remains unknown. The test-only control used by the
+frozen fixture and fresh-signature paths checks bounded canonical DER, scalar
+ranges and the exact public point, then permits one equivalent-twin verification
+only after native rejection. Its verification is independent of production
+codecs and verdicts, uses the same native backend and has a maximum
+of two verification calls per control. Requiring direct native acceptance, or
+calling `Issue.record` whenever native verification returns false, would fail
+this independently valid signature on the observed host. Callers still retain
+production grammar and verification checks.
 
 The public scalar-9 control is frozen verbatim in
 [`signature-control.json`](signature-control.json). It is a standalone static
@@ -217,6 +224,18 @@ scalar-9 public point. Go verifies both equivalent DER forms directly with
 Both consumers check DER/raw-scalar correspondence and reject changed inputs;
 Swift also retains twin arithmetic, malformed-input checks and production
 high-S refusal.
+
+Every successful equivalent result from the Boolean control emits a fixed
+`registry_signature_control_fallback` JSON event containing only `schema_version`,
+`event` and `outcome: "equivalent"`. Separately, the frozen-fixture test emits two
+`registry_signature_control_frozen` JSON rows, one for each low/high-S form,
+with the schema version, public scalar 9, actual host OS version, direct native
+acceptance Boolean and control outcome. These rows report observations without
+requiring either a native rejection or a particular number of fallback events.
+
+The Go checks require at least Go 1.25.13, as declared in
+[`go.mod`](../../go.mod). [CI](../../.github/workflows/go.yaml) reads that same
+version through `go-version-file`.
 
 From the repository root:
 
