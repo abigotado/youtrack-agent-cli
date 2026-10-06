@@ -81,7 +81,7 @@ func registrySignatureControl(message: Data, derSignature: Data, x963: Data) thr
   let outcome = try registrySignatureControlOutcome(
     message: message, derSignature: derSignature, x963: x963)
   if outcome == .equivalent {
-    print("registrySignatureControl: equivalent representation verified")
+    print(#"{"schema_version":1,"event":"registry_signature_control_fallback","outcome":"equivalent"}"#)
   }
   return outcome != .rejected
 }

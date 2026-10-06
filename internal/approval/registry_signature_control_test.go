@@ -2,11 +2,13 @@ package approval
 
 import (
 	"bytes"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/asn1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -117,16 +119,33 @@ func TestSharedRegistrySignatureControl(t *testing.T) {
 	}
 	x963 := registrySignatureControlHex(t, control.X963Hex, 65)
 	curve := elliptic.P256()
-	x, y := curve.ScalarBaseMult([]byte{9})
-	if !bytes.Equal(x963, elliptic.Marshal(curve, key.X, key.Y)) || !bytes.Equal(x963, elliptic.Marshal(curve, x, y)) {
+	var scalarNine [32]byte
+	scalarNine[31] = 9
+	knownKey, err := ecdh.P256().NewPrivateKey(scalarNine[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedPoint, err := key.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(x963, parsedPoint) || !bytes.Equal(x963, knownKey.PublicKey().Bytes()) {
 		t.Fatal("signature control SPKI and X9.63 do not represent the literal public 9G point")
 	}
 	wrongX963 := registrySignatureControlHex(t, control.WrongX963Hex, 65)
-	wrongX, wrongY := curve.ScalarBaseMult([]byte{1})
-	if bytes.Equal(wrongX963, x963) || !bytes.Equal(wrongX963, elliptic.Marshal(curve, wrongX, wrongY)) {
+	var scalarOne [32]byte
+	scalarOne[31] = 1
+	knownWrongKey, err := ecdh.P256().NewPrivateKey(scalarOne[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(wrongX963, x963) || !bytes.Equal(wrongX963, knownWrongKey.PublicKey().Bytes()) {
 		t.Fatal("signature control wrong public point is not the distinct literal 1G point")
 	}
-	wrongKey := &ecdsa.PublicKey{Curve: curve, X: wrongX, Y: wrongY}
+	wrongKey, err := ecdsa.ParseUncompressedPublicKey(curve, wrongX963)
+	if err != nil {
+		t.Fatal(err)
+	}
 	lowDER, err := hex.DecodeString(control.LowDERHex)
 	if err != nil || len(lowDER) == 0 || hex.EncodeToString(lowDER) != control.LowDERHex {
 		t.Fatal("signature control low-S DER hex is not canonical")
@@ -202,6 +221,39 @@ func TestSharedRegistrySignatureControl(t *testing.T) {
 						t.Fatalf("raw integer verification accepted=%v, want %v", accepted, test.accepted)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestSharedRegistrySignatureControlProductionLowSIngress(t *testing.T) {
+	control := readRegistrySignatureControl(t)
+	for _, test := range []struct {
+		name, derHex string
+		accepted     bool
+	}{
+		{"low-s", control.LowDERHex, true},
+		{"high-s", control.HighDERHex, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			der, err := hex.DecodeString(test.derHex)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateP256DERSignature(der); (err == nil) != test.accepted {
+				t.Fatalf("production DER grammar accepted=%v, want %v: %v", err == nil, test.accepted, err)
+			}
+			encoded := base64.RawURLEncoding.EncodeToString(der)
+			decoded, err := DecodeP256DERSignature(encoded)
+			if (err == nil) != test.accepted {
+				t.Fatalf("production base64url ingress accepted=%v, want %v: %v", err == nil, test.accepted, err)
+			}
+			if test.accepted {
+				if !bytes.Equal(decoded, der) || base64.RawURLEncoding.EncodeToString(decoded) != encoded {
+					t.Fatal("production low-S ingress changed the canonical fixture signature")
+				}
+			} else if len(decoded) != 0 {
+				t.Fatal("production high-S refusal returned signature bytes")
 			}
 		})
 	}

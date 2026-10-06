@@ -74,6 +74,15 @@ private struct RegistrySignatureControlFixture {
 }
 
 @Test func registrySignatureControlAcceptsFrozenEquivalentSignatures() throws {
+    struct Observation: Encodable {
+        let schema_version = 1
+        let event = "registry_signature_control_frozen"
+        let public_scalar = 9
+        let os_version: String
+        let form: String
+        let native_original_accepted: Bool
+        let control_outcome: String
+    }
     let fixture = try RegistrySignatureControlFixture()
     let nativeKey = try P256.Signing.PublicKey(x963Representation: fixture.key)
     for (name, der) in [("low-S", fixture.low), ("high-S", fixture.high)] {
@@ -82,7 +91,18 @@ private struct RegistrySignatureControlFixture {
         let outcome = try registrySignatureControlOutcome(message: fixture.message, derSignature: der, x963: fixture.key)
         let expected: RegistrySignatureControlOutcome = originalAccepted ? .original : .equivalent
         #expect(outcome == expected, "\(name)")
-        print("registry_signature_control form=\(name) outcome=\(outcome)")
+        let controlOutcome = switch outcome {
+        case .original: "original"
+        case .equivalent: "equivalent"
+        case .rejected: "rejected"
+        }
+        let observation = Observation(
+            os_version: ProcessInfo.processInfo.operatingSystemVersionString,
+            form: name,
+            native_original_accepted: originalAccepted,
+            control_outcome: controlOutcome
+        )
+        print(String(decoding: try JSONEncoder().encode(observation), as: UTF8.self))
         #expect(try registrySignatureControl(message: fixture.message, derSignature: der, x963: fixture.key), "\(name)")
     }
 }
