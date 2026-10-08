@@ -205,10 +205,18 @@ frozen fixture and fresh-signature paths checks bounded canonical DER, scalar
 ranges and the exact public point, then permits one equivalent-twin verification
 only after native rejection. Its verification is independent of production
 codecs and verdicts, uses the same native backend and has a maximum
-of two verification calls per control. Requiring direct native acceptance, or
-calling `Issue.record` whenever native verification returns false, would fail
-this independently valid signature on the observed host. Callers still retain
-production grammar and verification checks.
+of two verification calls per control. A control's mathematical acceptance of
+the high-S form does not admit it on the wire. Callers retain production grammar
+and verification checks, including strict high-S refusal.
+
+As defined by the [native-boundary ADR](../../docs/gate1a-native-boundary.md#consequences),
+Go/Swift disagreement in public wire acceptance/rejection, decoded meaning,
+final protocol verdicts or tamper-negative refusals is blocking. Direct native
+verification and equivalent-twin outcomes are separate backend-health
+diagnostics. An independently valid signature accepted through the bounded
+same-backend path does not fail CI solely because the first native call rejected
+it. This acceptance criterion does not establish a repaired native backend or
+complete Gate 1A.
 
 The public scalar-9 control is frozen verbatim in
 [`signature-control.json`](signature-control.json). It is a standalone static
@@ -225,13 +233,25 @@ Both consumers check DER/raw-scalar correspondence and reject changed inputs;
 Swift also retains twin arithmetic, malformed-input checks and production
 high-S refusal.
 
+The same Go oracle's `TestSharedRegistrySignatureControlSwiftScalarThree`
+reads the existing `recovery-continuity-success` transcript from
+[`corpus.json`](corpus.json) and pins the scalar-3 message, public key and both
+DER forms used by the [Swift public-API regression tests](../../native/macos/ApprovalProtocol/Tests/ApprovalProtocolTests/P256CompatibilityTests.swift).
+It verifies both mathematical forms directly with `ecdsa.VerifyASN1` and
+`ecdsa.Verify`, rejects changed message/key/r/s, and separately requires
+production low-S acceptance and high-S refusal. This proof uses existing corpus
+bytes; no fixture regeneration is required. The focused Go command below runs
+both scalar-3 and scalar-9 controls.
+
 Every successful equivalent result from the Boolean control emits a fixed
 `registry_signature_control_fallback` JSON event containing only `schema_version`,
 `event` and `outcome: "equivalent"`. Separately, the frozen-fixture test emits two
 `registry_signature_control_frozen` JSON rows, one for each low/high-S form,
 with the schema version, public scalar 9, actual host OS version, direct native
 acceptance Boolean and control outcome. These rows report observations without
-requiring either a native rejection or a particular number of fallback events.
+requiring either a native rejection or an arbitrary fallback-rate threshold.
+The control remains bounded to two calls using the same key, message and native
+backend, and changed-input refusals remain mandatory.
 
 The Go checks require at least Go 1.25.13, as declared in
 [`go.mod`](../../go.mod). [CI](../../.github/workflows/go.yaml) reads that same

@@ -144,9 +144,11 @@ their closed error behavior; no supplied content is included in diagnostics.
 The [two preserved synthetic regression pairs](../testdata/gate1a-registry/README.md#native-signature-compatibility-regression)
 motivate this compatibility path: a fixed corpus signature for public scalar 3
 and a fresh CryptoKit signature for public scalar 9 captured on 2026-10-05.
-Independent verification accepts both pairs' original low-S representation and
-equivalent twin. Their observed concentration on synthetic fixture values does
-not prove that other keys can never encounter it; the internal platform cause
+The [Go standard-library controls](../internal/approval/registry_signature_control_test.go)
+independently verify both pairs' original low-S representation and equivalent
+twin as mathematical signatures, while separately requiring production high-S
+wire refusal. Their observed concentration on synthetic fixture values does not
+prove that other keys can never encounter it; the internal platform cause
 remains unknown.
 
 The future native factory uses an exact two-minute receipt lifetime. This is a
@@ -397,7 +399,12 @@ generation before UI and revalidates them afterward.
 ## Consequences
 
 - Go and Swift consume shared URL, ID, plan, receipt, key, signature, display,
-  and frame fixtures; disagreement is a blocking failure.
+  and frame fixtures; disagreement in public wire acceptance/rejection,
+  decoded meaning, final protocol verdicts or tamper-negative refusals is a
+  blocking failure. Direct native verification and internal equivalent-twin
+  outcomes are separate backend-health diagnostics; a first-pass native
+  rejection followed by valid same-backend verification alone does not fail CI
+  or establish that native backend health is repaired.
 - The binary format has no ambiguity from JSON envelopes, Unicode, optional
   fields, helper-supplied text, or integer byte order.
 - The pure Go validator requires an explicit enrolled key generation, exact
