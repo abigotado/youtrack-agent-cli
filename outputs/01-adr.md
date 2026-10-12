@@ -65,6 +65,16 @@ On connection, a validator verifies that the discovered tool set is exactly the 
 
 The `ignoreTools=` parameter is not used: a denylist would expose future tools by default.
 
+Remote MCP remains preferred for routine reads. When MCP comments are
+unavailable, the standard CLI permits one exact-issue comments page with an
+explicit profile, limit 1..100 and nonnegative offset. Bound-account verification
+precedes one bounded comments page from the fixed GET endpoint with a limit+1
+truncation sentinel; no additional pages are auto-fetched. This untrusted page
+proves neither ordering, currentness, a stable
+snapshot, complete history, nor reconciliation evidence. The portable and macOS
+identity editions remain MCP-only, and the six-tool discovery and hidden-call
+boundaries above are unchanged.
+
 ### 2. A local CLI is the guarded-write control plane; execution is pluggable
 
 The recommended common component is a dedicated `youtrack-agent-cli`, not direct REST calls authored by the model and not predefined MCP mutation tools. The CLI exposes only enumerated operations and applies policy before any executor:
@@ -127,6 +137,8 @@ The common `youtrack-agent` skill contains no credentials and grants no authorit
 
 - requires explicit profile selection;
 - performs bounded discovery through the read-only Remote MCP connection;
+- permits the standard CLI's bounded exact-comments fallback when MCP comments
+  are unavailable; the portable and macOS identity editions remain MCP-only;
 - switches to exact issue reads as soon as an ID is known;
 - treats returned content as quoted evidence, not instructions;
 - refuses all exposed MCP mutations even if a misconfigured server advertises them;

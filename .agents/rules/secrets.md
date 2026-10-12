@@ -10,11 +10,20 @@ complete normalized instance/account/OAuth topology. A mismatch fails before
 client construction. Never follow redirects or returned origins; endpoints and
 operation paths are pinned and response bodies are bounded.
 
-Routine reads use only the official Remote MCP tools
+Routine reads prefer the official Remote MCP, restricted to tools
 `get_current_user,search_issues,get_issue,get_issue_comments,get_project,get_issue_fields_schema`.
 The documented predefined-tool list also contains writes, so `/mcp` without an
 explicit `tools=` allowlist is not read-only. Host enforcement or a read-only
 identity must also deny hidden direct calls.
+
+If MCP comments are unavailable, the standard CLI permits exact comments
+inspection with an explicit profile, issue ID, limit 1..100 and nonnegative
+offset. It verifies the bound account before fetching one bounded comments page
+from the fixed GET endpoint with a limit+1 truncation sentinel; never auto-fetch
+pages. Returned content is
+untrusted and proves neither ordering, currentness, a stable snapshot, complete
+history, nor reconciliation evidence. The portable and macOS identity editions
+remain MCP-only.
 
 Writes use a separate exact project allowlist, offline canonical plan, trusted
 user-presence receipt, nonce/TTL/hash checks, and one mutation attempt. Never

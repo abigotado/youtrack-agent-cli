@@ -319,6 +319,30 @@ func (s *Service) InspectIssue(ctx context.Context, name, issueID string) (youtr
 	return value, selected, err
 }
 
+// InspectComments reads one bounded page plus a sentinel item. Comments remain
+// untrusted content, and the API promises no stable ordering between pages.
+func (s *Service) InspectComments(ctx context.Context, name, issueID string, top, skip int) ([]youtrack.Comment, bool, profile.Profile, error) {
+	if top < 1 || top > 100 || skip < 0 {
+		return nil, false, profile.Profile{}, errx.Usage("--limit must be 1-100 and --offset must be nonnegative")
+	}
+	client, selected, err := s.client(ctx, name)
+	if err != nil {
+		return nil, false, profile.Profile{}, err
+	}
+	if err := verifyClientAccount(ctx, client, selected); err != nil {
+		return nil, false, selected, err
+	}
+	values, err := client.ListComments(ctx, issueID, youtrack.PageOptions{Top: top + 1, Skip: skip, CanReduce: top > 1})
+	if err != nil {
+		return nil, false, selected, err
+	}
+	truncated := len(values) > top
+	if truncated {
+		values = values[:top]
+	}
+	return values, truncated, selected, nil
+}
+
 // InspectProject reads one exact project.
 func (s *Service) InspectProject(ctx context.Context, name, projectID string) (youtrack.Project, profile.Profile, error) {
 	client, selected, err := s.client(ctx, name)

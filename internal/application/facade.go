@@ -90,6 +90,28 @@ type IssueInfo struct {
 	CustomFields  []IssueCustomFieldInfo `json:"custom_fields,omitempty"`
 }
 
+type IdentityInfo struct {
+	ID    string `json:"id"`
+	Name  string `json:"name,omitempty"`
+	Login string `json:"login,omitempty"`
+}
+
+type VisibilityInfo struct {
+	Type            string         `json:"type"`
+	PermittedGroups []IdentityInfo `json:"permitted_groups"`
+	PermittedUsers  []IdentityInfo `json:"permitted_users"`
+}
+
+type CommentInfo struct {
+	ID         string          `json:"id"`
+	Author     *UserInfo       `json:"author"`
+	Created    int64           `json:"created"`
+	Updated    *int64          `json:"updated"`
+	Deleted    bool            `json:"deleted"`
+	Text       *string         `json:"text"`
+	Visibility *VisibilityInfo `json:"visibility"`
+}
+
 type BundleValueInfo struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -275,6 +297,15 @@ func (s *Service) InspectIssueInfo(ctx context.Context, name, issueID string) (I
 	return issueInfo(value), profileInfo(selected), err
 }
 
+func (s *Service) InspectCommentsInfo(ctx context.Context, name, issueID string, top, skip int) ([]CommentInfo, bool, ProfileInfo, error) {
+	values, truncated, selected, err := s.InspectComments(ctx, name, issueID, top, skip)
+	result := make([]CommentInfo, len(values))
+	for index, value := range values {
+		result[index] = commentInfo(value)
+	}
+	return result, truncated, profileInfo(selected), err
+}
+
 func (s *Service) InspectProjectInfo(ctx context.Context, name, projectID string) (ProjectInfo, ProfileInfo, error) {
 	value, selected, err := s.InspectProject(ctx, name, projectID)
 	return projectInfo(value), profileInfo(selected), err
@@ -457,6 +488,31 @@ func issueInfo(value youtrack.Issue) IssueInfo {
 	result.CustomFields = make([]IssueCustomFieldInfo, len(value.CustomFields))
 	for index, field := range value.CustomFields {
 		result.CustomFields[index] = IssueCustomFieldInfo{ID: field.ID, Name: field.Name, Type: field.Type, Value: append(json.RawMessage(nil), field.Value...)}
+	}
+	return result
+}
+
+func commentInfo(value youtrack.Comment) CommentInfo {
+	result := CommentInfo{ID: value.ID, Created: value.Created, Updated: value.Updated, Deleted: value.Deleted, Text: value.Text}
+	if value.Author != nil {
+		author := userInfo(*value.Author)
+		result.Author = &author
+	}
+	if value.Visibility != nil {
+		visibility := VisibilityInfo{Type: value.Visibility.Type}
+		if value.Visibility.PermittedGroups != nil {
+			visibility.PermittedGroups = make([]IdentityInfo, len(value.Visibility.PermittedGroups))
+			for index, identity := range value.Visibility.PermittedGroups {
+				visibility.PermittedGroups[index] = IdentityInfo{ID: identity.ID, Name: identity.Name, Login: identity.Login}
+			}
+		}
+		if value.Visibility.PermittedUsers != nil {
+			visibility.PermittedUsers = make([]IdentityInfo, len(value.Visibility.PermittedUsers))
+			for index, identity := range value.Visibility.PermittedUsers {
+				visibility.PermittedUsers[index] = IdentityInfo{ID: identity.ID, Name: identity.Name, Login: identity.Login}
+			}
+		}
+		result.Visibility = &visibility
 	}
 	return result
 }

@@ -26,7 +26,7 @@ func TestPortableReadOnlyPayloadContainsOnlyTheReadBoundary(t *testing.T) {
 			t.Errorf("portable skill is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{"auth login", "mutation prepare", "issue.create"} {
+	for _, forbidden := range []string{"auth login", "inspect comments", "mutation prepare", "issue.create"} {
 		if strings.Contains(skill, forbidden) {
 			t.Errorf("portable skill contains unavailable command %q", forbidden)
 		}
