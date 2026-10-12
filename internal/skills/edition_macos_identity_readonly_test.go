@@ -35,7 +35,7 @@ func TestIdentityEditionEmbedsOnlyReadOnlySkill(t *testing.T) {
 					t.Errorf("identity skill is missing %q", required)
 				}
 			}
-			for _, forbidden := range []string{"portable edition", "auth login", "mutation prepare", "issue.create"} {
+			for _, forbidden := range []string{"portable edition", "auth login", "inspect comments", "mutation prepare", "issue.create"} {
 				if strings.Contains(string(skill), forbidden) {
 					t.Errorf("identity skill contains unavailable command %q", forbidden)
 				}

@@ -44,6 +44,13 @@ func TestInspectVerifiesCurrentAccountBeforeEveryTargetRead(t *testing.T) {
 			},
 		},
 		{
+			name: "comments", targetPath: "/api/issues/APP-1/comments", response: `[]`,
+			invoke: func(ctx context.Context, service *Service) error {
+				_, _, _, err := service.InspectComments(ctx, "work", "APP-1", 10, 0)
+				return err
+			},
+		},
+		{
 			name: "project", targetPath: "/api/admin/projects/APP",
 			response: `{"id":"0-1","shortName":"APP","name":"App","archived":false}`,
 			invoke: func(ctx context.Context, service *Service) error {

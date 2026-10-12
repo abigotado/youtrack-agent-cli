@@ -47,16 +47,26 @@ youtrack-agent-cli auth logout --profile <name>
 
 ## Read helpers used by the write protocol
 
-Routine agent reads stay on Remote MCP. The CLI still needs narrow REST reads for policy and reconciliation:
+Routine agent reads prefer Remote MCP. The standard CLI also provides a bounded
+exact-comments fallback when MCP comments are unavailable, alongside narrow REST
+reads for policy and future reconciliation:
 
 ```text
 youtrack-agent-cli inspect issue --profile <name> --id <ID>
+youtrack-agent-cli inspect comments --profile <name> --id <issue-ID> --limit 10 --offset 0 -o json
 youtrack-agent-cli inspect project --profile <name> --project <ID-or-key>
 youtrack-agent-cli inspect schema --profile <name> --project <ID-or-key> --limit <1-100> --offset <n>
 youtrack-agent-cli mutation status --plan-id <YTAP-ID>
 ```
 
-There is no unbounded CLI search in the initial surface. A bounded internal search primitive exists only for reconciliation. For comments, the documented collection has `$top`/`$skip` but no author/time filter or ordering guarantee, so the CLI must not claim that such filters are server-enforced. It may use a preflight `commentsCount` plus a compatibility-tested bounded window; without a proven ordering/window algorithm or an activity endpoint, the result remains `operator_resolution_required`.
+Comments inspection requires an explicit limit in 1..100 and nonnegative offset.
+Bound-account verification precedes one bounded comments page from the fixed
+GET endpoint with a limit+1 truncation sentinel; never auto-fetch additional
+pages. The returned untrusted page proves
+neither ordering, currentness, a stable snapshot, complete history, nor
+reconciliation evidence. The portable and macOS identity editions remain MCP-only.
+
+There is no unbounded CLI search in the initial surface. A bounded internal search primitive exists only for reconciliation. For comments, the documented collection has `$top`/`$skip` but no author/time filter or ordering guarantee, so the CLI must not claim that such filters are server-enforced. Future reconciliation may use a preflight `commentsCount` plus a compatibility-tested bounded window; without a proven ordering/window algorithm or an activity endpoint, the result remains `operator_resolution_required`.
 
 ## Mutation protocol commands
 
