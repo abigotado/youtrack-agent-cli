@@ -23,13 +23,13 @@
     },
     {
       "path": "golang.org/x/sys",
-      "version": "v0.47.0",
-      "zip_sha256": "cdac013ddced0262926ec29ffcda645da39670e61c7e5b761e572b6b1809bb1b"
+      "version": "v0.49.0",
+      "zip_sha256": "e73a06591ca0d7016ce3ccb45c36a8ed7128468aecc1a357f94d815c760c6b31"
     },
     {
       "path": "golang.org/x/term",
-      "version": "v0.45.0",
-      "zip_sha256": "b3a3af689728b43012ae1b21482571a35c033c545e98e021606bd4fcf1f79108"
+      "version": "v0.47.0",
+      "zip_sha256": "d990d5ab94dfa41ba980645b721bba7490064337a01bb03e6cacace70e8df0bf"
     }
   ]
 }
