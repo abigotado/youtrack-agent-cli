@@ -1,5 +1,11 @@
 # Implementation decision: align with the existing CLI harness without weakening write approval
 
+Scope update: the signed-helper requirements below remain the strict native
+`mutation` design. The accepted [operator-write decision](../docs/operator-writes.md)
+adds a distinct lower-assurance mode to the standard Formula without claiming
+Gate activation. Source support is not an installed release. The ordinary
+read-capable Formula is already published.
+
 - Status: Accepted and implemented through the fail-closed first slice
 - Date: 2026-09-02
 - Target module: `github.com/abigotado/youtrack-agent-cli`

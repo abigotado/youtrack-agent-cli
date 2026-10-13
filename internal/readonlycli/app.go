@@ -89,7 +89,7 @@ func (a *App) NewRootCommand() *cobra.Command {
 	flags.BoolVar(&a.dryRun, "dry-run", false, "preview a supported local change")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return errx.Usage("%v", err) })
 	root.PersistentPreRunE = a.setup
-	root.AddCommand(a.newVersionCommand(), a.newContractCommand(), a.newProfileCommand(), a.newSkillsCommand())
+	root.AddCommand(a.newVersionCommand(), a.newContractCommand(), a.newCapabilitiesCommand(), a.newProfileCommand(), a.newSkillsCommand())
 	return root
 }
 

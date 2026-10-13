@@ -73,6 +73,14 @@ Apply this grammar in order:
    `mutation reconcile` flow for the same receipt. An inconclusive result is
    `operator_resolution_required`, never inferred success or failure.
 
+4. For `operator-write apply`, missing/malformed output or
+   `WRITE_OUTCOME_UNKNOWN` also forbids replay or an automatic equivalent
+   new plan. Use `operator-write status` and GET-only `operator-write reconcile`
+   for the same plan ID. `WRITE_APPLIED_LOCAL_FAILURE` means verified remote
+   success with a local failure: do not resend. Operator confirmation is an
+   explicit assertion, not a native receipt; the separate native `mutation`
+   confirmation/apply/reconcile path remains unavailable.
+
 ## Global flags
 
 | Flag | Type | Default | Description |
@@ -83,7 +91,7 @@ Apply this grammar in order:
 | `--profile` | string |  | explicit named YouTrack profile |
 | `--timeout` | duration | `30s` | abort the command after this duration |
 | `-v, --verbose` | bool |  | write redacted request activity to stderr |
-| `--yes` | bool |  | confirm a supported local configuration change |
+| `--yes` | bool |  | confirm a supported local configuration change or exact operator-write intent |
 
 ## Commands
 
@@ -144,6 +152,12 @@ Show credential presence and optionally verify the account
 ### `youtrack-agent-cli auth whoami`
 
 Verify and return the exact authenticated account
+
+No flags of its own.
+
+### `youtrack-agent-cli capabilities`
+
+Report build support and optional offline profile readiness
 
 No flags of its own.
 
@@ -243,6 +257,58 @@ Read one durable local mutation record without network access
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--plan-id` | string |  | exact local mutation plan ID |
+
+### `youtrack-agent-cli operator-write apply`
+
+Consume one exact confirmed intent for at most one POST
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--confirm-intent` | string |  | exact SHA-256 operator assertion for the reviewed plan |
+| `--plan-id` | string |  | exact authoritative local operator plan ID |
+
+### `youtrack-agent-cli operator-write prepare`
+
+Prepare a single-use intent offline from a frozen snapshot
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--offline` | bool |  | guarantee no credentials, browser, OAuth, or network access |
+| `--out` | string |  | optional new exclusive 0600 plan export path |
+| `--request-stdin` | bool |  | read bounded typed operator request JSON from stdin |
+| `--snapshot` | string |  | bounded frozen snapshot JSON file |
+
+### `youtrack-agent-cli operator-write reconcile`
+
+Collect one bounded GET-only observation for a consumed intent
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--limit` | int | `20` | one comments page limit, 1-100 |
+| `--offset` | int | `0` | one nonnegative comments page offset |
+| `--plan-id` | string |  | exact consumed local operator plan ID |
+
+### `youtrack-agent-cli operator-write snapshot`
+
+Read one exact issue and freeze a supported write target
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--field` | string |  | exact field name, for example Stage |
+| `--field-id` | string |  | immutable project custom-field ID |
+| `--id` | string |  | exact issue entity or readable ID |
+| `--kind` | string |  | supported write kind: issue.update or comment.add |
+| `--out` | string |  | new exclusive 0600 snapshot path in an existing private directory |
+| `--value` | string |  | exact target bundle value name |
+| `--value-id` | string |  | immutable target bundle value ID |
+
+### `youtrack-agent-cli operator-write status`
+
+Read one authoritative local operator record offline
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--plan-id` | string |  | exact local operator plan ID |
 
 ### `youtrack-agent-cli profile add`
 

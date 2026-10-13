@@ -7,8 +7,8 @@ distribution channels:
   Remote-MCP-only. It validates non-secret read-only profile metadata and
   installs a shared Codex/Claude Code skill. Every remote read goes through the
   official YouTrack Remote MCP with an explicit six-tool allowlist.
-- The **standard macOS edition** is being prepared as a source-built Homebrew
-  Formula. Once published, Homebrew will compile the standard CLI locally with
+- The **standard macOS edition** is available as a source-built Homebrew
+  Formula. Homebrew compiles the standard CLI locally with
   `CGO_ENABLED=1`, so OAuth credentials remain in the native
   Security.framework Keychain. This channel needs neither an Apple Developer
   membership nor a signed/notarized application bundle.
@@ -30,7 +30,9 @@ Download a checksummed archive from GitHub Releases and inspect it before use:
 ```
 
 The portable surface is intentionally limited to `version`, `contract`,
-credential-free `profile`, and `skills`. It supports Linux on amd64 and arm64,
+credential-free `profile`, and `skills`. This source tree additionally provides
+offline `capabilities`; that command is not in the previously published v0.3.0.
+The portable edition supports Linux on amd64 and arm64,
 and needs no Keychain, token, or browser access. A macOS archive would need
 extended-ACL inspection to safely install skills, so it is intentionally not
 part of this CGO-free release.
@@ -49,9 +51,8 @@ envelopes, errors, and recovery.
 
 ## macOS Homebrew Formula
 
-The planned standard macOS distribution channel is a source-built Formula in
-the maintained tap. The command below is for use after publication, not an
-indication that the Formula is already available. A merged source change
+The standard macOS distribution channel is a source-built Formula in
+the maintained tap. A merged source change
 reaches Homebrew only after its own release tag and a merged tap update; check
 `version` before relying on newly documented behavior:
 
@@ -60,7 +61,7 @@ brew install abigotado/tap/youtrack-agent-cli
 youtrack-agent-cli version -o json
 ```
 
-Once published, the Formula will pin a checksummed source release and build it
+The Formula pins a checksummed source release and builds it
 locally with Go, CGO, and the macOS Security.framework; it does not download
 an unsigned executable, remove Gatekeeper quarantine, or need Apple Developer
 signing or notarization. It includes the standard explicit-profile OAuth and Keychain
@@ -138,11 +139,29 @@ content; a page establishes neither ordering, currentness, a stable snapshot,
 complete history, nor reconciliation evidence. The portable and macOS identity
 editions remain Remote-MCP-only.
 
-## Guarded writes are not released
+## Operator-confirmed writes
+
+This source tree adds `operator-write` for single Stage/State/Enum updates and
+public comment additions on the standard macOS CGO build. The previously
+released v0.3.0 is read-only; source changes reach installed Homebrew binaries
+only after a new release and tap update. Check `version` and `capabilities`
+instead of assuming that an installed binary has these commands.
+
+The path uses explicit operator confirmation of an immutable intent, a bound
+profile/project allowlist, fresh preflight, and a permanent local claim before
+one POST. It is not native proof of human presence and does not defend against
+hostile same-user processes or restored local state. A separate authenticated
+write profile is required; the existing read profile stays unchanged.
+
+See [the operator-write decision, threat model and command flow](docs/operator-writes.md)
+for setup, exact field snapshots, marked comments and non-retryable outcomes.
+Issue creation, editing existing comments and batch changes are not included.
+
+## Native-presence writes remain closed
 
 The macOS Formula enables the standard CLI's OAuth, Keychain, REST, journal,
-and network-free `mutation prepare` surfaces. It does **not** make guarded
-writes available: `mutation confirm`, `mutation apply`, and
+and network-free `mutation prepare` surfaces. It does **not** unlock the separate
+native-presence lane: `mutation confirm`, `mutation apply`, and
 `mutation reconcile` fail closed until Gate 1A and Gate 1B have passed and a
 separately authorized write-capable channel is released. This applies equally
 to source builds and the Formula; no agent may bypass it through MCP or raw

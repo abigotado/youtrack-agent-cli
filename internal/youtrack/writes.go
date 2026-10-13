@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"unicode/utf8"
 
@@ -18,6 +19,7 @@ const (
 	maxSummaryBytes     = 1024
 	maxDescriptionBytes = 1 << 20
 	maxMutationBodySize = 2 << 20
+	maxCommentBytes     = 32 << 10
 )
 
 // CustomFieldUpdate is one ID- and type-bound issue custom field mutation.
@@ -46,6 +48,31 @@ type UpdateIssueInput struct {
 	Summary      *string
 	Description  *string
 	CustomFields []CustomFieldUpdate
+}
+
+// AddCommentInput binds one public comment to its exact issue and expected
+// authenticated author. Text includes any caller-provided reconciliation marker.
+type AddCommentInput struct {
+	IssueID             string
+	ExpectedAuthorID    string
+	ExpectedAuthorLogin string
+	Text                string
+}
+
+type addCommentPayload struct {
+	Text       string                  `json:"text"`
+	Visibility publicCommentVisibility `json:"visibility"`
+}
+
+type publicCommentVisibility struct {
+	Type string `json:"$type"`
+}
+
+// commentResponse preserves presence of deleted, so omitted/null
+// fields cannot masquerade as a verified non-deleted comment.
+type commentResponse struct {
+	Comment
+	Deleted *bool `json:"deleted"`
 }
 
 type createIssuePayload struct {
@@ -110,6 +137,50 @@ func ValidateUpdateIssueInput(input UpdateIssueInput) error {
 	return validateCustomFieldUpdates(input.CustomFields)
 }
 
+// ValidateAddCommentInput validates the full final comment before dispatch.
+func ValidateAddCommentInput(input AddCommentInput) error {
+	if err := validateIdentifier("issue", input.IssueID); err != nil {
+		return err
+	}
+	if err := validateIdentifier("author", input.ExpectedAuthorID); err != nil {
+		return err
+	}
+	if err := validateRequiredText("author login", input.ExpectedAuthorLogin, maxIdentifierBytes); err != nil {
+		return err
+	}
+	return validateRequiredText("comment text", input.Text, maxCommentBytes)
+}
+
+// AddComment sends one non-replayable public comment mutation. A successful
+// HTTP response is verified before callers can treat the write as applied.
+func (client *Client) AddComment(ctx context.Context, input AddCommentInput) (Comment, error) {
+	if err := ValidateAddCommentInput(input); err != nil {
+		return Comment{}, err
+	}
+	body, err := json.Marshal(addCommentPayload{
+		Text: input.Text, Visibility: publicCommentVisibility{Type: "UnlimitedVisibility"},
+	})
+	if err != nil {
+		return Comment{}, errx.Internal("could not encode the typed YouTrack comment")
+	}
+	var response commentResponse
+	if err := client.writeJSON(ctx, request{
+		method: http.MethodPost, path: "/issues/" + url.PathEscape(input.IssueID) + "/comments",
+		query: fieldsQuery(commentFields), body: body, operation: "comment.add", write: true,
+	}, &response); err != nil {
+		return Comment{}, err
+	}
+	result := response.Comment
+	if !validEntityID(result.ID) || result.Text == nil || *result.Text != input.Text ||
+		result.Author == nil || result.Author.ID != input.ExpectedAuthorID || result.Author.Login != input.ExpectedAuthorLogin ||
+		response.Deleted == nil || *response.Deleted || result.Visibility == nil ||
+		result.Visibility.Type != "UnlimitedVisibility" || len(result.Visibility.PermittedGroups) != 0 || len(result.Visibility.PermittedUsers) != 0 {
+		return Comment{}, errx.WriteOutcomeUnknown("comment.add")
+	}
+	result.Deleted = *response.Deleted
+	return result, nil
+}
+
 // CreateIssue dispatches exactly one non-replayable POST /api/issues request.
 func (client *Client) CreateIssue(ctx context.Context, input CreateIssueInput) (Issue, error) {
 	if err := ValidateCreateIssueInput(input); err != nil {
@@ -152,7 +223,56 @@ func (client *Client) UpdateIssue(ctx context.Context, input UpdateIssueInput) (
 	if input.Description != nil && (result.Description == nil || *result.Description != *input.Description) {
 		return Issue{}, errx.WriteOutcomeUnknown("issue.update")
 	}
+	for _, expected := range input.CustomFields {
+		matches := 0
+		for _, actual := range result.CustomFields {
+			if actual.ID != expected.ID {
+				continue
+			}
+			matches++
+			if actual.Type != expected.Type || !customFieldValueMatches(expected.Value, actual.Value) {
+				return Issue{}, errx.WriteOutcomeUnknown("issue.update")
+			}
+		}
+		if matches != 1 {
+			return Issue{}, errx.WriteOutcomeUnknown("issue.update")
+		}
+	}
 	return result, nil
+}
+
+func customFieldValueMatches(expectedJSON, actualJSON json.RawMessage) bool {
+	var expected, actual any
+	expectedDecoder := json.NewDecoder(bytes.NewReader(expectedJSON))
+	expectedDecoder.UseNumber()
+	actualDecoder := json.NewDecoder(bytes.NewReader(actualJSON))
+	actualDecoder.UseNumber()
+	if expectedDecoder.Decode(&expected) != nil || actualDecoder.Decode(&actual) != nil {
+		return false
+	}
+	return customFieldValueEqual(expected, actual)
+}
+
+func customFieldValueEqual(expected, actual any) bool {
+	if expectedEntity, ok := expected.(map[string]any); ok && len(expectedEntity) == 1 {
+		if expectedID, ok := expectedEntity["id"].(string); ok && validEntityID(expectedID) {
+			actualEntity, ok := actual.(map[string]any)
+			return ok && actualEntity["id"] == expectedID
+		}
+	}
+	if expectedList, ok := expected.([]any); ok {
+		actualList, ok := actual.([]any)
+		if !ok || len(expectedList) != len(actualList) {
+			return false
+		}
+		for index, value := range expectedList {
+			if !customFieldValueEqual(value, actualList[index]) {
+				return false
+			}
+		}
+		return true
+	}
+	return reflect.DeepEqual(expected, actual)
 }
 
 func (client *Client) sendMutation(ctx context.Context, operationPath, operation string, payload any, out any) error {

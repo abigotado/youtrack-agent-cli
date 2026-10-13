@@ -170,6 +170,17 @@ func ConfirmRequired(action string) *Error {
 	return &Error{Code: CodeConfirm, Reason: "CONFIRMATION_REQUIRED", Message: fmt.Sprintf("%s was not confirmed", action), Hint: "obtain trusted human approval before continuing"}
 }
 
+// OperatorConfirmRequired reports missing operator-declared confirmation.
+// This assertion binds an exact reviewed intent, not native user presence.
+func OperatorConfirmRequired() *Error {
+	return &Error{
+		Code:    CodeConfirm,
+		Reason:  "OPERATOR_CONFIRMATION_REQUIRED",
+		Message: "the exact operator write intent was not confirmed",
+		Hint:    "review the stored operator plan, obtain human confirmation, then use --confirm-intent SHA256 --yes; never fabricate native approval",
+	}
+}
+
 // IntentConfirmationRequired reports that --yes was not bound to the exact
 // reviewed dry-run receipt.
 func IntentConfirmationRequired() *Error {

@@ -1,5 +1,10 @@
 # Guarded mutation contract
 
+Scope: this document specifies strict native `mutation`, not the separate
+[operator-write mode](operator-writes.md). Native-helper/Gate requirements below
+remain native-only; operator assertions never become receipts, permits or native
+journal authority.
+
 The CLI supports typed `issue.create`, `issue.update`, and `comment.add`
 operations. It exposes no arbitrary REST method/path, deletion, administration,
 attachment, bulk, or workflow-command escape hatch.

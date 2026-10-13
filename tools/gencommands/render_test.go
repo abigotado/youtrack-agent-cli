@@ -18,6 +18,9 @@ func TestRenderMarkdownSortsAndDocumentsCommands(t *testing.T) {
 		"one stable envelope",
 		"explicit `--profile`",
 		"never replay the mutation",
+		"GET-only `operator-write reconcile`",
+		"WRITE_APPLIED_LOCAL_FAILURE",
+		"success with a local failure: do not resend",
 		"### `youtrack-agent-cli mutation apply`",
 		"`--receipt`",
 	} {

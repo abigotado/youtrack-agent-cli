@@ -23,6 +23,7 @@ import (
 	"github.com/abigotado/youtrack-agent-cli/internal/mutation"
 	"github.com/abigotado/youtrack-agent-cli/internal/oauth"
 	"github.com/abigotado/youtrack-agent-cli/internal/oauthrecovery"
+	"github.com/abigotado/youtrack-agent-cli/internal/operatorwrite"
 	"github.com/abigotado/youtrack-agent-cli/internal/profile"
 	"github.com/abigotado/youtrack-agent-cli/internal/skills"
 	"github.com/abigotado/youtrack-agent-cli/internal/writepolicy"
@@ -46,16 +47,20 @@ const (
 
 // Service owns the profile, policy, credential, intent, and journal boundary.
 type Service struct {
-	Profiles    *profile.Registry
-	Policies    *writepolicy.Registry
-	Credentials auth.CredentialAccessStore
-	Journal     journal.Store
-	Approver    approval.Approver
-	Executor    mutation.Executor
-	Reconciler  mutation.Reconciler
-	HTTP        http.RoundTripper
-	Logger      *slog.Logger
-	Now         func() time.Time
+	Profiles       *profile.Registry
+	Policies       *writepolicy.Registry
+	Credentials    auth.CredentialAccessStore
+	Journal        journal.Store
+	Approver       approval.Approver
+	Executor       mutation.Executor
+	Reconciler     mutation.Reconciler
+	HTTP           http.RoundTripper
+	Logger         *slog.Logger
+	Now            func() time.Time
+	OperatorWrites *operatorwrite.Store
+	// OperatorWriteSupport permits tests to supply an in-process backend. The
+	// production default is fixed by build tags, with no flag or environment bypass.
+	OperatorWriteSupport func() bool
 }
 
 // NewDefault creates the user-scoped production service without reading any
@@ -77,6 +82,7 @@ func NewDefault(logger *slog.Logger) (*Service, error) {
 		Profiles: profiles, Policies: policies, Credentials: auth.KeychainStore{},
 		Journal:  journal.New(filepath.Join(configDir, "youtrack-agent-cli", "journal")),
 		Approver: approval.Unsupported{}, HTTP: http.DefaultTransport, Logger: logger, Now: time.Now,
+		OperatorWrites: operatorwrite.New(filepath.Join(configDir, "youtrack-agent-cli")),
 	}, nil
 }
 
