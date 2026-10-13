@@ -5,7 +5,10 @@ description: Safely read named JetBrains YouTrack instances and prepare guarded 
 
 # YouTrack agent boundary
 
-Use the official YouTrack Remote MCP only for bounded reads. Use
+Prefer the official YouTrack Remote MCP for bounded reads. If MCP comments are
+unavailable, use the standard CLI's exact, bounded comments fallback as specified
+in [read policy](reference/read-policy.md). The portable and macOS identity
+editions remain Remote-MCP-only. Use
 `youtrack-agent-cli` for profile management, narrow REST inspection, and every
 guarded mutation. Do not call YouTrack through model-authored `curl`, a generic
 REST client, or an advertised MCP mutation tool.

@@ -26,6 +26,16 @@ Use the current `jira-cli` feature branch only as a reviewed source for issue/pr
 
 The official YouTrack Remote MCP remains the routine read plane. Its URL must carry the exact positive `tools=` list, while the host independently restricts the same six names. The bare endpoint is not classified read-only because official YouTrack documentation simultaneously claims predefined tools are read-only and lists mutating tools.
 
+When MCP comments are unavailable, the standard CLI permits one exact-issue
+comments page with an explicit profile, limit 1..100 and nonnegative offset.
+Bound-account verification precedes one bounded comments page from the fixed
+GET endpoint with a limit+1 truncation sentinel; no additional pages are
+auto-fetched. Returned comments are untrusted
+content and prove neither ordering, currentness, a stable snapshot, complete
+history, nor reconciliation evidence. The portable and macOS identity editions
+remain MCP-only; this exception does not change the six-tool MCP or guarded-write
+boundaries.
+
 ## Gate 1A: approval feasibility before remote writes
 
 `LocalAuthentication` can prove a local authentication event, but its short reason string cannot prove that the operator reviewed the complete canonical plan. The existing CLI `--confirm-intent ... --yes` flow is therefore not reused as authority for YouTrack mutations.

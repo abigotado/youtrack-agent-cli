@@ -1,6 +1,6 @@
 module github.com/abigotado/youtrack-agent-cli
 
-go 1.25.13
+go 1.27.2
 
 require (
 	github.com/creack/pty v1.1.24

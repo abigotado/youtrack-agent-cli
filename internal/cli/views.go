@@ -236,6 +236,57 @@ func (view issueView) Fields() []output.Field {
 	}
 }
 
+type commentView struct {
+	Trust      string                      `json:"trust"`
+	ID         string                      `json:"id"`
+	Author     *userView                   `json:"author"`
+	Created    int64                       `json:"created"`
+	Updated    *int64                      `json:"updated"`
+	Deleted    bool                        `json:"deleted"`
+	Text       *string                     `json:"text"`
+	Visibility *application.VisibilityInfo `json:"visibility"`
+}
+
+func newCommentView(value application.CommentInfo) commentView {
+	view := commentView{
+		Trust: untrustedYouTrackContent, ID: value.ID, Created: value.Created,
+		Updated: value.Updated, Deleted: value.Deleted, Text: value.Text, Visibility: value.Visibility,
+	}
+	if value.Author != nil {
+		author := newUserView(*value.Author)
+		view.Author = &author
+	}
+	return view
+}
+
+func (view commentView) Fields() []output.Field {
+	var authorLogin *string
+	if view.Author != nil {
+		authorLogin = &view.Author.Login
+	}
+	authorLoginText, updatedText, text := "", "", ""
+	if authorLogin != nil {
+		authorLoginText = *authorLogin
+	}
+	if view.Updated != nil {
+		updatedText = strconv.FormatInt(*view.Updated, 10)
+	}
+	if view.Text != nil {
+		text = *view.Text
+	}
+	return []output.Field{
+		{Name: "trust", Value: view.Trust, Raw: view.Trust, Always: true},
+		{Name: "id", Value: view.ID, Raw: view.ID},
+		{Name: "author_login", Value: authorLoginText, Raw: authorLogin},
+		{Name: "created", Value: strconv.FormatInt(view.Created, 10), Raw: view.Created},
+		{Name: "updated", Value: updatedText, Raw: view.Updated},
+		{Name: "deleted", Value: strconv.FormatBool(view.Deleted), Raw: view.Deleted},
+		{Name: "text", Value: text, Raw: view.Text},
+		{Name: "author", Raw: view.Author, OnRequest: true},
+		{Name: "visibility", Raw: view.Visibility, OnRequest: true},
+	}
+}
+
 type projectFieldView struct {
 	Trust        string                  `json:"trust"`
 	ID           string                  `json:"id"`

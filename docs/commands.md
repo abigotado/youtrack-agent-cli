@@ -153,6 +153,16 @@ Print the versioned envelope and exit-code contract
 
 No flags of its own.
 
+### `youtrack-agent-cli inspect comments`
+
+Read one bounded page of comments on an exact issue
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--id` | string |  | exact YouTrack issue database ID or readable ID |
+| `--limit` | int | `10` | maximum comments in this page (1-100) |
+| `--offset` | int | `0` | explicit bounded page offset |
+
 ### `youtrack-agent-cli inspect issue`
 
 Read one exact issue through the narrow REST helper
