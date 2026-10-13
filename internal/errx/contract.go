@@ -55,7 +55,7 @@ var codes = []CodeInfo{
 	{CodeAmbiguous, "AMBIGUOUS", "several objects matched", "pick from candidates"},
 	{CodeAuth, "AUTH", "missing, expired, or rejected credentials", "log in or rotate the API token"},
 	{CodeRetryable, "RETRYABLE", "rate limit or transient network failure", "back off and retry safely"},
-	{CodeConfirm, "CONFIRMATION_REQUIRED", "write was not confirmed", "obtain a trusted human approval receipt"},
+	{CodeConfirm, "CONFIRMATION_REQUIRED", "write was not confirmed", "obtain human confirmation using the operation's approval mode"},
 	{CodePermission, "PERMISSION_DENIED", "YouTrack permission or token scope denied", "request permission or scope; do not retry unchanged"},
 	{CodeConflict, "CONFLICT", "stale state or write conflict", "re-read the YouTrack resource before deciding"},
 }

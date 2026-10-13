@@ -129,4 +129,12 @@ class VerifyPortableReadOnlyReleasePolicyTest < Minitest::Test
     refute success
     assert_includes stderr, "must equal the approved portable read-only publisher"
   end
+
+  def test_rejects_removing_operator_write_dependency_guard
+    changed = RELEASE.sub("auth|application|journal|mutation|operatorwrite|youtrack", "auth|application|journal|mutation|youtrack")
+    refute_equal RELEASE, changed
+    success, stderr = verify(CONFIG, {}, release: changed)
+    refute success
+    assert_includes stderr, "must equal the approved portable read-only publisher"
+  end
 end

@@ -30,7 +30,10 @@ the client rebuilds a fixed-origin, fixed-operation URL.
 In JSON mode stdout contains exactly one envelope. Logs, warnings, and prompts
 use stderr. Text, raw, and explicit help are caller-selected exceptions.
 
-Every network operation names a profile. Reads are bounded. Mutation preparation
-is network-free, approval requires trusted user presence, and apply dispatches at
-most one mutating request. An ambiguous result is reconciled by bounded reads and
-is never replayed automatically.
+Every network operation names a profile. Reads are bounded. Preparation is
+network-free. Native `mutation` requires trusted user presence and remains
+closed until its authority gates pass. Separate `operator-write` binds declared
+operator confirmation to the exact stored plan, not independently verified
+human presence. Its private local attempt ledger is separate from native
+authority and prevents cooperating replay. Apply dispatches at most one mutation
+per plan. Ambiguous results use bounded reads and are never replayed automatically.

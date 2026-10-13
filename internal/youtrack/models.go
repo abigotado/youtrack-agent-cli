@@ -23,10 +23,23 @@ type Project struct {
 // IssueCustomField retains only the stable field identity/type and a bounded
 // raw value. The value is untrusted YouTrack content, not executable input.
 type IssueCustomField struct {
-	ID    string          `json:"id"`
-	Name  string          `json:"name"`
-	Type  string          `json:"$type"`
-	Value json.RawMessage `json:"value"`
+	ID                 string                       `json:"id"`
+	Name               string                       `json:"name"`
+	Type               string                       `json:"$type"`
+	Value              json.RawMessage              `json:"value"`
+	ProjectCustomField *ProjectCustomFieldReference `json:"projectCustomField,omitempty"`
+}
+
+// ProjectCustomFieldReference links an issue field to its project schema and
+// global definition. It contains identities only, never a returned URL.
+type ProjectCustomFieldReference struct {
+	ID    string         `json:"id"`
+	Field FieldReference `json:"field"`
+}
+
+// FieldReference identifies the global custom-field definition.
+type FieldReference struct {
+	ID string `json:"id"`
 }
 
 // Issue is the fixed detailed shape used for exact reads and reconciliation.
@@ -77,16 +90,21 @@ type Bundle struct {
 
 // ProjectField is one project-specific custom-field schema entry.
 type ProjectField struct {
-	ID         string          `json:"id"`
-	Type       string          `json:"$type"`
-	Field      FieldDefinition `json:"field"`
-	CanBeEmpty bool            `json:"canBeEmpty"`
-	IsPublic   bool            `json:"isPublic"`
-	Bundle     *Bundle         `json:"bundle,omitempty"`
+	ID         string                        `json:"id"`
+	Type       string                        `json:"$type"`
+	Field      FieldDefinition               `json:"field"`
+	CanBeEmpty bool                          `json:"canBeEmpty"`
+	IsPublic   bool                          `json:"isPublic"`
+	Bundle     *Bundle                       `json:"bundle,omitempty"`
+	Project    *ProjectFieldProjectReference `json:"project,omitempty"`
 }
 
-// Visibility contains explicit comment visibility identities. It is read-only
-// in the first slice because comment mutation remains disabled.
+// ProjectFieldProjectReference binds an exact schema read to its project.
+type ProjectFieldProjectReference struct {
+	ID string `json:"id"`
+}
+
+// Visibility contains explicit comment visibility identities.
 type Visibility struct {
 	Type            string     `json:"$type"`
 	PermittedGroups []Identity `json:"permittedGroups,omitempty"`

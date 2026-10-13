@@ -81,7 +81,7 @@ func TestEmbeddedPayloadMatchesSourceAndProviders(t *testing.T) {
 	}
 }
 
-func TestPortableSkillPinsReadMCPAndRefusesWrites(t *testing.T) {
+func TestStandardSkillPinsReadMCPAndRefusesMutationBypasses(t *testing.T) {
 	payload, err := payload(ProviderClaude)
 	if err != nil {
 		t.Fatalf("payload: %v", err)
@@ -91,7 +91,8 @@ func TestPortableSkillPinsReadMCPAndRefusesWrites(t *testing.T) {
 		"get_current_user search_issues get_issue get_issue_comments get_project get_issue_fields_schema",
 		"endpoint without an explicit `tools=` allowlist is not read-only",
 		"If any mutation tool is visible, report the connection as misconfigured and do not use it",
-		"Never mint approval on the user's behalf and never retry an ambiguous mutation",
+		"never fabricate its receipt",
+		"Never retry an ambiguous mutation or mix CLI and MCP/raw REST write paths",
 	} {
 		if !strings.Contains(skill, rule) {
 			t.Errorf("portable skill is missing fail-closed parser rule %q", rule)

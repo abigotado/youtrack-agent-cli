@@ -135,6 +135,13 @@ func renderMarkdown(tree commandTree) string {
 	builder.WriteString("   `WRITE_OUTCOME_UNKNOWN`, never replay the mutation. Run the bounded\n")
 	builder.WriteString("   `mutation reconcile` flow for the same receipt. An inconclusive result is\n")
 	builder.WriteString("   `operator_resolution_required`, never inferred success or failure.\n\n")
+	builder.WriteString("4. For `operator-write apply`, missing/malformed output or\n")
+	builder.WriteString("   `WRITE_OUTCOME_UNKNOWN` also forbids replay or an automatic equivalent\n")
+	builder.WriteString("   new plan. Use `operator-write status` and GET-only `operator-write reconcile`\n")
+	builder.WriteString("   for the same plan ID. `WRITE_APPLIED_LOCAL_FAILURE` means verified remote\n")
+	builder.WriteString("   success with a local failure: do not resend. Operator confirmation is an\n")
+	builder.WriteString("   explicit assertion, not a native receipt; the separate native `mutation`\n")
+	builder.WriteString("   confirmation/apply/reconcile path remains unavailable.\n\n")
 	builder.WriteString("## Global flags\n\n| Flag | Type | Default | Description |\n| --- | --- | --- | --- |\n")
 	for _, flag := range tree.Globals {
 		builder.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", flagLabel(flag), flag.Type, code(flag.Default), flag.Usage))

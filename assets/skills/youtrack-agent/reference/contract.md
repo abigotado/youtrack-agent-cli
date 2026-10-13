@@ -144,6 +144,14 @@ Apply this grammar in order:
    `mutation reconcile` flow for the same receipt. An inconclusive result is
    `operator_resolution_required`, never inferred success or failure.
 
+4. For `operator-write apply`, missing/malformed output or
+   `WRITE_OUTCOME_UNKNOWN` also forbids replay or an automatic equivalent
+   new plan. Use `operator-write status` and GET-only `operator-write reconcile`
+   for the same plan ID. `WRITE_APPLIED_LOCAL_FAILURE` means verified remote
+   success with a local failure: do not resend. Operator confirmation is an
+   explicit assertion, not a native receipt; the separate native `mutation`
+   confirmation/apply/reconcile path remains unavailable.
+
 ## Exit codes
 
 Each status maps to a distinct caller recovery action.
@@ -157,7 +165,7 @@ Each status maps to a distinct caller recovery action.
 | 4 | `AMBIGUOUS` | several objects matched | pick from candidates |
 | 5 | `AUTH` | missing, expired, or rejected credentials | log in or rotate the API token |
 | 6 | `RETRYABLE` | rate limit or transient network failure | back off and retry safely |
-| 7 | `CONFIRMATION_REQUIRED` | write was not confirmed | obtain a trusted human approval receipt |
+| 7 | `CONFIRMATION_REQUIRED` | write was not confirmed | obtain human confirmation using the operation's approval mode |
 | 8 | `PERMISSION_DENIED` | YouTrack permission or token scope denied | request permission or scope; do not retry unchanged |
 | 9 | `CONFLICT` | stale state or write conflict | re-read the YouTrack resource before deciding |
 

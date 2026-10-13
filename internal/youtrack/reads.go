@@ -12,10 +12,30 @@ import (
 const (
 	currentUserFields  = "id,login,name,fullName,email"
 	projectFields      = "id,shortName,name,archived"
-	issueFields        = "id,idReadable,summary,description,project(id,shortName,name,archived),reporter(id,login,name,fullName),created,updated,commentsCount,customFields(id,name,$type,value(id,name,login,fullName,text,presentation,isResolved,$type))"
+	issueFields        = "id,idReadable,summary,description,project(id,shortName,name,archived),reporter(id,login,name,fullName),created,updated,commentsCount,customFields(id,name,$type,projectCustomField(id,field(id)),value(id,name,login,fullName,text,presentation,isResolved,$type))"
 	projectFieldFields = "id,$type,field(id,name,fieldType(id,valueType,isMultiValue,$type)),canBeEmpty,isPublic,bundle(id,$type,values(id,name,localizedName,archived,$type),aggregatedUsers(id,login,name,fullName))"
 	commentFields      = "id,author(id,login,name,fullName),created,updated,deleted,text,visibility($type,permittedGroups(id,name),permittedUsers(id,name,login))"
 )
+
+type exactProjectFieldResponse struct {
+	ProjectField
+	CanBeEmpty *bool `json:"canBeEmpty"`
+	IsPublic   *bool `json:"isPublic"`
+	Field      struct {
+		FieldDefinition
+		FieldType struct {
+			FieldType
+			IsMultiValue *bool `json:"isMultiValue"`
+		} `json:"fieldType"`
+	} `json:"field"`
+	Bundle *struct {
+		Bundle
+		Values []struct {
+			BundleValue
+			Archived *bool `json:"archived"`
+		} `json:"values"`
+	} `json:"bundle"`
+}
 
 // CurrentUser reads the authenticated account identity.
 func (client *Client) CurrentUser(ctx context.Context) (User, error) {
@@ -94,6 +114,85 @@ func (client *Client) ListProjectFields(ctx context.Context, projectID string, o
 		}
 	}
 	return fields, nil
+}
+
+// GetProjectField reads the selected schema from the exact project subresource.
+func (client *Client) GetProjectField(ctx context.Context, projectID, projectFieldID string) (ProjectField, error) {
+	if err := validateIdentifier("project", projectID); err != nil {
+		return ProjectField{}, err
+	}
+	if err := validateIdentifier("project custom field", projectFieldID); err != nil {
+		return ProjectField{}, err
+	}
+	var response exactProjectFieldResponse
+	if err := client.readJSON(ctx, request{
+		path:  "/admin/projects/" + url.PathEscape(projectID) + "/customFields/" + url.PathEscape(projectFieldID),
+		query: fieldsQuery(projectFieldFields + ",project(id)"), operation: "project_fields.get",
+	}, &response); err != nil {
+		return ProjectField{}, err
+	}
+	if response.CanBeEmpty == nil || response.IsPublic == nil || response.Field.FieldType.IsMultiValue == nil {
+		return ProjectField{}, invalidReadResponse()
+	}
+	field := response.ProjectField
+	field.CanBeEmpty = *response.CanBeEmpty
+	field.IsPublic = *response.IsPublic
+	field.Field = response.Field.FieldDefinition
+	field.Field.FieldType = response.Field.FieldType.FieldType
+	field.Field.FieldType.IsMultiValue = *response.Field.FieldType.IsMultiValue
+	if response.Bundle != nil {
+		bundle := response.Bundle.Bundle
+		bundle.Values = make([]BundleValue, 0, len(response.Bundle.Values))
+		for _, value := range response.Bundle.Values {
+			if value.Archived == nil {
+				return ProjectField{}, invalidReadResponse()
+			}
+			entry := value.BundleValue
+			entry.Archived = *value.Archived
+			bundle.Values = append(bundle.Values, entry)
+		}
+		field.Bundle = &bundle
+	}
+	if field.ID != projectFieldID || !validEntityID(field.ID) || !validEntityID(field.Field.ID) ||
+		strings.TrimSpace(field.Field.Name) == "" || validateTypeName(field.Type) != nil ||
+		field.Field.FieldType.ID == "" || field.Field.FieldType.ValueType == "" || validateTypeName(field.Field.FieldType.Type) != nil ||
+		field.Project == nil || field.Project.ID != projectID {
+		return ProjectField{}, invalidReadResponse()
+	}
+	if field.Bundle != nil {
+		if !validEntityID(field.Bundle.ID) || validateTypeName(field.Bundle.Type) != nil {
+			return ProjectField{}, invalidReadResponse()
+		}
+		for _, value := range field.Bundle.Values {
+			if !validEntityID(value.ID) || strings.TrimSpace(value.Name) == "" || validateTypeName(value.Type) != nil {
+				return ProjectField{}, invalidReadResponse()
+			}
+		}
+	}
+	return field, nil
+}
+
+// GetComment reads one exact comment for read-only reconciliation.
+func (client *Client) GetComment(ctx context.Context, issueID, commentID string) (Comment, error) {
+	if err := validateIdentifier("issue", issueID); err != nil {
+		return Comment{}, err
+	}
+	if err := validateIdentifier("comment", commentID); err != nil {
+		return Comment{}, err
+	}
+	var response commentResponse
+	if err := client.readJSON(ctx, request{
+		path:  "/issues/" + url.PathEscape(issueID) + "/comments/" + url.PathEscape(commentID),
+		query: fieldsQuery(commentFields), operation: "comments.get",
+	}, &response); err != nil {
+		return Comment{}, err
+	}
+	comment := response.Comment
+	if !validEntityID(comment.ID) || comment.ID != commentID || response.Deleted == nil {
+		return Comment{}, invalidReadResponse()
+	}
+	comment.Deleted = *response.Deleted
+	return comment, nil
 }
 
 // ListComments reads exactly one bounded page. The API documents no ordering,
@@ -214,6 +313,9 @@ func validateIssueResponse(issue Issue, requestedID string) error {
 	}
 	for _, field := range issue.CustomFields {
 		if !validEntityID(field.ID) || field.Name == "" || field.Type == "" || len(field.Value) > maxCustomFieldValueSize {
+			return invalidReadResponse()
+		}
+		if field.ProjectCustomField != nil && (!validEntityID(field.ProjectCustomField.ID) || !validEntityID(field.ProjectCustomField.Field.ID)) {
 			return invalidReadResponse()
 		}
 	}

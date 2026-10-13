@@ -5,7 +5,6 @@ require "yaml"
 
 ALLOWED_ACTIONS = %w[actions/checkout actions/setup-go actions/setup-python].freeze
 READONLY_TAG = "portable_readonly"
-FORBIDDEN_PACKAGES = %r{/internal/(?:auth|application|journal|mutation|youtrack)$}.freeze
 CHECKOUT_STEP = {
   "name" => "Git checkout",
   "uses" => "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -29,10 +28,10 @@ VERIFY_BOUNDARY_RUN = <<~SH
   set -euo pipefail
   go test -race ./...
   go test -tags portable_readonly ./...
-  test -z "$(go list -tags portable_readonly -deps ./cmd/youtrack-agent-cli | grep -E '/internal/(auth|application|journal|mutation|youtrack)$' || true)"
+  test -z "$(go list -tags portable_readonly -deps ./cmd/youtrack-agent-cli | grep -E '/internal/(auth|application|journal|mutation|operatorwrite|youtrack)$' || true)"
   go build -tags portable_readonly -o portable-readonly ./cmd/youtrack-agent-cli
-  ./portable-readonly --help | grep -Fxq '  profile     Manage non-secret read-only Remote MCP profiles'
-  ! ./portable-readonly --help | grep -Eiq 'auth|inspect|mutation'
+  ./portable-readonly --help | grep -Eq '^  profile +Manage non-secret read-only Remote MCP profiles$'
+  ! ./portable-readonly --help | grep -Eiq 'auth|inspect|mutation|operator-write'
 SH
 VERIFY_POLICY_RUN = <<~SH
   set -euo pipefail

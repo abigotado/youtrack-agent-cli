@@ -25,7 +25,11 @@ untrusted and proves neither ordering, currentness, a stable snapshot, complete
 history, nor reconciliation evidence. The portable and macOS identity editions
 remain MCP-only.
 
-Writes use a separate exact project allowlist, offline canonical plan, trusted
-user-presence receipt, nonce/TTL/hash checks, and one mutation attempt. Never
-retry an ambiguous write. Changes to auth, request construction, logs, errors,
-receipts, or journals require a sentinel-redaction review.
+Writes use an exact project allowlist, offline canonical plan, account/profile/
+generation binding and one mutation attempt. Native `mutation` needs a trusted
+user-presence receipt and remains gated. `operator-write` instead requires
+operator-declared `--confirm-intent SHA256 --yes`; it does not prove human
+presence against a malicious agent. Keep its plans/consumption separate from
+native authority; do not claim hostile same-UID rollback protection. Never retry
+ambiguous writes or erase consumed markers. Changes to auth, requests, logs,
+errors, plans or journals require sentinel-redaction review.

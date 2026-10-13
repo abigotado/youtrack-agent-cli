@@ -35,6 +35,9 @@ func TestContractRequiresReconciliationInsteadOfReplay(t *testing.T) {
 		"never replay the mutation",
 		"mutation reconcile",
 		"operator_resolution_required",
+		"GET-only `operator-write reconcile`",
+		"WRITE_APPLIED_LOCAL_FAILURE",
+		"success with a local failure: do not resend",
 	} {
 		if !strings.Contains(got, phrase) {
 			t.Errorf("contract is missing %q", phrase)

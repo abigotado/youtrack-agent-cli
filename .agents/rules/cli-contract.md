@@ -92,7 +92,7 @@ new one is justified; if the caller's next move is the same, it is a new
 | 4 | ambiguous | pick from `candidates` |
 | 5 | auth | re-authenticate |
 | 6 | retryable (rate limit, network) | back off, retry |
-| 7 | confirmation required | obtain a trusted human approval receipt |
+| 7 | confirmation required | obtain human confirmation using the operation's approval mode |
 | 8 | permission / scope denied | stop and request permission or scope |
 | 9 | conflict / stale state | re-read the YouTrack object before retrying |
 
@@ -117,6 +117,15 @@ Two hazards that are easy to reintroduce:
 - `mutation prepare --offline` performs no network, browser, OAuth, or
   secret-store access. `mutation confirm` has no noninteractive bypass.
 - `mutation apply` requires a valid receipt and accepts no `--yes` substitute.
+- `operator-write apply` uses a separate operator-assertion mode with
+  `--confirm-intent SHA256 --yes` for the authoritative stored plan. Missing or
+  mismatched consent is `OPERATOR_CONFIRMATION_REQUIRED` before credentials or
+  network, not an independently verified receipt.
+- Never apply a consumed operator plan again. Unknown results use bounded
+  `operator-write reconcile`; verified-write local/output failure is
+  `WRITE_APPLIED_LOCAL_FAILURE`, never an invitation to repeat the write.
+- `capabilities` describes local configuration, not Keychain availability or
+  verified server permissions.
 
 ## Output economy
 

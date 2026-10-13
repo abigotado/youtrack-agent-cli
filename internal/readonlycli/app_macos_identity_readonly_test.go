@@ -64,7 +64,7 @@ func TestIdentitySurfaceAndVersionAreExact(t *testing.T) {
 		gotCommands = append(gotCommands, command.Name())
 	}
 	sort.Strings(gotCommands)
-	wantCommands := []string{"contract", "profile", "skills", "version"}
+	wantCommands := []string{"capabilities", "contract", "profile", "skills", "version"}
 	if !reflect.DeepEqual(gotCommands, wantCommands) {
 		t.Fatalf("commands=%v, want %v", gotCommands, wantCommands)
 	}
@@ -81,7 +81,7 @@ func TestIdentitySurfaceAndVersionAreExact(t *testing.T) {
 	}
 	help := stdout.String()
 	for _, command := range append([]string{"completion", "help"}, wantCommands...) {
-		if !strings.Contains(help, "  "+command+"  ") {
+		if !strings.Contains(help, "  "+command+" ") {
 			t.Errorf("identity help omits command %q: %s", command, help)
 		}
 	}

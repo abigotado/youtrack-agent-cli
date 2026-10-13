@@ -73,13 +73,13 @@ func (a *App) NewRootCommand() *cobra.Command {
 	flags.StringSliceVar(&a.fields, "fields", nil, "comma-separated output fields")
 	flags.DurationVar(&a.timeout, "timeout", defaultTimeout, "abort the command after this duration")
 	flags.BoolVarP(&a.verbose, "verbose", "v", false, "write redacted request activity to stderr")
-	flags.BoolVar(&a.assumeYes, "yes", false, "confirm a supported local configuration change")
+	flags.BoolVar(&a.assumeYes, "yes", false, "confirm a supported local configuration change or exact operator-write intent")
 	flags.BoolVar(&a.dryRun, "dry-run", false, "preview a supported local or offline change")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return errx.Usage("%v", err) })
 	root.PersistentPreRunE = a.setup
 	root.AddCommand(
-		a.newVersionCommand(), a.newContractCommand(), a.newProfileCommand(), a.newAuthCommand(),
-		a.newInspectCommand(), a.newMutationCommand(), a.newSkillsCommand(),
+		a.newVersionCommand(), a.newContractCommand(), a.newCapabilitiesCommand(), a.newProfileCommand(), a.newAuthCommand(),
+		a.newInspectCommand(), a.newMutationCommand(), a.newOperatorWriteCommand(), a.newSkillsCommand(),
 	)
 	return root
 }

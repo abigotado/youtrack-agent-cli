@@ -1,5 +1,11 @@
 # `youtrack-agent` provider-neutral Agent Skill contract
 
+Scope update: the packaged skill distinguishes operator-confirmed writes from
+the strict native flow below. The current operator policy is
+[operator-writes](../docs/operator-writes.md) and its embedded write-policy
+reference. Native receipts below remain future-only. Select the available mode
+using machine `capabilities`, not this historical status text.
+
 Status: Portable skill created; guarded execution remains disabled; no installation claimed
 
 ## Current build boundary

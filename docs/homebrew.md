@@ -2,30 +2,30 @@
 
 ## Standard macOS Formula
 
-The standard macOS distribution channel for the existing CLI is a planned
-source-built Formula in the maintained tap. The install command below applies
-after publication; it is not evidence that the Formula is already available.
+The standard macOS distribution channel is a published source-built Formula
+in the maintained tap.
 A merged source change reaches Homebrew only after its own release tag and a
 merged tap update; check `version` before
 relying on newly documented behavior:
 
 An untagged source checkout reports `devel`. A `devel` build can be used for
-development, but it is not the tagged `v0.2.0` Formula; no Formula containing
-the planned OAuth classifications has been published yet.
+development, but it is not a tagged Formula release. The released v0.3.0
+supports reads; new operator-write source changes require their own release
+and tap update before they appear in an installed binary.
 
 ```bash
 brew install abigotado/tap/youtrack-agent-cli
 youtrack-agent-cli version -o json
 ```
 
-Like the Jira, Slack, and Confluence CLI Formulae, the planned Formula will
+Like the Jira, Slack, and Confluence CLI Formulae, the Formula
 pin a checksummed immutable source release and have Homebrew build it locally
-with Go and `CGO_ENABLED=1`. The resulting binary will link the native macOS
-Security.framework Keychain backend. This Formula will not be a downloaded
-binary Cask: it will need neither Apple Developer membership nor Developer ID
+with Go and `CGO_ENABLED=1`. The resulting binary links the native macOS
+Security.framework Keychain backend. This Formula is not a downloaded
+binary Cask: it needs neither Apple Developer membership nor Developer ID
 signing, notarization, or an installer that removes Gatekeeper quarantine.
 
-The Formula will carry the standard CLI, including explicit-profile OAuth,
+The Formula carries the standard CLI, including explicit-profile OAuth,
 Keychain credential storage, REST reads, local journal operations, and the
 Agent Skill installer. The Linux portable Remote-MCP-only release is unchanged:
 it remains credential-free and does not gain a macOS archive from this Formula.
@@ -34,7 +34,11 @@ The release sequence is deliberately simple: merge the source change, create
 the immutable source tag, then open the tap PR that pins that exact archive and
 its SHA-256. A Formula update never builds from a mutable branch.
 
-### OAuth error-code transition in v0.2.0
+### OAuth error-code transition — historical v0.2.0 design
+
+The following compatibility notes describe the original v0.2.0 transition;
+their historical "planned" wording does not mean the standard Formula is
+unpublished today. Operator writes have the separate release boundary above.
 
 The planned tagged `v0.2.0` standard CLI changes machine recovery for
 authorization-code token exchange failures. The JSON envelope remains `v:1`,
@@ -105,9 +109,16 @@ youtrack-agent-cli auth migrate-keychain --profile work --yes -o json
 That command operates on exactly one selected profile and does not expose its
 secret. It is deliberately an operator action, never a post-install hook.
 
-## Guarded-write boundary
+## Write boundaries
 
-The Formula does not activate guarded YouTrack writes. `mutation prepare`
+The new [operator-confirmed lane](operator-writes.md) is source-supported,
+not part of the previously released v0.3.0. It requires a new reviewed source
+release and tap update; use `capabilities --profile NAME -o json` to check the
+installed build and local profile configuration. It supports single custom
+field updates and public comment additions with operator-declared confirmation,
+not a native receipt. It never activates the separate strict `mutation` lane.
+
+The Formula does not activate native-presence YouTrack writes. `mutation prepare`
 remains a network-free local planning operation, while `mutation confirm`,
 `mutation apply`, and `mutation reconcile` fail closed until Gate 1A and Gate
 1B have passed and a separately authorized write-capable release exists. Do
