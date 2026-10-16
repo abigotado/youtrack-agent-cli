@@ -35,6 +35,19 @@ type ProfileInfo struct {
 	Assurance    string   `json:"assurance"`
 }
 
+// ProfileDefaultSlotInfo is a non-secret diagnostic for one saved default.
+type ProfileDefaultSlotInfo struct {
+	State                 string `json:"state"`
+	ProfileName           string `json:"profile_name,omitempty"`
+	ProfileIdentitySHA256 string `json:"profile_identity_sha256,omitempty"`
+}
+
+// ProfileDefaultsInfo reports saved read and write defaults independently.
+type ProfileDefaultsInfo struct {
+	Read  ProfileDefaultSlotInfo `json:"read"`
+	Write ProfileDefaultSlotInfo `json:"write"`
+}
+
 type ProjectRef struct {
 	ID  string `json:"id"`
 	Key string `json:"key"`
@@ -216,6 +229,141 @@ func (s *Service) GetProfileInfo(ctx context.Context, name string) (ProfileInfo,
 	return profileInfo(value), err
 }
 
+// GetProfileDefaults reports local saved defaults without reading credentials
+// or contacting YouTrack.
+func (s *Service) GetProfileDefaults(ctx context.Context) (ProfileDefaultsInfo, error) {
+	if s == nil || s.Profiles == nil {
+		return ProfileDefaultsInfo{}, errx.Internal("profile registry is unavailable")
+	}
+	defaults, err := s.Profiles.GetDefaults(ctx)
+	if err != nil {
+		return ProfileDefaultsInfo{}, err
+	}
+	return s.profileDefaultsInfo(ctx, defaults)
+}
+
+// ChangeProfileDefaults atomically replaces the specified saved slots. Nil
+// inputs preserve their respective existing slots; dry-run never creates a
+// directory, lock, or file.
+func (s *Service) ChangeProfileDefaults(ctx context.Context, readName, writeName *string, dryRun bool) (ProfileDefaultsInfo, error) {
+	if s == nil || s.Profiles == nil {
+		return ProfileDefaultsInfo{}, errx.Internal("profile registry is unavailable")
+	}
+	if readName == nil && writeName == nil {
+		return ProfileDefaultsInfo{}, errx.Usage("provide a read or write profile default to change")
+	}
+	names := make([]string, 0, 2)
+	if readName != nil {
+		names = append(names, *readName)
+	}
+	if writeName != nil {
+		names = append(names, *writeName)
+	}
+	if dryRun {
+		current, err := s.Profiles.GetDefaults(ctx)
+		if err != nil {
+			return ProfileDefaultsInfo{}, err
+		}
+		if err := applyDefaultSlots(ctx, s.Profiles, &current, readName, writeName); err != nil {
+			return ProfileDefaultsInfo{}, err
+		}
+		return s.profileDefaultsInfo(ctx, current)
+	}
+	var saved profile.Defaults
+	err := withDefaultProfileLocks(ctx, s.Profiles, names, func() error {
+		var updateErr error
+		saved, updateErr = s.Profiles.UpdateDefaults(ctx, func(current profile.Defaults) (profile.Defaults, error) {
+			if err := applyDefaultSlots(ctx, s.Profiles, &current, readName, writeName); err != nil {
+				return profile.Defaults{}, err
+			}
+			return current, nil
+		})
+		return updateErr
+	})
+	if err != nil {
+		return s.profileDefaultsInfoAfterCommit(ctx, saved, err)
+	}
+	return s.profileDefaultsInfo(ctx, saved)
+}
+
+// ClearProfileDefaults clears only the requested saved slots under the
+// defaults lock. It does not take profile locks or read credentials or policy.
+func (s *Service) ClearProfileDefaults(ctx context.Context, clearRead, clearWrite, dryRun bool) (ProfileDefaultsInfo, error) {
+	if s == nil || s.Profiles == nil {
+		return ProfileDefaultsInfo{}, errx.Internal("profile registry is unavailable")
+	}
+	if !clearRead && !clearWrite {
+		return ProfileDefaultsInfo{}, errx.Usage("select a read or write profile default to clear")
+	}
+	if dryRun {
+		current, err := s.Profiles.GetDefaults(ctx)
+		if err != nil {
+			return ProfileDefaultsInfo{}, err
+		}
+		if clearRead {
+			current.Read = nil
+		}
+		if clearWrite {
+			current.Write = nil
+		}
+		return s.profileDefaultsInfo(ctx, current)
+	}
+	saved, err := s.Profiles.ClearDefaults(ctx, clearRead, clearWrite)
+	if err != nil {
+		return s.profileDefaultsInfoAfterCommit(ctx, saved, err)
+	}
+	return s.profileDefaultsInfo(ctx, saved)
+}
+
+func applyDefaultSlots(ctx context.Context, registry *profile.Registry, current *profile.Defaults, readName, writeName *string) error {
+	if readName != nil {
+		value, err := registry.Get(ctx, *readName)
+		if err != nil {
+			return err
+		}
+		slot, err := defaultSlotFor(value, "read")
+		if err != nil {
+			return err
+		}
+		current.Read = &slot
+	}
+	if writeName != nil {
+		value, err := registry.Get(ctx, *writeName)
+		if err != nil {
+			return err
+		}
+		slot, err := defaultSlotFor(value, "write")
+		if err != nil {
+			return err
+		}
+		current.Write = &slot
+	}
+	return nil
+}
+
+func (s *Service) profileDefaultsInfo(ctx context.Context, defaults profile.Defaults) (ProfileDefaultsInfo, error) {
+	read, err := profileDefaultSlotInfo(ctx, s.Profiles, defaults.Read, "read")
+	if err != nil {
+		return ProfileDefaultsInfo{}, err
+	}
+	write, err := profileDefaultSlotInfo(ctx, s.Profiles, defaults.Write, "write")
+	if err != nil {
+		return ProfileDefaultsInfo{}, err
+	}
+	return ProfileDefaultsInfo{Read: read, Write: write}, nil
+}
+
+func (s *Service) profileDefaultsInfoAfterCommit(ctx context.Context, defaults profile.Defaults, commitErr error) (ProfileDefaultsInfo, error) {
+	if !profile.WasCommitted(commitErr) {
+		return ProfileDefaultsInfo{}, commitErr
+	}
+	info, infoErr := s.profileDefaultsInfo(ctx, defaults)
+	if infoErr != nil {
+		return ProfileDefaultsInfo{}, commitErr
+	}
+	return info, commitErr
+}
+
 func (s *Service) ValidateProfileJSON(raw []byte, requestedName string) (ProfileInfo, error) {
 	var value profile.Profile
 	if err := json.Unmarshal(raw, &value); err != nil {
@@ -381,6 +529,10 @@ func TranslateError(err error, name string) error {
 		return errx.Translate(err)
 	case errors.Is(err, profile.ErrProfileRequired):
 		return errx.ProfileRequired()
+	case errors.Is(err, profile.ErrDefaultNotSet):
+		return errx.ProfileRequired()
+	case errors.Is(err, profile.ErrDefaultStale):
+		return defaultStaleError()
 	case errors.Is(err, profile.ErrInvalidProfile), errors.Is(err, endpoint.ErrInvalidEndpoint), errors.Is(err, intent.ErrInvalidPlan), errors.Is(err, intent.ErrInputTooLarge), errors.Is(err, writepolicy.ErrInvalid):
 		return errx.Usage("input failed strict validation")
 	case errors.Is(err, profile.ErrNotFound):

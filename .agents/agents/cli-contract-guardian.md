@@ -15,7 +15,9 @@ Check, in order:
    if the shape changes incompatibly.
 3. **Flags.** Existing flag names, shorthands, and defaults are contract.
    A removed or renamed flag needs a hidden alias. Verify every network command
-   keeps the explicit `--profile` requirement.
+   preserves explicit-profile requirements outside the documented saved-default
+   commands. Within those commands verify explicit flag precedence, stale
+   identity refusal before credentials, and no implicit fallback.
 4. **Generated docs.** `docs/contract.md` and the shipped skill reference are
    generated from `internal/errx`. Verify they were regenerated and match.
 5. **Dependency direction.** `internal/youtrack` must not import `internal/auth`.

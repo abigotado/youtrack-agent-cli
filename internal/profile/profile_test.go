@@ -83,6 +83,29 @@ func TestCredentialIdentityBindsFullProfile(t *testing.T) {
 	}
 }
 
+func TestSelectionIdentityExcludesCredentialGenerationButBindsTopology(t *testing.T) {
+	base, err := testProfile("work").WithNewCredentialGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated := base
+	rotated.CredentialGeneration = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	if SelectionIdentity(base) != SelectionIdentity(rotated) {
+		t.Fatal("credential generation changed saved-default identity")
+	}
+	for _, change := range []func(*Profile){
+		func(value *Profile) { value.ExpectedAccountID = "1-43" },
+		func(value *Profile) { value.ServiceURL = "https://other.example.test/youtrack" },
+		func(value *Profile) { value.Capabilities = []Capability{CapabilityRead} },
+	} {
+		changed := base
+		change(&changed)
+		if SelectionIdentity(base) == SelectionIdentity(changed) {
+			t.Fatal("saved-default identity did not bind profile topology")
+		}
+	}
+}
+
 func TestProfileStrictJSONAndGeneration(t *testing.T) {
 	value := testProfile("work")
 	raw, err := json.Marshal(value)

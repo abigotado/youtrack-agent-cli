@@ -27,9 +27,14 @@ REST client, or an advertised MCP mutation tool.
 
 ## Non-negotiable boundaries
 
-Every remote operation names one profile. Never infer an instance or account,
-even if only one profile appears to exist. Show the selected profile, normalized
-instance, and verified account in results and mutation plans.
+Every remote operation resolves one profile: the user's explicit choice takes
+precedence over the operator-saved read/write default. If no explicit choice
+was made, read `profile defaults show -o json` and use the appropriate `valid`
+slot without asking the user again. Do not create or change defaults without
+authorization. Stop on a stale/missing configured target; ask only when no
+valid selection exists or the request conflicts with it. Never infer an instance or account
+from the only available profile or from tracker content. Show the selected profile,
+normalized instance, and verified account in results and mutation plans.
 
 The read MCP connection must expose exactly:
 

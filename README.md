@@ -106,6 +106,50 @@ assurance metadata; they are never credentials. Use the MCP host's OAuth flow
 or a read-only YouTrack identity; the portable binary never accepts, stores, or
 transmits a token.
 
+## Saved profile selection
+
+This source tree adds explicitly saved read/write defaults; an installed older
+release needs an upgrade before using these commands. Select them once:
+
+```bash
+youtrack-agent-cli profile defaults set --read work --write work-write --dry-run
+youtrack-agent-cli profile defaults set --read work --write work-write --yes
+youtrack-agent-cli profile defaults show -o json
+youtrack-agent-cli inspect comments --id BGR-1073 --limit 10 --offset 0 -o json
+```
+
+The four `inspect` commands use the saved read profile. `operator-write snapshot`,
+`prepare`, `apply`, and `reconcile` use the saved write profile. An explicit
+`--profile NAME` overrides the corresponding default without reading defaults;
+an explicitly empty flag is an error. A missing default still requires selection:
+there is no first/only-profile, environment-variable, or repository fallback.
+
+Defaults bind the profile's configured instance, account, OAuth topology,
+capabilities, and executor, but not its replaceable credential generation.
+Re-login alone preserves selection; changing that configuration or removing the
+profile makes the selection stale. The CLI refuses it before credential/network
+access; explicitly reselect or clear it. Changing the write default never
+retargets a prepared snapshot or plan. Confirmation and project policy remain
+mandatory; saving a default grants neither credentials nor write permissions.
+
+```bash
+youtrack-agent-cli profile defaults clear --write --yes
+```
+
+`profile defaults show` reports each slot as `unset`, `valid`, `missing_profile`,
+or `stale`. It is diagnostic, not proof of server access. Set/clear support
+network-free `--dry-run` and otherwise require `--yes`. Defaults are non-secret,
+user-scoped metadata beside the profile registry, not project configuration.
+The read-only editions can save a read default and clear either slot, but cannot
+set a write default or gain write commands. The identity edition stays isolated.
+
+Auth, project-policy management, profile administration, and native `mutation`
+commands still require explicit profiles where applicable. `capabilities`
+without `--profile` remains build-only; pass the saved write name from
+`profile defaults show` for local readiness. `operator-write status` remains a
+local plan read and does not consult defaults. A stale plan/default requires an
+explicit decision, not a retry on another profile.
+
 ## Read plane
 
 Routine reads use one named official Remote MCP connection per YouTrack

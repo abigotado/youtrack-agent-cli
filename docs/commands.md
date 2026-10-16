@@ -2,7 +2,7 @@
 
 # Command reference
 
-JSON mode writes one stable envelope to stdout and is the default when stdout is not a TTY. Text, raw, and help output are explicitly selected exceptions. Network commands require an explicit `--profile`; there is no active or default profile. See `contract.md` for exit codes and envelopes.
+JSON mode writes one stable envelope to stdout and is the default when stdout is not a TTY. Text, raw, and help output are explicitly selected exceptions. The four `inspect` commands use an explicit `--profile` or the saved read default; `operator-write snapshot`, `prepare`, `apply`, and `reconcile` use an explicit profile or the saved write default. Explicit flags override defaults; empty flags and stale saved identities fail closed. Auth, profile administration, project policy, and native mutation retain explicit-profile requirements. No-profile `capabilities` remains build-only; local operator status does not consult defaults. Configure selection with `profile defaults show|set|clear`. See `contract.md` for exit codes and envelopes.
 
 ## JSON response recovery
 
@@ -88,7 +88,7 @@ Apply this grammar in order:
 | `--dry-run` | bool |  | preview a supported local or offline change |
 | `--fields` | stringSlice |  | comma-separated output fields |
 | `-o, --output` | string |  | output format: text, json, or raw |
-| `--profile` | string |  | explicit named YouTrack profile |
+| `--profile` | string |  | explicit named YouTrack profile; overrides a saved default on supported commands |
 | `--timeout` | duration | `30s` | abort the command after this duration |
 | `-v, --verbose` | bool |  | write redacted request activity to stderr |
 | `--yes` | bool |  | confirm a supported local configuration change or exact operator-write intent |
@@ -317,6 +317,30 @@ Add or replace one strict non-secret profile
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--from` | string |  | bounded non-secret profile JSON file |
+
+### `youtrack-agent-cli profile defaults clear`
+
+Clear saved read and write profile defaults
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--read` | bool |  | clear the saved read default |
+| `--write` | bool |  | clear the saved write default |
+
+### `youtrack-agent-cli profile defaults set`
+
+Set saved read and write profile defaults
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--read` | string |  | profile name for supported read operations |
+| `--write` | string |  | profile name for supported operator-write operations |
+
+### `youtrack-agent-cli profile defaults show`
+
+Show saved read and write profile defaults
+
+No flags of its own.
 
 ### `youtrack-agent-cli profile list`
 

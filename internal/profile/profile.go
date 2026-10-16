@@ -33,6 +33,8 @@ var (
 	ErrAlreadyExists       = errors.New("profile already exists")
 	ErrCorruptRegistry     = errors.New("profile registry is corrupt")
 	ErrInsecurePermissions = errors.New("profile registry has insecure permissions")
+	ErrDefaultNotSet       = errors.New("profile default is not set")
+	ErrDefaultStale        = errors.New("profile default identity is stale")
 
 	namePattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	accountIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
@@ -192,6 +194,15 @@ func CredentialIdentity(value Profile) string {
 	})
 	digest := sha256.Sum256(canonical)
 	return hex.EncodeToString(digest[:])
+}
+
+// SelectionIdentity hashes the stable profile topology used for saved default
+// selection. Credential generations rotate during login and must not invalidate
+// a choice that is otherwise still bound to the same profile metadata.
+func SelectionIdentity(value Profile) string {
+	value.CredentialGeneration = ""
+	value.credentialGenerationPresent = false
+	return CredentialIdentity(value)
 }
 
 func RequireName(name string) error {

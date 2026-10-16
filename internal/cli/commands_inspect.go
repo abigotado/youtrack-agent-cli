@@ -16,7 +16,7 @@ func (a *App) newInspectIssueCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use: "issue", Short: "Read one exact issue through the narrow REST helper", Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := a.requireProfile(); err != nil {
+			if err := a.resolveOperationProfile(cmd, "read"); err != nil {
 				return err
 			}
 			if id == "" {
@@ -41,7 +41,7 @@ func (a *App) newInspectCommentsCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use: "comments", Short: "Read one bounded page of comments on an exact issue", Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := a.requireProfile(); err != nil {
+			if err := a.resolveOperationProfile(cmd, "read"); err != nil {
 				return err
 			}
 			if id == "" {
@@ -77,7 +77,7 @@ func (a *App) newInspectProjectCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use: "project", Short: "Read one exact project", Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := a.requireProfile(); err != nil {
+			if err := a.resolveOperationProfile(cmd, "read"); err != nil {
 				return err
 			}
 			if id == "" {
@@ -102,7 +102,7 @@ func (a *App) newInspectSchemaCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use: "schema", Short: "Read one bounded page of project field schema", Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := a.requireProfile(); err != nil {
+			if err := a.resolveOperationProfile(cmd, "read"); err != nil {
 				return err
 			}
 			if id == "" {

@@ -66,7 +66,7 @@ func (a *App) NewRootCommand() *cobra.Command {
 	root.SetOut(a.stdout)
 	root.SetErr(a.stderr)
 	flags := root.PersistentFlags()
-	flags.StringVar(&a.profileName, "profile", "", "explicit named YouTrack profile")
+	flags.StringVar(&a.profileName, "profile", "", "explicit named YouTrack profile; overrides a saved default on supported commands")
 	flags.StringVarP(&a.format, "output", "o", "", "output format: text, json, or raw")
 	flags.BoolVar(&a.jsonAlias, "json", false, "emit the JSON envelope")
 	_ = flags.MarkHidden("json")
@@ -135,6 +135,25 @@ func (a *App) requireProfile() error {
 		return errx.ProfileRequired()
 	}
 	return application.ValidateProfileName(a.profileName)
+}
+
+// resolveOperationProfile selects a role-specific saved default only when the
+// caller did not provide --profile. An explicit empty value is rejected rather
+// than silently falling back to a saved default.
+func (a *App) resolveOperationProfile(cmd *cobra.Command, role string) error {
+	if cmd.Flags().Changed("profile") {
+		if a.profileName == "" {
+			return errx.Usage("--profile must not be empty")
+		}
+		return application.ValidateProfileName(a.profileName)
+	}
+	ctx, name, err := a.service.ResolveSavedProfile(cmd.Context(), role)
+	if err != nil {
+		return err
+	}
+	cmd.SetContext(ctx)
+	a.profileName = name
+	return nil
 }
 
 func usageArgs(validator cobra.PositionalArgs) cobra.PositionalArgs {

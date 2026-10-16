@@ -1,6 +1,11 @@
 # Read policy
 
-For MCP reads, use one explicitly selected profile and verify `get_current_user`
+For MCP reads, use the explicit profile or the saved `read` slot from
+`profile defaults show -o json`, requiring `state: "valid"`. Do not ask again
+when the saved choice is valid. Load that exact profile's pinned MCP URL; a
+saved CLI selection does not switch an MCP host connection. If no matching
+connection exists, configure it explicitly rather than using another instance.
+Verify `get_current_user`
 before relying on remote results. The connection URL must contain this exact allowlist
 and schema flag:
 

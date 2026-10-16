@@ -114,8 +114,18 @@ Two hazards that are easy to reintroduce:
 
 - Names, shorthands, and defaults are contract. A rename ships with a hidden
   alias for the old spelling.
-- Every network command requires `--profile NAME`; no command switches an
-  active profile and no stored default exists.
+- `inspect` reads and `operator-write snapshot|prepare|apply|reconcile` accept
+  an explicitly saved user-scoped read/write default. Explicit `--profile NAME`
+  overrides it without reading defaults; an explicitly empty flag is invalid.
+  Missing selection is `PROFILE_REQUIRED`; missing or identity-changed saved
+  targets are `PROFILE_DEFAULT_STALE`, never another profile. No environment,
+  repository, first-profile, or sole-profile inference is allowed.
+- `profile defaults show|set|clear` manages independent read/write slots. Set
+  and clear require `--yes` except network-free, non-mutating `--dry-run`.
+  Saving a default changes neither credentials nor capability/project grants.
+  Auth, profile administration, project policy, and native `mutation` retain
+  explicit-profile requirements. No-profile `capabilities` stays build-only;
+  `operator-write status` is local and never consults defaults.
 - Output is `-o/--output {text,json,raw}` plus `--fields`. `--json` is a
   retained hidden alias.
 - **Output defaults to `json` when stdout is not a TTY.** Do not make an agent

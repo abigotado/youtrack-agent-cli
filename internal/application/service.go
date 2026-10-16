@@ -99,7 +99,14 @@ func (s *Service) GetProfile(ctx context.Context, name string) (profile.Profile,
 	if s == nil || s.Profiles == nil {
 		return profile.Profile{}, errx.Internal("profile registry is unavailable")
 	}
-	return s.Profiles.Get(ctx, name)
+	value, err := s.Profiles.Get(ctx, name)
+	if err != nil {
+		return profile.Profile{}, checkSelectionLookupError(ctx, name, err)
+	}
+	if err := s.checkSelectionGuard(ctx, value); err != nil {
+		return profile.Profile{}, err
+	}
+	return value, nil
 }
 
 // SaveProfile installs a validated, unauthenticated profile. Replacing an
@@ -566,6 +573,9 @@ func (s *Service) client(ctx context.Context, name string) (*youtrack.Client, pr
 		var err error
 		selected, err = s.Profiles.Get(ctx, name)
 		if err != nil {
+			return checkSelectionLookupError(ctx, name, err)
+		}
+		if err := s.checkSelectionGuard(ctx, selected); err != nil {
 			return err
 		}
 		credential, err := s.Credentials.Load(ctx, name)

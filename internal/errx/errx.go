@@ -103,13 +103,13 @@ func Usage(format string, args ...any) *Error {
 	return &Error{Code: CodeUsage, Reason: "USAGE", Message: fmt.Sprintf(format, args...), Hint: "check the flags against --help"}
 }
 
-// ProfileRequired reports that implicit profile selection was unsafe.
+// ProfileRequired reports that the command has no authorized profile selection.
 func ProfileRequired() *Error {
 	return &Error{
 		Code:    CodeUsage,
 		Reason:  "PROFILE_REQUIRED",
-		Message: "an explicit profile is required for every network command",
-		Hint:    "re-run with --profile NAME",
+		Message: "this command requires a named profile selection",
+		Hint:    "pass --profile NAME; supported routine commands can use profile defaults set",
 	}
 }
 
