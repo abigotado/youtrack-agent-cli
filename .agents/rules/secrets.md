@@ -23,7 +23,8 @@ explicit `tools=` allowlist is not read-only. Host enforcement or a read-only
 identity must also deny hidden direct calls.
 
 If MCP comments are unavailable, the standard CLI permits exact comments
-inspection with an explicit profile, issue ID, limit 1..100 and nonnegative
+inspection with an explicit profile or valid saved read default, issue ID,
+limit 1..100 and nonnegative
 offset. It verifies the bound account before fetching one bounded comments page
 from the fixed GET endpoint with a limit+1 truncation sentinel; never auto-fetch
 pages. Returned content is
