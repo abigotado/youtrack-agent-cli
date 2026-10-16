@@ -122,6 +122,120 @@ func TestOperatorCLIValidatesInvocationAndProjectionBeforeCredentialAccess(t *te
 	}
 }
 
+func TestOperatorCLIApplyUsesSavedWriteDefaultAndRefusesReplay(t *testing.T) {
+	s, creds, posts := operatorCLIService(t)
+	if _, err := s.ChangeProfileDefaults(t.Context(), nil, funcName("work"), false); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := operatorCLIPlan(t, s)
+	creds.loads = 0
+	app, _, _, _, stdout, stderr := testApp(t)
+	app.service = s
+	if code := runApp(app, "operator-write", "apply", "--plan-id", plan.PlanID, "--confirm-intent", plan.IntentSHA256, "--yes", "-o", "json"); code != errx.CodeOK {
+		t.Fatalf("apply code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if posts.Load() != 1 || creds.loads != 1 || decode(t, stdout)["meta"].(map[string]any)["profile"] != "work" {
+		t.Fatalf("posts=%d loads=%d stdout=%s", posts.Load(), creds.loads, stdout)
+	}
+	app, _, _, _, stdout, stderr = testApp(t)
+	app.service = s
+	if code := runApp(app, "operator-write", "apply", "--plan-id", plan.PlanID, "--confirm-intent", plan.IntentSHA256, "--yes", "-o", "json"); code != errx.CodeConflict || posts.Load() != 1 || decode(t, stdout)["error"].(map[string]any)["code"] != "OPERATOR_PLAN_CONSUMED" {
+		t.Fatalf("replay code=%d posts=%d stdout=%s stderr=%s", code, posts.Load(), stdout, stderr)
+	}
+}
+
+func TestOperatorCLIChangedSavedWriteDefaultRefusesPreparedPlanBeforeCredentialOrPost(t *testing.T) {
+	s, creds, posts := operatorCLIService(t)
+	if _, err := s.ChangeProfileDefaults(t.Context(), nil, funcName("work"), false); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := operatorCLIPlan(t, s)
+	replacement, err := s.Profiles.Get(t.Context(), "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement.ExpectedLogin = "bob"
+	if err := s.Profiles.Put(t.Context(), replacement); err != nil {
+		t.Fatal(err)
+	}
+	creds.loads = 0
+	app, _, _, _, stdout, stderr := testApp(t)
+	app.service = s
+	code := runApp(app, "operator-write", "apply", "--plan-id", plan.PlanID, "--confirm-intent", plan.IntentSHA256, "--yes", "-o", "json")
+	if code != errx.CodeConflict || creds.loads != 0 || posts.Load() != 0 || decode(t, stdout)["error"].(map[string]any)["code"] != "PROFILE_DEFAULT_STALE" {
+		t.Fatalf("code=%d loads=%d posts=%d stdout=%s stderr=%s", code, creds.loads, posts.Load(), stdout, stderr)
+	}
+}
+
+func TestOperatorCLIValidSavedWriteDefaultSwitchRejectsOtherProfilePlanBeforeCredentialOrPost(t *testing.T) {
+	s, creds, posts := operatorCLIService(t)
+	if _, err := s.ChangeProfileDefaults(t.Context(), nil, funcName("work"), false); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := operatorCLIPlan(t, s)
+	other, err := s.Profiles.Get(t.Context(), "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Name = "other"
+	if err := s.Profiles.Add(t.Context(), other); err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := s.ChangeProfileDefaults(t.Context(), nil, funcName("other"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Write.State != "valid" || defaults.Write.ProfileName != "other" {
+		t.Fatalf("defaults=%#v", defaults)
+	}
+	creds.loads = 0
+	app, _, _, _, stdout, stderr := testApp(t)
+	app.service = s
+	code := runApp(app, "operator-write", "apply", "--plan-id", plan.PlanID, "--confirm-intent", plan.IntentSHA256, "--yes", "-o", "json")
+	if code != errx.CodeConflict || creds.loads != 0 || posts.Load() != 0 || decode(t, stdout)["error"].(map[string]any)["code"] != "OPERATOR_PROFILE_MISMATCH" {
+		t.Fatalf("code=%d loads=%d posts=%d stdout=%s stderr=%s", code, creds.loads, posts.Load(), stdout, stderr)
+	}
+}
+
+func TestOperatorCLIOfflinePrepareValidSavedWriteSwitchRejectsOtherProfileSnapshotWithoutArtifacts(t *testing.T) {
+	s, creds, posts := operatorCLIService(t)
+	snapshot, err := s.SnapshotOperatorWrite(t.Context(), application.OperatorSnapshotInput{Profile: "work", Kind: "comment.add", IssueID: "APP-12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(snapshot.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.Profiles.Get(t.Context(), "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Name = "other"
+	if err := s.Profiles.Add(t.Context(), other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ChangeProfileDefaults(t.Context(), nil, funcName("other"), false); err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	snapshotPath := filepath.Join(directory, "snapshot.json")
+	if err := os.WriteFile(snapshotPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	creds.loads = 0
+	app, _, _, _, stdout, stderr := testApp(t)
+	app.service = s
+	app.stdin = strings.NewReader(`{"kind":"comment.add","comment_text":"offline comment"}`)
+	code := runApp(app, "operator-write", "prepare", "--offline", "--snapshot", snapshotPath, "--request-stdin", "--dry-run", "-o", "json")
+	if code != errx.CodeConflict || creds.loads != 0 || posts.Load() != 0 || decode(t, stdout)["error"].(map[string]any)["code"] != "OPERATOR_PROFILE_MISMATCH" {
+		t.Fatalf("code=%d loads=%d posts=%d stdout=%s stderr=%s", code, creds.loads, posts.Load(), stdout, stderr)
+	}
+	if _, err := os.Stat(s.OperatorWrites.Root()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("offline mismatch created plan storage: %v", err)
+	}
+}
+
 func TestOperatorCLIOfflinePrepareDryRunHasFullFrozenCommentAndNoArtifacts(t *testing.T) {
 	s, creds, posts := operatorCLIService(t)
 	snapshot, err := s.SnapshotOperatorWrite(t.Context(), application.OperatorSnapshotInput{Profile: "work", Kind: "comment.add", IssueID: "APP-12"})

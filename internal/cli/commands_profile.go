@@ -14,7 +14,7 @@ func (a *App) newContractCommand() *cobra.Command {
 
 func (a *App) newProfileCommand() *cobra.Command {
 	command := commandGroup("profile", "Manage strict non-secret YouTrack profiles")
-	command.AddCommand(a.newProfileListCommand(), a.newProfileShowCommand(), a.newProfileValidateCommand(), a.newProfileAddCommand(), a.newProfileRemoveCommand())
+	command.AddCommand(a.newProfileListCommand(), a.newProfileShowCommand(), a.newProfileValidateCommand(), a.newProfileAddCommand(), a.newProfileRemoveCommand(), a.newProfileDefaultsCommand())
 	return command
 }
 

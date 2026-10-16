@@ -65,7 +65,7 @@ func (a *App) newOperatorWriteCommand() *cobra.Command {
 func (a *App) newOperatorSnapshotCommand() *cobra.Command {
 	var input application.OperatorSnapshotInput
 	command := &cobra.Command{Use: "snapshot", Short: "Read one exact issue and freeze a supported write target", Args: usageArgs(cobra.NoArgs), RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := a.requireProfile(); err != nil {
+		if err := a.resolveOperationProfile(cmd, "write"); err != nil {
 			return err
 		}
 		if a.assumeYes || a.dryRun {
@@ -99,7 +99,7 @@ func (a *App) newOperatorPrepareCommand() *cobra.Command {
 	var offline, requestStdin bool
 	var snapshotPath, outputPath string
 	command := &cobra.Command{Use: "prepare", Short: "Prepare a single-use intent offline from a frozen snapshot", Args: usageArgs(cobra.NoArgs), RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := a.requireProfile(); err != nil {
+		if err := a.resolveOperationProfile(cmd, "write"); err != nil {
 			return err
 		}
 		if !offline || !requestStdin || snapshotPath == "" {
@@ -135,7 +135,7 @@ func (a *App) newOperatorPrepareCommand() *cobra.Command {
 func (a *App) newOperatorApplyCommand() *cobra.Command {
 	var planID, digest string
 	command := &cobra.Command{Use: "apply", Short: "Consume one exact confirmed intent for at most one POST", Args: usageArgs(cobra.NoArgs), RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := a.requireProfile(); err != nil {
+		if err := a.resolveOperationProfile(cmd, "write"); err != nil {
 			return err
 		}
 		if a.dryRun {
@@ -189,7 +189,7 @@ func (a *App) newOperatorStatusCommand() *cobra.Command {
 func (a *App) newOperatorReconcileCommand() *cobra.Command {
 	var input application.OperatorReconcileInput
 	command := &cobra.Command{Use: "reconcile", Short: "Collect one bounded GET-only observation for a consumed intent", Args: usageArgs(cobra.NoArgs), RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := a.requireProfile(); err != nil {
+		if err := a.resolveOperationProfile(cmd, "write"); err != nil {
 			return err
 		}
 		if a.assumeYes || a.dryRun {

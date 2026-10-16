@@ -25,7 +25,11 @@ the client rebuilds a fixed-origin, fixed-operation URL.
 In JSON mode stdout contains exactly one envelope. Logs, warnings, and prompts
 use stderr. Text, raw, and explicit help are caller-selected exceptions.
 
-Every network operation names a profile. Reads are bounded. Preparation is
+Every network operation resolves a named profile from an explicit flag or an
+operator-saved role default on supported commands. Defaults live beside the
+user profile registry, never in repository state. Application methods still
+take explicit names; saved selection carries an identity guard through context
+and rechecks it under the client profile lock before credentials. Reads are bounded. Preparation is
 network-free. Native `mutation` requires trusted user presence and remains
 closed until its authority gates pass. Separate `operator-write` binds declared
 operator confirmation to the exact stored plan, not independently verified

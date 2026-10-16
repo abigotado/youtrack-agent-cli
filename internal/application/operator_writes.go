@@ -60,7 +60,7 @@ func (s *Service) checkOperatorBinding(ctx context.Context, snapshot operatorwri
 	if snapshot.Binding.ProfileName != name {
 		return errx.Conflict("OPERATOR_PROFILE_MISMATCH", "operator plan belongs to a different profile")
 	}
-	selected, err := s.Profiles.Get(ctx, name)
+	selected, err := s.GetProfile(ctx, name)
 	if err != nil {
 		return err
 	}

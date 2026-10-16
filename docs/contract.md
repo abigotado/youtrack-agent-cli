@@ -10,7 +10,7 @@ Current version: `1`.
 
 ```json
 {"ok":true,"v":1,"data":[{"id":"APP-123","summary":"Example"}],"meta":{"count":1,"truncated":true,"next_cursor":"opaque","profile":"work","instance":"https://example.youtrack.cloud"}}
-{"ok":false,"v":1,"error":{"code":"PROFILE_REQUIRED","message":"an explicit profile is required for every network command"},"hint":"re-run with --profile NAME"}
+{"ok":false,"v":1,"error":{"code":"PROFILE_REQUIRED","message":"this command requires a named profile selection"},"hint":"pass --profile NAME; supported routine commands can use profile defaults set"}
 ```
 
 The top-level keys `ok`, `v`, `data`, `meta`, `error`, and `hint` are the

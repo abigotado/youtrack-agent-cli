@@ -5,8 +5,27 @@ one OAuth issuer/end-point set, one credential generation, one executor mode,
 and one exact project allowlist. Profile files contain no tokens, authorization
 codes, PKCE verifiers, or refresh credentials.
 
-Name the profile on every network command. If none was supplied, list only
-non-secret profile labels and ask the user to choose; do not contact YouTrack.
+Use the user's explicit profile, otherwise the operator-saved role default.
+Read `youtrack-agent-cli profile defaults show -o json`: `data.read` and
+`data.write` expose `profile_name`, `profile_identity_sha256`, and `state`.
+Only a `valid` slot selects a target. Do not ask the user again when it is
+valid; missing/stale configured targets must be repaired explicitly, never
+replaced by another profile. If unset, list non-secret profile labels and ask
+once. Saving a default is a separate authorized local configuration change:
+
+```sh
+youtrack-agent-cli profile defaults set --read work --write work-write --yes
+```
+
+The four `inspect` commands resolve read defaults; `operator-write snapshot`,
+`prepare`, `apply`, and `reconcile` resolve write defaults. Explicit `--profile`
+wins, including when defaults are corrupt; an empty explicit flag is invalid.
+Auth, project policy, profile administration, and native mutation retain their
+explicit-profile contract. No-profile `capabilities` is build-only, so obtain
+the saved write name for its explicit readiness check. Local plan status does
+not consult defaults. Defaults are not repository/environment settings and
+never grant capabilities. A normal re-login preserves selection, but a changed
+configured identity invalidates it. Changing defaults cannot retarget a plan.
 Before presenting remote data, verify the current account and show the profile,
 instance, and account together.
 

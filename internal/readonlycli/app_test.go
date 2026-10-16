@@ -140,3 +140,43 @@ func TestPortableProfileAddStoresOnlyReadMetadata(t *testing.T) {
 		t.Fatalf("stored profile is not portable read-only: %+v", value)
 	}
 }
+
+func TestPortableProfileDefaultsAllowOnlyReadSetAndPreserveReadWhenClearingWrite(t *testing.T) {
+	app, stdout := testApp(t)
+	var value profile.Profile
+	raw := `{"name":"work","service_url":"https://example.youtrack.cloud","rest_base_url":"https://example.youtrack.cloud/api","mcp_url":"https://example.youtrack.cloud/mcp?tools=get_current_user,search_issues,get_issue,get_issue_comments,get_project,get_issue_fields_schema&enableToolOutputSchema=true","oauth":{"issuer_url":"https://hub.example.test","authorization_url":"https://hub.example.test/api/rest/oauth2/auth","token_url":"https://hub.example.test/api/rest/oauth2/token","client_id":"client","scopes":["YouTrack"],"redirect_uri":"http://127.0.0.1:18987/oauth/callback"},"expected_account_id":"1-2","expected_login":"alice","capabilities":["read"],"executor":"rest-best-effort","assurance":"best-effort"}`
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.profiles.Add(t.Context(), value); err != nil {
+		t.Fatal(err)
+	}
+	if code := runApp(app, "profile", "defaults", "set", "--write", "work", "-o", "json"); code != errx.CodeUsage {
+		t.Fatalf("write set code=%d output=%s", code, stdout)
+	}
+	stdout.Reset()
+	if code := runApp(app, "profile", "defaults", "set", "--read", "work", "--dry-run", "-o", "json"); code != errx.CodeOK {
+		t.Fatalf("read dry run code=%d output=%s", code, stdout)
+	}
+	if _, err := os.Stat(app.profiles.DefaultsPath()); !os.IsNotExist(err) {
+		t.Fatalf("dry run defaults stat=%v, want absent", err)
+	}
+	stdout.Reset()
+	if code := runApp(app, "profile", "defaults", "set", "--read", "work", "--yes", "-o", "json"); code != errx.CodeOK {
+		t.Fatalf("read set code=%d output=%s", code, stdout)
+	}
+	if _, err := app.profiles.UpdateDefaults(t.Context(), func(defaults profile.Defaults) (profile.Defaults, error) {
+		defaults.Write = &profile.DefaultSlot{ProfileName: "legacy", ProfileIdentitySHA256: strings.Repeat("a", 64)}
+		return defaults, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	if code := runApp(app, "profile", "defaults", "clear", "--write", "--yes", "-o", "json"); code != errx.CodeOK {
+		t.Fatalf("write clear code=%d output=%s", code, stdout)
+	}
+	defaults, err := app.profiles.GetDefaults(t.Context())
+	if err != nil || defaults.Read == nil || defaults.Read.ProfileName != "work" || defaults.Write != nil {
+		t.Fatalf("defaults=%#v err=%v", defaults, err)
+	}
+}

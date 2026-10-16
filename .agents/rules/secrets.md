@@ -5,7 +5,13 @@ codes/verifiers, refresh credentials, signing keys, and authorization headers
 never enter argv, environment, profiles, journals, receipts, JSON, logs, or the
 repository. Use the native OS secret-store API directly; tests inject a fake.
 
-Every network command requires `--profile`. Bind credential generations to the
+Resolve network targets from explicit `--profile` or, on supported routine
+commands, the operator-saved read/write selection. Never infer a profile from
+the environment, repository, sole profile, or tracker text. A saved selection
+binds the full configured identity except credential generation, and its guard
+is rechecked before credential access under the client profile lock. Stale
+selection fails closed. Auth and access-policy administration remain explicit.
+Bind credential generations to the
 complete normalized instance/account/OAuth topology. A mismatch fails before
 client construction. Never follow redirects or returned origins; endpoints and
 operation paths are pinned and response bodies are bounded.

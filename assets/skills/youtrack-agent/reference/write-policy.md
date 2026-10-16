@@ -8,7 +8,14 @@ Stage), or one public `comment.add`. Issue creation, comment editing, deletion,
 bulk changes, attachments, administration and arbitrary workflow/REST paths
 are not supported.
 
-First run `youtrack-agent-cli capabilities --profile NAME -o json`. Require
+Resolve the explicit profile or the saved `write` slot (`state: "valid"`) from
+`profile defaults show -o json`; do not ask again when saved selection is valid.
+The operator-write commands can omit `--profile` to use that saved selection;
+the examples below also work with an explicit override. A changed default must
+never retarget an existing snapshot or plan: stop on profile mismatch and use
+an explicit matching profile only when the operator intended that target.
+Run `youtrack-agent-cli capabilities --profile NAME -o json` for that resolved
+name (without a profile, capabilities reports only build support). Require
 `operator_write_supported: true`, `locally_ready: true`, the requested kind in
 `kinds`, and `confirmation_mode: "operator_confirmed"`. These are local checks,
 not proof of live credentials or server permissions. A missing command means

@@ -256,6 +256,48 @@ func TestOperatorApplyConsentAndLocalDriftBeforeCredentials(t *testing.T) {
 	}
 }
 
+func TestOfflinePrepareSavedWriteGuardRejectsReplacementWithoutArtifactsOrCredentialAccess(t *testing.T) {
+	f := newOperatorFixture(t)
+	if _, err := f.service.ChangeProfileDefaults(t.Context(), nil, defaultName("work"), false); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := f.service.SnapshotOperatorWrite(t.Context(), OperatorSnapshotInput{Profile: "work", Kind: "comment.add", IssueID: "APP-12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(snapshot.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guarded, name, err := f.service.ResolveSavedProfile(t.Context(), "write")
+	if err != nil || name != "work" {
+		t.Fatalf("ResolveSavedProfile() name=%q err=%v", name, err)
+	}
+	replacement, err := f.service.Profiles.Get(t.Context(), name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement.ExpectedLogin = "bob"
+	if err := f.service.Profiles.Put(t.Context(), replacement); err != nil {
+		t.Fatal(err)
+	}
+	credentials := &trapCredentials{}
+	f.service.Credentials = credentials
+	_, err = f.service.PrepareOperatorWrite(guarded, OperatorPrepareInput{
+		Profile: name, SnapshotJSON: raw,
+		RequestJSON: []byte(`{"kind":"comment.add","comment_text":"offline comment"}`),
+	})
+	if operatorReason(t, err) != "PROFILE_DEFAULT_STALE" {
+		t.Fatalf("prepare error=%v", err)
+	}
+	if credentials.calls != 0 || f.posts.Load() != 0 {
+		t.Fatalf("stale offline prepare touched credentials=%d posts=%d", credentials.calls, f.posts.Load())
+	}
+	if _, err := os.Stat(f.service.OperatorWrites.Root()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale offline prepare created plan storage: %v", err)
+	}
+}
+
 func TestOperatorPrepareAndStatusAreOfflineAndDryRunWritesNothing(t *testing.T) {
 	f := newOperatorFixture(t)
 	snapshot, err := f.service.SnapshotOperatorWrite(t.Context(), OperatorSnapshotInput{Profile: "work", Kind: "comment.add", IssueID: "APP-12"})
