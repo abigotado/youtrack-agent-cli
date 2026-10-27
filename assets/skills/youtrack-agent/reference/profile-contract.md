@@ -39,7 +39,7 @@ environment variables, profile files, logs, receipts, or repository files. Do
 not inspect or print secret-store values.
 
 Operator-confirmed writes need `rest-best-effort` / `best-effort`, the requested
-`issue-update` or `comment-add` capability, a bound credential generation and
+`issue-create`, `issue-update` or `comment-add` capability, a bound credential generation and
 a nonempty current project allowlist. Keep the existing read-only profile
 unchanged. A separate operator-approved `work-write` profile requires its own
 browser login and `auth allow-projects set --profile work-write --project ID:KEY`.

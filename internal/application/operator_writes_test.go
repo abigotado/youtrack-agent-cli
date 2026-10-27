@@ -174,7 +174,7 @@ func (f *operatorFixture) prepare(t *testing.T, kind string) OperatorWriteInfo {
 	t.Helper()
 	input := OperatorSnapshotInput{Profile: "work", Kind: kind, IssueID: "APP-12"}
 	if kind == "issue.update" {
-		input.FieldID, input.ValueID = "92-1", "101-2"
+		input.Fields = []OperatorFieldSelection{{FieldID: "92-1", ValueID: "101-2"}}
 	}
 	snapshot, err := f.service.SnapshotOperatorWrite(t.Context(), input)
 	if err != nil {
@@ -334,7 +334,7 @@ func TestOperatorPrepareAndStatusAreOfflineAndDryRunWritesNothing(t *testing.T) 
 	if creds.calls != 0 || network.calls != 0 {
 		t.Fatalf("offline credentials=%d network=%d", creds.calls, network.calls)
 	}
-	if !strings.HasSuffix(prepared.Plan.Request.CommentText, "\n\n"+operatorwrite.CommentMarker(prepared.PlanID)) {
+	if !strings.HasSuffix(prepared.Plan.Request.CommentText, "\n\n"+operatorwrite.Marker(prepared.PlanID)) {
 		t.Fatalf("missing frozen public marker: %q", prepared.Plan.Request.CommentText)
 	}
 }
@@ -468,10 +468,10 @@ func TestOperatorReconcileCommentEvidenceIsBoundedAndNeverRestoresClaim(t *testi
 			case "wrong author":
 				f.comments = []map[string]any{operatorComment(text, "4-1", "1-3")}
 			case "wrong full text":
-				f.comments = []map[string]any{operatorComment(operatorwrite.CommentMarker(p.PlanID), "4-1", "1-2")}
+				f.comments = []map[string]any{operatorComment(operatorwrite.Marker(p.PlanID), "4-1", "1-2")}
 			case "known id", "known id inconclusive":
 				if mode == "known id inconclusive" {
-					f.commentText = operatorwrite.CommentMarker(p.PlanID)
+					f.commentText = operatorwrite.Marker(p.PlanID)
 				}
 				if _, err := f.service.OperatorWrites.Finalize(t.Context(), p.PlanID, attempt, operatorwrite.Result{State: operatorwrite.StateUnknown, Code: "WRITE_OUTCOME_UNKNOWN", RemoteID: "4-1"}, f.service.currentTime()); err != nil {
 					t.Fatal(err)
@@ -536,7 +536,7 @@ func TestOperatorSnapshotRejectsUnsupportedAndUnresolvedFields(t *testing.T) {
 	for _, mode := range []string{"null prohibited", "multi value", "unsupported type", "target absent", "target archived", "target ambiguous", "field absent", "field ambiguous", "field truncated", "missing crosswalk"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newOperatorFixture(t)
-			input := OperatorSnapshotInput{Profile: "work", Kind: "issue.update", IssueID: "APP-12", FieldName: "Stage", ValueName: "Done"}
+			input := OperatorSnapshotInput{Profile: "work", Kind: "issue.update", IssueID: "APP-12", Fields: []OperatorFieldSelection{{FieldName: "Stage", ValueName: "Done"}}}
 			switch mode {
 			case "null prohibited":
 				f.schema = strings.Replace(f.schema, `"canBeEmpty":true`, `"canBeEmpty":false`, 1)
@@ -545,13 +545,13 @@ func TestOperatorSnapshotRejectsUnsupportedAndUnresolvedFields(t *testing.T) {
 			case "unsupported type":
 				f.issue = strings.Replace(f.issue, "StateIssueCustomField", "MultiEnumIssueCustomField", 1)
 			case "target absent":
-				input.ValueName = "Absent"
+				input.Fields[0].ValueName = "Absent"
 			case "target archived":
 				f.schema = strings.Replace(f.schema, `"name":"Done","$type":"StateBundleElement","archived":false`, `"name":"Done","$type":"StateBundleElement","archived":true`, 1)
 			case "target ambiguous":
 				f.schema = strings.Replace(f.schema, `"name":"Open"`, `"name":"Done"`, 1)
 			case "field absent":
-				input.FieldName = "Absent"
+				input.Fields[0].FieldName = "Absent"
 			case "field ambiguous":
 				f.fieldList = "[" + f.schema + "," + strings.Replace(f.schema, `"id":"92-1"`, `"id":"92-2"`, 1) + "]"
 			case "field truncated":
@@ -705,7 +705,7 @@ func TestOperatorSnapshotSupportsExactScalarStateAndEnumValues(t *testing.T) {
 				f.issue = strings.NewReplacer("StateIssueCustomField", "SingleEnumIssueCustomField", "StateBundleElement", "EnumBundleElement").Replace(f.issue)
 				wantType = "SingleEnumIssueCustomField"
 			}
-			result, err := f.service.SnapshotOperatorWrite(t.Context(), OperatorSnapshotInput{Profile: "work", Kind: "issue.update", IssueID: "APP-12", FieldID: "92-1", ValueID: "101-2"})
+			result, err := f.service.SnapshotOperatorWrite(t.Context(), OperatorSnapshotInput{Profile: "work", Kind: "issue.update", IssueID: "APP-12", Fields: []OperatorFieldSelection{{FieldID: "92-1", ValueID: "101-2"}}})
 			if err != nil || result.Snapshot == nil {
 				t.Fatalf("snapshot=%#v error=%v", result, err)
 			}

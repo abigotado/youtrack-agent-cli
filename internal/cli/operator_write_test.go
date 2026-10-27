@@ -369,3 +369,34 @@ func TestOperatorCLIPublicCommentProjectionKeepsCompleteTextAndIdentity(t *testi
 		t.Fatal("credential leaked to output")
 	}
 }
+
+func TestOperatorCLICreateSnapshotRefusesMalformedSelectorsBeforeCredentialAccess(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{"field without value", []string{"--kind", "issue.create", "--project", "APP", "--field", "Stage"}},
+		{"value without field", []string{"--kind", "issue.create", "--project", "APP", "--value", "Done"}},
+		{"field id without value id", []string{"--kind", "issue.create", "--project", "APP", "--field-id", "92-1"}},
+		{"value id without field id", []string{"--kind", "issue.create", "--project", "APP", "--value-id", "101-2"}},
+		{"unequal field and value counts", []string{"--kind", "issue.create", "--project", "APP", "--field", "Stage", "--field", "Priority", "--value", "Done"}},
+		{"names mixed with ids", []string{"--kind", "issue.create", "--project", "APP", "--field", "Stage", "--value", "Done", "--field-id", "92-1", "--value-id", "101-2"}},
+		{"missing project and id", []string{"--kind", "issue.create", "--field", "Stage", "--value", "Done"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, creds, posts := operatorCLIService(t)
+			creds.loads = 0
+			out := filepath.Join(t.TempDir(), "snapshot.json")
+			app, _, _, _, stdout, stderr := testApp(t)
+			app.service = s
+			args := append([]string{"operator-write", "snapshot", "--profile", "work", "--out", out, "-o", "json"}, test.args...)
+			code := runApp(app, args...)
+			if code != errx.CodeUsage || decode(t, stdout)["error"].(map[string]any)["code"] != "USAGE" || creds.loads != 0 || posts.Load() != 0 {
+				t.Fatalf("code=%d loads=%d posts=%d stdout=%s stderr=%s", code, creds.loads, posts.Load(), stdout, stderr)
+			}
+			if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("refused snapshot wrote %s: %v", out, err)
+			}
+		})
+	}
+}

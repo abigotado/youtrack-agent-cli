@@ -30,12 +30,26 @@ type CustomFieldUpdate struct {
 	Value json.RawMessage `json:"value"`
 }
 
-// CreateIssueInput is the complete supported issue.create payload.
+// CreateCustomField sets one bundle-valued field on a new issue. A new issue
+// has no issue-field identity, so the payload addresses the field by its
+// project-unique Name and Type; ProjectFieldID verifies the response.
+type CreateCustomField struct {
+	ProjectFieldID string
+	Name           string
+	Type           string
+	ValueID        string
+}
+
+// CreateIssueInput is the complete supported issue.create payload. ProjectKey
+// and the expected reporter bind the verified response, and are never sent.
 type CreateIssueInput struct {
-	ProjectID    string
-	Summary      string
-	Description  *string
-	CustomFields []CustomFieldUpdate
+	ProjectID             string
+	ProjectKey            string
+	Summary               string
+	Description           *string
+	ExpectedReporterID    string
+	ExpectedReporterLogin string
+	CustomFields          []CreateCustomField
 }
 
 // UpdateIssueInput is the complete supported issue.update payload. ProjectID
@@ -76,10 +90,16 @@ type commentResponse struct {
 }
 
 type createIssuePayload struct {
-	Project      projectReference    `json:"project"`
-	Summary      string              `json:"summary"`
-	Description  *string             `json:"description,omitempty"`
-	CustomFields []CustomFieldUpdate `json:"customFields,omitempty"`
+	Project      projectReference     `json:"project"`
+	Summary      string               `json:"summary"`
+	Description  *string              `json:"description,omitempty"`
+	CustomFields []createFieldPayload `json:"customFields,omitempty"`
+}
+
+type createFieldPayload struct {
+	Name  string           `json:"name"`
+	Type  string           `json:"$type"`
+	Value projectReference `json:"value"`
 }
 
 type updateIssuePayload struct {
@@ -98,6 +118,15 @@ func ValidateCreateIssueInput(input CreateIssueInput) error {
 	if err := validateIdentifier("project", input.ProjectID); err != nil {
 		return err
 	}
+	if err := validateIdentifier("project", input.ProjectKey); err != nil {
+		return err
+	}
+	if err := validateIdentifier("reporter", input.ExpectedReporterID); err != nil {
+		return err
+	}
+	if err := validateRequiredText("reporter login", input.ExpectedReporterLogin, maxIdentifierBytes); err != nil {
+		return err
+	}
 	if err := validateRequiredText("summary", input.Summary, maxSummaryBytes); err != nil {
 		return err
 	}
@@ -106,7 +135,26 @@ func ValidateCreateIssueInput(input CreateIssueInput) error {
 			return err
 		}
 	}
-	return validateCustomFieldUpdates(input.CustomFields)
+	projectFields, names := map[string]bool{}, map[string]bool{}
+	for _, field := range input.CustomFields {
+		if err := validateIdentifier("project custom field", field.ProjectFieldID); err != nil {
+			return err
+		}
+		if err := validateIdentifier("custom field value", field.ValueID); err != nil {
+			return err
+		}
+		if err := validateRequiredText("custom field name", field.Name, maxIdentifierBytes); err != nil {
+			return err
+		}
+		if err := validateTypeName(field.Type); err != nil {
+			return err
+		}
+		if projectFields[field.ProjectFieldID] || names[field.Name] {
+			return errx.Usage("custom fields must be unique")
+		}
+		projectFields[field.ProjectFieldID], names[field.Name] = true, true
+	}
+	return nil
 }
 
 // ValidateUpdateIssueInput validates update intent without credentials or
@@ -182,22 +230,61 @@ func (client *Client) AddComment(ctx context.Context, input AddCommentInput) (Co
 }
 
 // CreateIssue dispatches exactly one non-replayable POST /api/issues request.
+// A response that cannot be verified is WRITE_OUTCOME_UNKNOWN; when it still
+// names a well-formed issue, those identities are returned with the error so
+// reconciliation can read the exact issue instead of searching.
 func (client *Client) CreateIssue(ctx context.Context, input CreateIssueInput) (Issue, error) {
 	if err := ValidateCreateIssueInput(input); err != nil {
 		return Issue{}, err
 	}
 	payload := createIssuePayload{
-		Project: projectReference{ID: input.ProjectID}, Summary: input.Summary,
-		Description: input.Description, CustomFields: input.CustomFields,
+		Project: projectReference{ID: input.ProjectID}, Summary: input.Summary, Description: input.Description,
+	}
+	for _, field := range input.CustomFields {
+		payload.CustomFields = append(payload.CustomFields, createFieldPayload{Name: field.Name, Type: field.Type, Value: projectReference{ID: field.ValueID}})
 	}
 	var result Issue
 	if err := client.sendMutation(ctx, "/issues", "issue.create", payload, &result); err != nil {
 		return Issue{}, err
 	}
-	if validateIssueResponse(result, "") != nil || result.Project.ID != input.ProjectID || result.Summary != input.Summary {
+	if !CreatedIssueMatches(result, input) {
+		if validEntityID(result.ID) && validEntityID(result.IDReadable) {
+			return Issue{ID: result.ID, IDReadable: result.IDReadable}, errx.WriteOutcomeUnknown("issue.create")
+		}
 		return Issue{}, errx.WriteOutcomeUnknown("issue.create")
 	}
 	return result, nil
+}
+
+// CreatedIssueMatches reports whether issue carries every value the create
+// input set. Reconciliation uses it as exact evidence for a created issue.
+func CreatedIssueMatches(issue Issue, input CreateIssueInput) bool {
+	if validateIssueResponse(issue, "") != nil || issue.Project.ID != input.ProjectID || issue.Project.ShortName != input.ProjectKey ||
+		issue.Summary != input.Summary || issue.Reporter == nil || issue.Reporter.ID != input.ExpectedReporterID || issue.Reporter.Login != input.ExpectedReporterLogin {
+		return false
+	}
+	if input.Description != nil && (issue.Description == nil || *issue.Description != *input.Description) {
+		return false
+	}
+	for _, expected := range input.CustomFields {
+		matches := 0
+		for _, actual := range issue.CustomFields {
+			if actual.ProjectCustomField == nil || actual.ProjectCustomField.ID != expected.ProjectFieldID {
+				continue
+			}
+			matches++
+			var value struct {
+				ID string `json:"id"`
+			}
+			if actual.Type != expected.Type || json.Unmarshal(actual.Value, &value) != nil || value.ID != expected.ValueID {
+				return false
+			}
+		}
+		if matches != 1 {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateIssue dispatches exactly one non-replayable POST for the exact issue.

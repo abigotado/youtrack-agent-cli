@@ -11,8 +11,17 @@ const (
 	MaxOperatorRequestBytes  = operatorwrite.MaxRequestBytes
 )
 
+// OperatorFieldSelection names one target field value either by exact names
+// or by immutable project-field and bundle-value IDs, never a mix.
+type OperatorFieldSelection struct {
+	FieldName, ValueName, FieldID, ValueID string
+}
+
+// OperatorSnapshotInput selects an exact issue for issue.update/comment.add,
+// or an exact project entity ID or key for issue.create.
 type OperatorSnapshotInput struct {
-	Profile, Kind, IssueID, FieldName, ValueName, FieldID, ValueID, OutputPath string
+	Profile, Kind, IssueID, ProjectID, OutputPath string
+	Fields                                        []OperatorFieldSelection
 }
 
 type OperatorPrepareInput struct {
@@ -50,6 +59,7 @@ type OperatorWriteInfo struct {
 	ProjectKey       string                  `json:"project_key"`
 	NonReplayable    bool                    `json:"non_replayable"`
 	RemoteID         string                  `json:"remote_id,omitempty"`
+	RemoteReadableID string                  `json:"remote_readable_id,omitempty"`
 	OutputPath       string                  `json:"output_path,omitempty"`
 	Snapshot         *operatorwrite.Snapshot `json:"snapshot,omitempty"`
 	Plan             *operatorwrite.Plan     `json:"plan,omitempty"`
@@ -57,10 +67,11 @@ type OperatorWriteInfo struct {
 }
 
 func operatorSnapshotInfo(snapshot operatorwrite.Snapshot) OperatorWriteInfo {
+	projectID, projectKey := snapshot.ProjectRef()
 	return OperatorWriteInfo{State: "snapshot", Kind: string(snapshot.Kind), ConfirmationMode: operatorwrite.ConfirmationMode, Notifications: operatorwrite.Notifications,
 		Profile: snapshot.Binding.ProfileName, Instance: snapshot.Binding.InstanceURL, AccountID: snapshot.Binding.AccountID,
-		AccountLogin: snapshot.Binding.AccountLogin, IssueID: snapshot.Issue.ID, ProjectID: snapshot.Issue.ProjectID,
-		ProjectKey: snapshot.Issue.ProjectKey, Snapshot: &snapshot}
+		AccountLogin: snapshot.Binding.AccountLogin, IssueID: snapshot.Issue.ID, ProjectID: projectID,
+		ProjectKey: projectKey, Snapshot: &snapshot}
 }
 
 func operatorRecordInfo(record operatorwrite.Record) OperatorWriteInfo {
@@ -70,7 +81,7 @@ func operatorRecordInfo(record operatorwrite.Record) OperatorWriteInfo {
 	result.ExpiresAt = record.Plan.ExpiresAt.Format(time.RFC3339)
 	result.NonReplayable, result.Plan = record.NonReplayable(), &record.Plan
 	if record.Result != nil {
-		result.RemoteID = record.Result.RemoteID
+		result.RemoteID, result.RemoteReadableID = record.Result.RemoteID, record.Result.RemoteReadableID
 	}
 	return result
 }

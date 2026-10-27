@@ -6,7 +6,8 @@ Status: accepted decision. Source support is not an installed release; check
 ## Decision and threat model
 
 The standard macOS CLI has a distinct `operator-write` path for one single-value
-state/enum field update or one public comment. An operator reviews the stored
+state/enum field update, one public comment, or one new issue in an allowlisted
+project. An operator reviews the stored
 plan and confirms its digest with `--confirm-intent SHA256 --yes`. This follows
 the operator-assertion model of the existing Slack/Jira CLIs, not independently
 verified human presence or a signed receipt.
@@ -31,7 +32,12 @@ interval. Normal YouTrack/workflow notifications may occur; recipients are not
 knowable from this snapshot. Notification suppression is not exposed.
 
 No raw REST path, MCP mutation tool, deletion, attachment, arbitrary workflow,
-batch, issue creation or existing-comment edit is authorized by this path.
+batch or existing-comment edit is authorized by this path. Issue creation is
+authorized since this decision was amended: one plan creates at most one issue
+in one exact allowlisted project, with a summary, a bounded description and
+optional single State/Enum fields. Creation has no remote precondition beyond
+the project and touched schema, so two equivalent plans create two issues;
+the ledger only stops one plan from being applied twice.
 The ordinary source-built Homebrew Formula is the distribution channel, with
 no Apple Developer membership or signed approval helper requirement. Portable
 and macOS identity-only editions cannot execute operator writes.
@@ -42,7 +48,8 @@ Preserve the authenticated read-only `work` profile. Capabilities are part of
 credential identity; editing them invalidates the credential/policy binding.
 Create a separately named profile such as `work-write` for the explicitly
 chosen instance/account/OAuth registration, with capabilities
-`read`, `issue-update`, `comment-add`. Then use existing commands:
+`read`, `issue-update`, `comment-add`, and `issue-create` when agents should
+open tickets. Then use existing commands:
 
 ```sh
 youtrack-agent-cli profile add --from write-profile.json --dry-run
@@ -52,7 +59,10 @@ youtrack-agent-cli auth allow-projects set --profile work-write --project ID:KEY
 youtrack-agent-cli capabilities --profile work-write -o json
 ```
 
-Replace `ID:KEY` with a verified immutable project ID and key. Profile/login/
+Replace `ID:KEY` with a verified immutable project ID and key. Adding
+`issue-create` to an existing profile changes its credential identity, so the
+old credential generation and project policy become stale: log in again and
+set the project allowlist again before preparing any plan. Profile/login/
 policy setup requires separate operator authorization; it is not an install hook.
 Capabilities describe local build/generation/bound-policy configuration, not
 live Keychain availability, token grants or verified server permissions.
@@ -98,6 +108,48 @@ DNS or sockets. Apply validates consent, hash and local bindings before credenti
 then verifies fresh account/remote preconditions. It consumes the local attempt
 before dispatch and never restores it.
 
+## Issue creation
+
+Snapshot the exact project instead of an issue. `--project` takes the project
+entity ID or key; the snapshot freezes both after the allowlist check:
+
+```sh
+youtrack-agent-cli operator-write snapshot --profile work-write --kind issue.create \
+  --project TAC --field Stage --value 'In Progress' --field Priority --value Normal \
+  --out "$youtrack_operation_dir/snapshot.json"
+printf '%s' '{"kind":"issue.create","summary":"EXACT TITLE","description":"EXACT BODY"}' |
+  youtrack-agent-cli operator-write prepare --offline --profile work-write \
+  --snapshot "$youtrack_operation_dir/snapshot.json" --request-stdin
+```
+
+`--field`/`--value` and `--field-id`/`--value-id` are repeatable and pair by
+position; one call uses names or IDs, never both. At most eight distinct single
+State/Enum fields are frozen by project-field, global-field and value IDs.
+Omitted fields take the project's defaults. The summary is one line without
+surrounding whitespace or control characters, at most 1024 bytes. The
+description is optional, LF-only and without surrounding whitespace; the final
+description, including the visible `[youtrack operator-write PLAN_ID]` marker on
+its own last paragraph, is at most 32 KiB. These rules make the exact response
+comparison safe against server-side trimming.
+
+Apply rechecks the project ID, key and archive state and each touched field
+schema and target, then sends one `POST /api/issues`. Fields are addressed by
+their project-unique name and `$type`, because a new issue has no issue-field
+IDs yet; the response must carry the exact project, summary, description,
+bound reporter and each value under the frozen project-field ID. A response that
+names an issue but fails this check is `WRITE_OUTCOME_UNKNOWN`; the error
+envelope carries no data, but the local record keeps the issue IDs for
+`operator-write status` and reconciliation. Success reports `remote_id` and
+`remote_readable_id`.
+
+Create reconciliation reads the kept issue exactly, or runs one search page
+`project: KEY "PLAN_ID"` (`--offset 0` only) and re-reads a unique match. Evidence
+is the marker-bearing description, summary, project and reporter;
+`matching_issue_observed_fields_differ` reports a match whose fields changed
+after creation, for example by a workflow. Absent, duplicate or truncated
+results stay `operator_resolution_required`: search indexing can lag, so they
+never prove that no issue was created.
+
 Public comments use `UnlimitedVisibility` for the issue's readers, not exposure
 outside issue access controls, and the fixed
 [official comment endpoint](https://www.jetbrains.com/help/youtrack/devportal/resource-api-issues-issueID-comments.html).
@@ -110,18 +162,21 @@ outside issue access controls, and the fixed
 | Stale local or remote precondition | Zero POST; inspect again and obtain confirmation for a new plan. |
 | Claim persistence failure | Local error, zero POST; partial consumed marker remains fail-closed. |
 | Durable claim, then transport/429/malformed/unverified response | `WRITE_OUTCOME_UNKNOWN`; never apply this plan again. |
+| Create returned an issue that fails verification | `WRITE_OUTCOME_UNKNOWN`; the local record keeps `remote_id`/`remote_readable_id` (see `operator-write status`) and reconcile reads that issue exactly. |
 | Verified write, then ledger or output failure | `WRITE_APPLIED_LOCAL_FAILURE`; write applied, do not repeat. |
 | Definitive 4xx rejection | Consumed terminal rejection; any later attempt needs new snapshot, plan and confirmation. |
 | Concurrent/repeated apply | Refuse, no second POST. |
 
 Use `operator-write status` or bounded GET-only `operator-write reconcile` for
-the same plan. An exact known comment ID or unique matching marker/text/author
-provides evidence. Missing, duplicate or truncated evidence cannot prove
+the same plan. An exact known comment or issue ID, or a unique matching
+marker/text/author, provides evidence. Missing, duplicate or truncated evidence cannot prove
 non-application. Stage reconciliation reports observed desired state, not proof
 this attempt caused it. Reconciliation never restores apply eligibility.
 Previously verified applied, rejected or reconciled results are returned
 offline and never replaced by a later inconclusive observation.
 
-Envelope v1 and exit numbers remain unchanged. Select recovery by `error.code`,
+Envelope v1 and exit numbers remain unchanged. A local result file that
+records `remote_readable_id` fails closed in an older binary, which cannot
+decode it; upgrade rather than editing the file. Select recovery by `error.code`,
 not prose. Missing/invalid apply output must never trigger replay. Do not delete
 attempt files or create a new equivalent plan automatically to evade consumption.

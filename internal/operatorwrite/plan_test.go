@@ -65,7 +65,7 @@ func TestPrepareFrozenBoundedPlan(t *testing.T) {
 				if p.Snapshot.Field.TargetValue.Name == "MUTATED" {
 					t.Fatal("snapshot pointer not frozen")
 				}
-			} else if !strings.HasSuffix(p.Request.CommentText, CommentMarker(p.ID)) {
+			} else if !strings.HasSuffix(p.Request.CommentText, Marker(p.ID)) {
 				t.Fatal("final comment omitted marker")
 			}
 			p.Request.CommentText = "TAMPER_SENTINEL"
