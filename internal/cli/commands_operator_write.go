@@ -81,6 +81,10 @@ func (a *App) newOperatorSnapshotCommand() *cobra.Command {
 		if input.Kind == "" || input.IssueID == "" && input.ProjectID == "" || input.OutputPath == "" {
 			return errx.Usage("operator-write snapshot requires --kind, --id or --project, and --out")
 		}
+		if input.Kind != "issue.create" {
+			// Single-field kinds keep the scalar flags' last-value-wins meaning.
+			fieldNames, valueNames, fieldIDs, valueIDs = lastValue(fieldNames), lastValue(valueNames), lastValue(fieldIDs), lastValue(valueIDs)
+		}
 		// Selectors pair by position, so one call uses names or IDs, never both.
 		if len(fieldNames) != len(valueNames) || len(fieldIDs) != len(valueIDs) || len(fieldNames) > 0 && len(fieldIDs) > 0 {
 			return errx.Usage("pair each --field with one --value, or each --field-id with one --value-id, without mixing names and IDs")
@@ -105,12 +109,19 @@ func (a *App) newOperatorSnapshotCommand() *cobra.Command {
 	flags.StringVar(&input.Kind, "kind", "", "supported write kind: issue.create, issue.update, or comment.add")
 	flags.StringVar(&input.IssueID, "id", "", "exact issue entity or readable ID for issue.update or comment.add")
 	flags.StringVar(&input.ProjectID, "project", "", "exact project entity ID or key for issue.create")
-	flags.StringArrayVar(&fieldNames, "field", nil, "exact field name, for example Stage; repeatable for issue.create")
+	flags.StringArrayVar(&fieldNames, "field", nil, "exact field name, for example Stage; repeatable for issue.create, last wins otherwise")
 	flags.StringArrayVar(&valueNames, "value", nil, "exact target bundle value name, paired with --field")
-	flags.StringArrayVar(&fieldIDs, "field-id", nil, "immutable project custom-field ID; repeatable for issue.create")
+	flags.StringArrayVar(&fieldIDs, "field-id", nil, "immutable project custom-field ID; repeatable for issue.create, last wins otherwise")
 	flags.StringArrayVar(&valueIDs, "value-id", nil, "immutable target bundle value ID, paired with --field-id")
 	flags.StringVar(&input.OutputPath, "out", "", "new exclusive 0600 snapshot path in an existing private directory")
 	return command
+}
+
+func lastValue(values []string) []string {
+	if len(values) > 1 {
+		return values[len(values)-1:]
+	}
+	return values
 }
 
 func (a *App) newOperatorPrepareCommand() *cobra.Command {

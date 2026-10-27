@@ -400,3 +400,35 @@ func TestOperatorCLICreateSnapshotRefusesMalformedSelectorsBeforeCredentialAcces
 		})
 	}
 }
+
+// Before issue.create the selectors were scalar flags, so a repeated flag on a
+// single-field kind still means "last value wins" and must not become USAGE.
+func TestOperatorCLISingleFieldKindsKeepLastValueWinsSelectors(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{"value overridden", []string{"--field", "Stage", "--value", "Open", "--value", "Done"}},
+		{"field overridden", []string{"--field", "Priority", "--field", "Stage", "--value", "Done"}},
+		{"value id overridden", []string{"--field-id", "92-1", "--value-id", "101-1", "--value-id", "101-2"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, creds, posts := operatorCLIService(t)
+			creds.loads = 0
+			dir := t.TempDir()
+			if err := os.Chmod(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			app, _, _, _, stdout, stderr := testApp(t)
+			app.service = s
+			args := append([]string{"operator-write", "snapshot", "--profile", "work", "--kind", "issue.update", "--id", "APP-12",
+				"--out", filepath.Join(dir, "snapshot.json"), "-o", "json"}, test.args...)
+			code := runApp(app, args...)
+			// The fixture profile lacks issue-update, so reaching the capability
+			// check proves the CLI accepted the overridden selectors.
+			if code != errx.CodePermission || decode(t, stdout)["error"].(map[string]any)["code"] != "OPERATOR_CAPABILITY_REQUIRED" || creds.loads != 0 || posts.Load() != 0 {
+				t.Fatalf("code=%d loads=%d posts=%d stdout=%s stderr=%s", code, creds.loads, posts.Load(), stdout, stderr)
+			}
+		})
+	}
+}

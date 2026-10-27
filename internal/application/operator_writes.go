@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/operatorwrite"
@@ -666,6 +667,10 @@ func operatorCreateInput(plan operatorwrite.Plan) youtrack.CreateIssueInput {
 	return input
 }
 
+// createdClockSkew bounds how far the YouTrack clock may trail the local
+// claim time for a searched issue to count as created by that attempt.
+const createdClockSkew = 5 * time.Minute
+
 func operatorConsumedError() *errx.Error {
 	return errx.Conflict("OPERATOR_PLAN_CONSUMED", "operator plan has already been consumed").WithHint("use operator-write status or reconcile; never apply this plan again")
 }
@@ -723,7 +728,7 @@ func (s *Service) ReconcileOperatorWrite(ctx context.Context, input OperatorReco
 	evidence := "inconclusive"
 	switch snapshot.Kind {
 	case operatorwrite.KindIssueCreate:
-		observed, observedEvidence, err := observeCreatedIssue(ctx, client, record.Plan, outcome.RemoteID, input.Limit)
+		observed, observedEvidence, err := observeCreatedIssue(ctx, client, record.Plan, *record.Attempt, outcome.RemoteID, input.Limit)
 		if err != nil {
 			return OperatorWriteInfo{}, err
 		}
@@ -815,7 +820,7 @@ func (s *Service) ReconcileOperatorWrite(ctx context.Context, input OperatorReco
 // observeCreatedIssue collects one bounded GET-only observation of the issue
 // a create plan may have made. A zero Issue means absent, duplicate, or
 // truncated evidence, which never proves non-application.
-func observeCreatedIssue(ctx context.Context, client *youtrack.Client, plan operatorwrite.Plan, remoteID string, limit int) (youtrack.Issue, string, error) {
+func observeCreatedIssue(ctx context.Context, client *youtrack.Client, plan operatorwrite.Plan, attempt operatorwrite.Attempt, remoteID string, limit int) (youtrack.Issue, string, error) {
 	snapshot := plan.Snapshot
 	project, err := client.GetProject(ctx, snapshot.Project.ID)
 	if err != nil {
@@ -829,6 +834,9 @@ func observeCreatedIssue(ctx context.Context, client *youtrack.Client, plan oper
 	// evidence is the marker-bearing text, project, and reporter only.
 	identity := expected
 	identity.CustomFields = nil
+	// A search hit is only text evidence: an older issue edited to carry the
+	// marker was not created by this attempt.
+	notBefore := attempt.ClaimedAt.Add(-createdClockSkew).UnixMilli()
 	var candidates []youtrack.Issue
 	if remoteID != "" {
 		issue, err := client.GetIssue(ctx, remoteID)
@@ -849,7 +857,7 @@ func observeCreatedIssue(ctx context.Context, client *youtrack.Client, plan oper
 	matches := 0
 	var match youtrack.Issue
 	for _, issue := range candidates {
-		if youtrack.CreatedIssueMatches(issue, identity) {
+		if youtrack.CreatedIssueMatches(issue, identity) && (remoteID != "" || issue.Created >= notBefore) {
 			matches++
 			match = issue
 		}
@@ -862,7 +870,7 @@ func observeCreatedIssue(ctx context.Context, client *youtrack.Client, plan oper
 		if err != nil {
 			return youtrack.Issue{}, "", err
 		}
-		if verified.ID != match.ID || !youtrack.CreatedIssueMatches(verified, identity) {
+		if verified.ID != match.ID || verified.Created < notBefore || !youtrack.CreatedIssueMatches(verified, identity) {
 			return youtrack.Issue{}, "", nil
 		}
 		match = verified

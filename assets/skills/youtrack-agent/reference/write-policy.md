@@ -32,7 +32,8 @@ capabilities, replace credentials, or copy another profile's identity.
    For a comment use `--kind comment.add` without field/value selectors.
    For a new issue use `--kind issue.create --project KEY` instead of `--id`,
    optionally with repeated `--field NAME --value VALUE` pairs (or repeated
-   `--field-id`/`--value-id` pairs, never mixed) for single State/Enum fields;
+   `--field-id`/`--value-id` pairs, never mixed) for single State/Enum fields
+   (other kinds keep only the last repeated value);
    omitted fields take project defaults. A project outside the profile's
    `auth allow-projects` policy is refused with `PROJECT_POLICY_DENIED`.
    Ambiguous/truncated field-name resolution must use exact IDs, never guesses.

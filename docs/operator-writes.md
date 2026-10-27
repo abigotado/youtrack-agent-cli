@@ -123,7 +123,9 @@ printf '%s' '{"kind":"issue.create","summary":"EXACT TITLE","description":"EXACT
 ```
 
 `--field`/`--value` and `--field-id`/`--value-id` are repeatable and pair by
-position; one call uses names or IDs, never both. At most eight distinct single
+position for `issue.create`; one call uses names or IDs, never both. For
+`issue.update`, which touches one field, a repeated flag keeps its last value as
+before. At most eight distinct single
 State/Enum fields are frozen by project-field, global-field and value IDs.
 Omitted fields take the project's defaults. The summary is one line without
 surrounding whitespace or control characters, at most 1024 bytes. The
@@ -143,8 +145,10 @@ envelope carries no data, but the local record keeps the issue IDs for
 `remote_readable_id`.
 
 Create reconciliation reads the kept issue exactly, or runs one search page
-`project: KEY "PLAN_ID"` (`--offset 0` only) and re-reads a unique match. Evidence
-is the marker-bearing description, summary, project and reporter;
+`project: KEY "PLAN_ID"` (`--offset 0` only) and re-reads a unique match. A
+search match must have been created no earlier than five minutes before the
+apply claim, so an older issue that copied the marker text is not evidence.
+Evidence is the marker-bearing description, summary, project and reporter;
 `matching_issue_observed_fields_differ` reports a match whose fields changed
 after creation, for example by a workflow. Absent, duplicate or truncated
 results stay `operator_resolution_required`: search indexing can lag, so they

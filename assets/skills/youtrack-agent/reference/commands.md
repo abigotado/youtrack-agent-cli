@@ -294,8 +294,8 @@ Read one exact issue or project and freeze a supported write target
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--field` | stringArray |  | exact field name, for example Stage; repeatable for issue.create |
-| `--field-id` | stringArray |  | immutable project custom-field ID; repeatable for issue.create |
+| `--field` | stringArray |  | exact field name, for example Stage; repeatable for issue.create, last wins otherwise |
+| `--field-id` | stringArray |  | immutable project custom-field ID; repeatable for issue.create, last wins otherwise |
 | `--id` | string |  | exact issue entity or readable ID for issue.update or comment.add |
 | `--kind` | string |  | supported write kind: issue.create, issue.update, or comment.add |
 | `--out` | string |  | new exclusive 0600 snapshot path in an existing private directory |

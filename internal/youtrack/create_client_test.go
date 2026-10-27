@@ -60,7 +60,8 @@ func TestCreateIssueUnverifiedResponseIsUnknownAndKeepsIdentity(t *testing.T) {
 		{"field value", `"value":{"id":"20-2"`, `"value":{"id":"20-1"`, true},
 		{"field type", `"$type":"StateIssueCustomField"`, `"$type":"SingleEnumIssueCustomField"`, true},
 		{"field mapping", `"projectCustomField":{"id":"189-8"`, `"projectCustomField":{"id":"189-9"`, true},
-		{"missing readable id", `"idReadable":"TAC-7",`, ``, false},
+		{"missing readable id", `"idReadable":"TAC-7",`, ``, true},
+		{"missing id", `"id":"2-40",`, ``, false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -79,7 +80,11 @@ func TestCreateIssueUnverifiedResponseIsUnknownAndKeepsIdentity(t *testing.T) {
 			if posts.Load() != 1 {
 				t.Fatalf("posts=%d", posts.Load())
 			}
-			if test.keepsIdentity && (issue.ID != "2-40" || issue.IDReadable != "TAC-7") || !test.keepsIdentity && issue.ID != "" {
+			wantReadable := "TAC-7"
+			if strings.Contains(test.from, "idReadable") {
+				wantReadable = ""
+			}
+			if test.keepsIdentity && (issue.ID != "2-40" || issue.IDReadable != wantReadable) || !test.keepsIdentity && (issue.ID != "" || issue.IDReadable != "") {
 				t.Fatalf("identity=%#v", issue)
 			}
 		})

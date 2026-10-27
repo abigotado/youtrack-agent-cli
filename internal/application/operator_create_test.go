@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/auth"
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
@@ -44,12 +45,14 @@ type createdIssue struct {
 	ID, Readable, Summary, Description                        string
 	ReporterID, ReporterLogin, ProjectID, ProjectKey, ValueID string
 	FieldType                                                 string
+	Created                                                   int64
 }
 
 // matchingIssue is exactly the issue a successful create of planID produces.
 func matchingIssue(planID string) createdIssue {
 	return createdIssue{ID: "2-99", Readable: "APP-99", Summary: "New ticket", Description: "Line one\n\n" + operatorwrite.Marker(planID),
-		ReporterID: "1-2", ReporterLogin: "alice", ProjectID: "0-3", ProjectKey: "APP", ValueID: "101-2", FieldType: "StateIssueCustomField"}
+		ReporterID: "1-2", ReporterLogin: "alice", ProjectID: "0-3", ProjectKey: "APP", ValueID: "101-2", FieldType: "StateIssueCustomField",
+		Created: time.Now().UnixMilli()}
 }
 
 func (c createdIssue) json(t testing.TB) string {
@@ -57,7 +60,7 @@ func (c createdIssue) json(t testing.TB) string {
 	issue := map[string]any{"id": c.ID, "idReadable": c.Readable, "summary": c.Summary, "description": c.Description,
 		"project":  map[string]any{"id": c.ProjectID, "shortName": c.ProjectKey, "name": "Application", "archived": false},
 		"reporter": map[string]any{"id": c.ReporterID, "login": c.ReporterLogin},
-		"created":  1, "updated": 2, "commentsCount": 0}
+		"created":  c.Created, "updated": c.Created, "commentsCount": 0}
 	if c.ValueID != "" {
 		issue["customFields"] = []any{map[string]any{"id": "issue-field-7", "name": "Stage", "$type": c.FieldType,
 			"value":              map[string]any{"id": c.ValueID, "name": "Done"},
@@ -825,6 +828,12 @@ func TestOperatorCreateReconcileSearchesOnePageByMarkerAndVerifiesWithExactRead(
 		}, nil, operatorwrite.StateOperatorRequired, "inconclusive", 0},
 		{"search match contradicted by the exact read", 5, func(m createdIssue) []createdIssue { return []createdIssue{m} },
 			func(i *createdIssue) { i.Description = "tampered" }, operatorwrite.StateOperatorRequired, "inconclusive", 1},
+		{"older issue carrying a copied marker", 5, func(m createdIssue) []createdIssue {
+			m.Created = time.Now().Add(-time.Hour).UnixMilli()
+			return []createdIssue{m}
+		}, nil, operatorwrite.StateOperatorRequired, "inconclusive", 0},
+		{"exact read reports an older creation time", 5, func(m createdIssue) []createdIssue { return []createdIssue{m} },
+			func(i *createdIssue) { i.Created = time.Now().Add(-time.Hour).UnixMilli() }, operatorwrite.StateOperatorRequired, "inconclusive", 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newCreateFixture(t)

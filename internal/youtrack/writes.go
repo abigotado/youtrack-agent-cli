@@ -248,10 +248,15 @@ func (client *Client) CreateIssue(ctx context.Context, input CreateIssueInput) (
 		return Issue{}, err
 	}
 	if !CreatedIssueMatches(result, input) {
-		if validEntityID(result.ID) && validEntityID(result.IDReadable) {
-			return Issue{ID: result.ID, IDReadable: result.IDReadable}, errx.WriteOutcomeUnknown("issue.create")
+		// The immutable ID alone allows an exact reconciliation read.
+		var identity Issue
+		if validEntityID(result.ID) {
+			identity.ID = result.ID
+			if validEntityID(result.IDReadable) {
+				identity.IDReadable = result.IDReadable
+			}
 		}
-		return Issue{}, errx.WriteOutcomeUnknown("issue.create")
+		return identity, errx.WriteOutcomeUnknown("issue.create")
 	}
 	return result, nil
 }
