@@ -117,11 +117,13 @@ func (a *App) newOperatorSnapshotCommand() *cobra.Command {
 	return command
 }
 
+// lastValue keeps the scalar flag meaning: the last occurrence wins, and an
+// empty last occurrence clears the selector.
 func lastValue(values []string) []string {
-	if len(values) > 1 {
-		return values[len(values)-1:]
+	if len(values) == 0 || values[len(values)-1] == "" {
+		return nil
 	}
-	return values
+	return values[len(values)-1:]
 }
 
 func (a *App) newOperatorPrepareCommand() *cobra.Command {

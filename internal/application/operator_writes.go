@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/operatorwrite"
@@ -667,10 +666,6 @@ func operatorCreateInput(plan operatorwrite.Plan) youtrack.CreateIssueInput {
 	return input
 }
 
-// createdClockSkew bounds how far the YouTrack clock may trail the local
-// claim time for a searched issue to count as created by that attempt.
-const createdClockSkew = 5 * time.Minute
-
 func operatorConsumedError() *errx.Error {
 	return errx.Conflict("OPERATOR_PLAN_CONSUMED", "operator plan has already been consumed").WithHint("use operator-write status or reconcile; never apply this plan again")
 }
@@ -835,8 +830,9 @@ func observeCreatedIssue(ctx context.Context, client *youtrack.Client, plan oper
 	identity := expected
 	identity.CustomFields = nil
 	// A search hit is only text evidence: an older issue edited to carry the
-	// marker was not created by this attempt.
-	notBefore := attempt.ClaimedAt.Add(-createdClockSkew).UnixMilli()
+	// marker was not created by this attempt. No clock-skew allowance: a
+	// server clock trailing the claim leaves the outcome for the operator.
+	notBefore := attempt.ClaimedAt.UnixMilli()
 	var candidates []youtrack.Issue
 	if remoteID != "" {
 		issue, err := client.GetIssue(ctx, remoteID)

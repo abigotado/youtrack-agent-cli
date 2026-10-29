@@ -411,6 +411,8 @@ func TestOperatorCLISingleFieldKindsKeepLastValueWinsSelectors(t *testing.T) {
 		{"value overridden", []string{"--field", "Stage", "--value", "Open", "--value", "Done"}},
 		{"field overridden", []string{"--field", "Priority", "--field", "Stage", "--value", "Done"}},
 		{"value id overridden", []string{"--field-id", "92-1", "--value-id", "101-1", "--value-id", "101-2"}},
+		{"names cleared for ids", []string{"--field", "Stage", "--value", "Done", "--field=", "--value=", "--field-id", "92-1", "--value-id", "101-2"}},
+		{"ids cleared for names", []string{"--field-id", "92-1", "--value-id", "101-2", "--field-id=", "--value-id=", "--field", "Stage", "--value", "Done"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s, creds, posts := operatorCLIService(t)

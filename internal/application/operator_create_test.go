@@ -832,6 +832,12 @@ func TestOperatorCreateReconcileSearchesOnePageByMarkerAndVerifiesWithExactRead(
 			m.Created = time.Now().Add(-time.Hour).UnixMilli()
 			return []createdIssue{m}
 		}, nil, operatorwrite.StateOperatorRequired, "inconclusive", 0},
+		{"issue created one minute before the claim", 5, func(m createdIssue) []createdIssue {
+			m.Created = time.Now().Add(-time.Minute).UnixMilli()
+			return []createdIssue{m}
+		}, nil, operatorwrite.StateOperatorRequired, "inconclusive", 0},
+		{"exact read reports a creation one minute before the claim", 5, func(m createdIssue) []createdIssue { return []createdIssue{m} },
+			func(i *createdIssue) { i.Created = time.Now().Add(-time.Minute).UnixMilli() }, operatorwrite.StateOperatorRequired, "inconclusive", 1},
 		{"exact read reports an older creation time", 5, func(m createdIssue) []createdIssue { return []createdIssue{m} },
 			func(i *createdIssue) { i.Created = time.Now().Add(-time.Hour).UnixMilli() }, operatorwrite.StateOperatorRequired, "inconclusive", 1},
 	} {
