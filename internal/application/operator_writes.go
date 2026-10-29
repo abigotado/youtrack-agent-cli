@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/operatorwrite"
@@ -832,7 +833,11 @@ func observeCreatedIssue(ctx context.Context, client *youtrack.Client, plan oper
 	// A search hit is only text evidence: an older issue edited to carry the
 	// marker was not created by this attempt. No clock-skew allowance: a
 	// server clock trailing the claim leaves the outcome for the operator.
+	// YouTrack reports milliseconds, so the cutoff rounds the claim up.
 	notBefore := attempt.ClaimedAt.UnixMilli()
+	if attempt.ClaimedAt.After(time.UnixMilli(notBefore)) {
+		notBefore++
+	}
 	var candidates []youtrack.Issue
 	if remoteID != "" {
 		issue, err := client.GetIssue(ctx, remoteID)

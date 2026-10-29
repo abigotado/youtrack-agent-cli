@@ -969,3 +969,30 @@ func mustJSON(t *testing.T, value any) string {
 	}
 	return string(raw)
 }
+
+// YouTrack reports creation in whole milliseconds, so an issue stamped with the
+// claim's own millisecond may predate a claim made later in that millisecond.
+func TestOperatorCreateReconcileRoundsTheClaimCutoffUp(t *testing.T) {
+	claim := time.Now().UTC().Truncate(time.Millisecond).Add(900 * time.Microsecond)
+	for _, test := range []struct {
+		name      string
+		created   int64
+		wantState operatorwrite.State
+	}{
+		{"created in the claim millisecond", claim.UnixMilli(), operatorwrite.StateOperatorRequired},
+		{"created in the next millisecond", claim.UnixMilli() + 1, operatorwrite.StateReconciled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newCreateFixture(t)
+			f.service.Now = func() time.Time { return claim }
+			p := unknownCreate(t, f, false)
+			match := matchingIssue(p.PlanID)
+			match.Created = test.created
+			f.set(func() { f.search, f.issues["2-99"] = issueList(t, match), match.json(t) })
+			result, err := f.service.ReconcileOperatorWrite(t.Context(), OperatorReconcileInput{Profile: "work", PlanID: p.PlanID, Limit: 5})
+			if err != nil || result.State != string(test.wantState) {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+		})
+	}
+}
