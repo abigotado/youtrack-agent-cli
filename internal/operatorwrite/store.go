@@ -216,6 +216,7 @@ func validResult(r Result) bool {
 		return false
 	}
 	return protocolvalue.IsIdentifier(r.Code) && (r.RemoteID == "" || protocolvalue.IsIdentifier(r.RemoteID)) &&
+		(r.RemoteReadableID == "" || protocolvalue.IsIdentifier(r.RemoteReadableID)) &&
 		(r.EvidenceSHA256 == "" || protocolvalue.IsSHA256(r.EvidenceSHA256))
 }
 

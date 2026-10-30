@@ -290,17 +290,18 @@ Collect one bounded GET-only observation for a consumed intent
 
 ### `youtrack-agent-cli operator-write snapshot`
 
-Read one exact issue and freeze a supported write target
+Read one exact issue or project and freeze a supported write target
 
 | Flag | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--field` | string |  | exact field name, for example Stage |
-| `--field-id` | string |  | immutable project custom-field ID |
-| `--id` | string |  | exact issue entity or readable ID |
-| `--kind` | string |  | supported write kind: issue.update or comment.add |
+| `--field` | stringArray |  | exact field name, for example Stage; repeatable for issue.create, last wins otherwise |
+| `--field-id` | stringArray |  | immutable project custom-field ID; repeatable for issue.create, last wins otherwise |
+| `--id` | string |  | exact issue entity or readable ID for issue.update or comment.add |
+| `--kind` | string |  | supported write kind: issue.create, issue.update, or comment.add |
 | `--out` | string |  | new exclusive 0600 snapshot path in an existing private directory |
-| `--value` | string |  | exact target bundle value name |
-| `--value-id` | string |  | immutable target bundle value ID |
+| `--project` | string |  | exact project entity ID or key for issue.create |
+| `--value` | stringArray |  | exact target bundle value name, paired with --field |
+| `--value-id` | stringArray |  | immutable target bundle value ID, paired with --field-id |
 
 ### `youtrack-agent-cli operator-write status`
 

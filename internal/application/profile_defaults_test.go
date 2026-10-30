@@ -67,6 +67,28 @@ func TestChangeProfileDefaultsRejectsWriteIneligibleProfileWithoutCreatingDefaul
 	}
 }
 
+func TestChangeProfileDefaultsAcceptsEachOperatorWriteCapabilityAlone(t *testing.T) {
+	for _, capability := range []profile.Capability{profile.CapabilityIssueCreate, profile.CapabilityIssueUpdate, profile.CapabilityCommentAdd} {
+		t.Run(string(capability), func(t *testing.T) {
+			service, _, _ := mutationService(t)
+			writer, err := service.Profiles.Get(t.Context(), "work")
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer.Name = "writer"
+			writer.Capabilities = []profile.Capability{profile.CapabilityRead, capability}
+			writer.Executor, writer.Assurance = profile.ExecutorRESTBestEffort, profile.AssuranceBestEffort
+			if err := service.Profiles.Add(t.Context(), writer); err != nil {
+				t.Fatal(err)
+			}
+			updated, err := service.ChangeProfileDefaults(t.Context(), nil, defaultName("writer"), false)
+			if err != nil || updated.Write.State != "valid" || updated.Write.ProfileName != "writer" {
+				t.Fatalf("write default=%#v err=%v", updated.Write, err)
+			}
+		})
+	}
+}
+
 func TestProfileDefaultsShowAndResolveFailClosedForMissingAndStaleSlots(t *testing.T) {
 	for _, test := range []struct {
 		name   string

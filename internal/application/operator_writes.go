@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/errx"
 	"github.com/abigotado/youtrack-agent-cli/internal/operatorwrite"
@@ -33,6 +34,8 @@ func requireOperatorProfile(selected profile.Profile, kind operatorwrite.Kind) e
 	}
 	var capability profile.Capability
 	switch kind {
+	case operatorwrite.KindIssueCreate:
+		capability = profile.CapabilityIssueCreate
 	case operatorwrite.KindIssueUpdate:
 		capability = profile.CapabilityIssueUpdate
 	case operatorwrite.KindCommentAdd:
@@ -67,7 +70,8 @@ func (s *Service) checkOperatorBinding(ctx context.Context, snapshot operatorwri
 	if err := requireOperatorProfile(selected, snapshot.Kind); err != nil {
 		return err
 	}
-	policy, err := s.Policies.RequireProject(ctx, selected, snapshot.Issue.ProjectID, snapshot.Issue.ProjectKey)
+	projectID, projectKey := snapshot.ProjectRef()
+	policy, err := s.Policies.RequireProject(ctx, selected, projectID, projectKey)
 	if err != nil {
 		return err
 	}
@@ -78,7 +82,7 @@ func (s *Service) checkOperatorBinding(ctx context.Context, snapshot operatorwri
 }
 
 // SnapshotOperatorWrite reads exactly one target and its selected field schema.
-// Account verification precedes issue and schema reads.
+// Account verification precedes issue, project, and schema reads.
 func (s *Service) SnapshotOperatorWrite(ctx context.Context, input OperatorSnapshotInput) (OperatorWriteInfo, error) {
 	if err := s.requireOperatorDependencies(false); err != nil {
 		return OperatorWriteInfo{}, err
@@ -99,18 +103,8 @@ func (s *Service) SnapshotOperatorWrite(ctx context.Context, input OperatorSnaps
 	if _, err := s.Policies.GetBound(ctx, selected); err != nil {
 		return OperatorWriteInfo{}, err
 	}
-	if input.IssueID == "" {
-		return OperatorWriteInfo{}, errx.Usage("operator snapshot requires an exact issue ID")
-	}
-	if kind == operatorwrite.KindCommentAdd && (input.FieldName != "" || input.ValueName != "" || input.FieldID != "" || input.ValueID != "") {
-		return OperatorWriteInfo{}, errx.Usage("comment snapshot does not accept field or value selectors")
-	}
-	if kind == operatorwrite.KindIssueUpdate {
-		byName := input.FieldName != "" && input.ValueName != "" && input.FieldID == "" && input.ValueID == ""
-		byID := input.FieldID != "" && input.ValueID != "" && input.FieldName == "" && input.ValueName == ""
-		if !byName && !byID {
-			return OperatorWriteInfo{}, errx.Usage("issue snapshot requires either --field and --value or --field-id and --value-id")
-		}
+	if err := validateOperatorTarget(kind, input); err != nil {
+		return OperatorWriteInfo{}, err
 	}
 	client, selected, err := s.client(ctx, input.Profile)
 	if err != nil {
@@ -119,52 +113,63 @@ func (s *Service) SnapshotOperatorWrite(ctx context.Context, input OperatorSnaps
 	if err := verifyClientAccount(ctx, client, selected); err != nil {
 		return OperatorWriteInfo{}, err
 	}
-	issue, err := client.GetIssue(ctx, input.IssueID)
-	if err != nil {
-		return OperatorWriteInfo{}, err
-	}
-	if issue.Project.Archived {
-		return OperatorWriteInfo{}, errx.Permission("OPERATOR_PROJECT_ARCHIVED", "target issue belongs to an archived project")
-	}
-	policy, err := s.Policies.RequireProject(ctx, selected, issue.Project.ID, issue.Project.ShortName)
-	if err != nil {
-		return OperatorWriteInfo{}, err
-	}
-	snapshot := operatorwrite.Snapshot{Version: operatorwrite.Version, Lane: operatorwrite.Lane, Kind: kind, Binding: operatorBinding(selected, policy),
-		Issue: operatorwrite.Issue{ID: issue.ID, ReadableID: issue.IDReadable, ProjectID: issue.Project.ID, ProjectKey: issue.Project.ShortName, Updated: issue.Updated}, CapturedAt: s.currentTime()}
-	if kind == operatorwrite.KindIssueUpdate {
-		fieldID := input.FieldID
-		if fieldID == "" {
-			fields, err := client.ListProjectFields(ctx, issue.Project.ID, youtrack.PageOptions{Top: 101})
+	snapshot := operatorwrite.Snapshot{Version: operatorwrite.Version, Lane: operatorwrite.Lane, Kind: kind, CapturedAt: s.currentTime()}
+	var projectFields []youtrack.ProjectField
+	if kind == operatorwrite.KindIssueCreate {
+		project, err := client.GetProject(ctx, input.ProjectID)
+		if err != nil {
+			return OperatorWriteInfo{}, err
+		}
+		if project.Archived {
+			return OperatorWriteInfo{}, errx.Permission("OPERATOR_PROJECT_ARCHIVED", "target project is archived")
+		}
+		policy, err := s.Policies.RequireProject(ctx, selected, project.ID, project.ShortName)
+		if err != nil {
+			return OperatorWriteInfo{}, err
+		}
+		snapshot.Binding, snapshot.Project = operatorBinding(selected, policy), &operatorwrite.Project{ID: project.ID, Key: project.ShortName}
+		for _, selection := range input.Fields {
+			schema, err := resolveOperatorField(ctx, client, project.ID, selection, &projectFields)
 			if err != nil {
 				return OperatorWriteInfo{}, err
 			}
-			if len(fields) > 100 {
-				return OperatorWriteInfo{}, errx.Conflict("OPERATOR_SCHEMA_TRUNCATED", "bounded field lookup is truncated").WithHint("use exact --field-id and --value-id")
+			field, err := freezeCreateField(schema, selection.ValueID, selection.ValueName)
+			if err != nil {
+				return OperatorWriteInfo{}, err
 			}
-			matches := 0
-			for _, field := range fields {
-				if field.Field.Name == input.FieldName {
-					fieldID = field.ID
-					matches++
+			for _, frozen := range snapshot.Fields {
+				if frozen.ProjectFieldID == field.ProjectFieldID {
+					return OperatorWriteInfo{}, errx.Usage("each custom field may be selected only once")
 				}
 			}
-			if matches != 1 {
-				return OperatorWriteInfo{}, errx.Usage("field name must resolve to exactly one project field; use immutable IDs")
+			snapshot.Fields = append(snapshot.Fields, field)
+		}
+	} else {
+		issue, err := client.GetIssue(ctx, input.IssueID)
+		if err != nil {
+			return OperatorWriteInfo{}, err
+		}
+		if issue.Project.Archived {
+			return OperatorWriteInfo{}, errx.Permission("OPERATOR_PROJECT_ARCHIVED", "target issue belongs to an archived project")
+		}
+		policy, err := s.Policies.RequireProject(ctx, selected, issue.Project.ID, issue.Project.ShortName)
+		if err != nil {
+			return OperatorWriteInfo{}, err
+		}
+		snapshot.Binding = operatorBinding(selected, policy)
+		snapshot.Issue = operatorwrite.Issue{ID: issue.ID, ReadableID: issue.IDReadable, ProjectID: issue.Project.ID, ProjectKey: issue.Project.ShortName, Updated: issue.Updated}
+		if kind == operatorwrite.KindIssueUpdate {
+			selection := input.Fields[0]
+			schema, err := resolveOperatorField(ctx, client, issue.Project.ID, selection, &projectFields)
+			if err != nil {
+				return OperatorWriteInfo{}, err
 			}
+			field, err := freezeOperatorField(issue, schema, selection.ValueID, selection.ValueName)
+			if err != nil {
+				return OperatorWriteInfo{}, err
+			}
+			snapshot.Field = &field
 		}
-		schema, err := client.GetProjectField(ctx, issue.Project.ID, fieldID)
-		if err != nil {
-			return OperatorWriteInfo{}, err
-		}
-		if input.FieldName != "" && schema.Field.Name != input.FieldName {
-			return OperatorWriteInfo{}, errx.Conflict("OPERATOR_FIELD_STALE", "selected field name changed during snapshot")
-		}
-		field, err := freezeOperatorField(issue, schema, input.ValueID, input.ValueName)
-		if err != nil {
-			return OperatorWriteInfo{}, err
-		}
-		snapshot.Field = &field
 	}
 	if err := operatorwrite.ValidateSnapshot(snapshot); err != nil {
 		return OperatorWriteInfo{}, err
@@ -179,6 +184,127 @@ func (s *Service) SnapshotOperatorWrite(ctx context.Context, input OperatorSnaps
 	return result, nil
 }
 
+// validateOperatorTarget checks the kind-specific selectors before any
+// credential or network access.
+func validateOperatorTarget(kind operatorwrite.Kind, input OperatorSnapshotInput) error {
+	for _, selection := range input.Fields {
+		byName := selection.FieldName != "" && selection.ValueName != "" && selection.FieldID == "" && selection.ValueID == ""
+		byID := selection.FieldID != "" && selection.ValueID != "" && selection.FieldName == "" && selection.ValueName == ""
+		if !byName && !byID {
+			return errx.Usage("each field selection requires either --field and --value or --field-id and --value-id")
+		}
+	}
+	selected := make(map[OperatorFieldSelection]bool, len(input.Fields))
+	for _, selection := range input.Fields {
+		key := OperatorFieldSelection{FieldName: selection.FieldName, FieldID: selection.FieldID}
+		if selected[key] {
+			return errx.Usage("each custom field may be selected only once")
+		}
+		selected[key] = true
+	}
+	switch kind {
+	case operatorwrite.KindIssueCreate:
+		if input.ProjectID == "" || input.IssueID != "" {
+			return errx.Usage("issue.create snapshot requires an exact --project and no --id")
+		}
+		if len(input.Fields) > operatorwrite.MaxCreateFields {
+			return errx.Usage("issue.create snapshot accepts at most %d field selections", operatorwrite.MaxCreateFields)
+		}
+	case operatorwrite.KindIssueUpdate:
+		if input.IssueID == "" || input.ProjectID != "" {
+			return errx.Usage("issue.update snapshot requires an exact --id and no --project")
+		}
+		if len(input.Fields) != 1 {
+			return errx.Usage("issue snapshot requires either --field and --value or --field-id and --value-id")
+		}
+	case operatorwrite.KindCommentAdd:
+		if input.IssueID == "" || input.ProjectID != "" {
+			return errx.Usage("comment.add snapshot requires an exact --id and no --project")
+		}
+		if len(input.Fields) != 0 {
+			return errx.Usage("comment snapshot does not accept field or value selectors")
+		}
+	default:
+		return errx.Usage("unsupported operator-write kind")
+	}
+	return nil
+}
+
+// resolveOperatorField reads the exact selected schema. Name resolution uses
+// one bounded page, read at most once per snapshot, and refuses ambiguity.
+func resolveOperatorField(ctx context.Context, client *youtrack.Client, projectID string, selection OperatorFieldSelection, listed *[]youtrack.ProjectField) (youtrack.ProjectField, error) {
+	fieldID := selection.FieldID
+	if fieldID == "" {
+		if *listed == nil {
+			fields, err := client.ListProjectFields(ctx, projectID, youtrack.PageOptions{Top: 101})
+			if err != nil {
+				return youtrack.ProjectField{}, err
+			}
+			if len(fields) > 100 {
+				return youtrack.ProjectField{}, errx.Conflict("OPERATOR_SCHEMA_TRUNCATED", "bounded field lookup is truncated").WithHint("use exact --field-id and --value-id")
+			}
+			*listed = fields
+		}
+		matches := 0
+		for _, field := range *listed {
+			if field.Field.Name == selection.FieldName {
+				fieldID = field.ID
+				matches++
+			}
+		}
+		if matches != 1 {
+			return youtrack.ProjectField{}, errx.Usage("field name must resolve to exactly one project field; use immutable IDs")
+		}
+	}
+	schema, err := client.GetProjectField(ctx, projectID, fieldID)
+	if err != nil {
+		return youtrack.ProjectField{}, err
+	}
+	if selection.FieldName != "" && schema.Field.Name != selection.FieldName {
+		return youtrack.ProjectField{}, errx.Conflict("OPERATOR_FIELD_STALE", "selected field name changed during snapshot")
+	}
+	return schema, nil
+}
+
+// freezeCreateField freezes one project schema and nonarchived target value
+// for a new issue. There is no issue field or current value to bind yet.
+func freezeCreateField(schema youtrack.ProjectField, valueID, valueName string) (operatorwrite.Field, error) {
+	if schema.ID == "" || schema.Field.ID == "" || schema.Field.FieldType.IsMultiValue || schema.Bundle == nil {
+		return operatorwrite.Field{}, errx.Usage("only single State and Enum fields are supported")
+	}
+	var issueType, valueType string
+	switch schema.Type {
+	case "StateProjectCustomField":
+		issueType, valueType = "StateIssueCustomField", "StateBundleElement"
+	case "EnumProjectCustomField":
+		issueType, valueType = "SingleEnumIssueCustomField", "EnumBundleElement"
+	default:
+		return operatorwrite.Field{}, errx.Usage("only single State and Enum fields are supported")
+	}
+	field := operatorwrite.Field{ProjectFieldID: schema.ID, GlobalFieldID: schema.Field.ID, Name: schema.Field.Name,
+		Type: issueType, ProjectFieldType: schema.Type, ValueType: schema.Field.FieldType.ValueType, IsMultiValue: schema.Field.FieldType.IsMultiValue,
+		CanBeEmpty: schema.CanBeEmpty, IsPublic: schema.IsPublic, FieldTypeID: schema.Field.FieldType.ID, FieldTypeType: schema.Field.FieldType.Type,
+		BundleID: schema.Bundle.ID, BundleType: schema.Bundle.Type}
+	targetMatches := 0
+	seen := make(map[string]bool, len(schema.Bundle.Values))
+	for _, value := range schema.Bundle.Values {
+		if value.ID == "" || seen[value.ID] {
+			return field, errx.Conflict("OPERATOR_BUNDLE_INVALID", "field bundle has missing or duplicate value IDs")
+		}
+		seen[value.ID] = true
+		if valueID != "" && value.ID == valueID || valueName != "" && value.Name == valueName {
+			field.TargetValue = operatorwrite.Value{ID: value.ID, Name: value.Name, Archived: value.Archived, Type: value.Type}
+			targetMatches++
+		}
+	}
+	if targetMatches != 1 || field.TargetValue.Archived {
+		return field, errx.Usage("the target value must be known, unique, and not archived")
+	}
+	if field.TargetValue.Type != valueType {
+		return field, errx.Conflict("OPERATOR_FIELD_VALUE_INVALID", "selected field value has an incompatible bundle type")
+	}
+	return field, nil
+}
 func freezeOperatorField(issue youtrack.Issue, schema youtrack.ProjectField, valueID, valueName string) (operatorwrite.Field, error) {
 	if schema.ID == "" || schema.Field.ID == "" || schema.Field.FieldType.IsMultiValue || schema.Bundle == nil {
 		return operatorwrite.Field{}, errx.Usage("only single State and Enum fields are supported")
@@ -359,6 +485,13 @@ func (s *Service) ApplyOperatorWrite(ctx context.Context, input OperatorApplyInp
 	if err := operatorwrite.CheckFresh(plan, s.currentTime()); err != nil {
 		return OperatorWriteInfo{}, err
 	}
+	// A payload the client would refuse must fail here, before Claim consumes
+	// the plan, not be recorded as a remote rejection.
+	if plan.Snapshot.Kind == operatorwrite.KindIssueCreate {
+		if err := youtrack.ValidateCreateIssueInput(operatorCreateInput(plan)); err != nil {
+			return OperatorWriteInfo{}, err
+		}
+	}
 	if err := s.checkOperatorBinding(ctx, plan.Snapshot, input.Profile); err != nil {
 		return OperatorWriteInfo{}, err
 	}
@@ -388,8 +521,8 @@ func (s *Service) ApplyOperatorWrite(ctx context.Context, input OperatorApplyInp
 				return claimErr
 			}
 			// Claim releases its own ledger lock before this remote call.
-			remoteID, writeErr := dispatchOperatorWrite(ctx, client, plan)
-			outcome := operatorwrite.Result{State: operatorwrite.StateApplied, Code: "WRITE_APPLIED", RemoteID: remoteID}
+			remoteID, remoteReadableID, writeErr := dispatchOperatorWrite(ctx, client, plan)
+			outcome := operatorwrite.Result{State: operatorwrite.StateApplied, Code: "WRITE_APPLIED", RemoteID: remoteID, RemoteReadableID: remoteReadableID}
 			if writeErr != nil {
 				outcome.State, outcome.Code = operatorwrite.StateUnknown, "WRITE_OUTCOME_UNKNOWN"
 				var typed *errx.Error
@@ -424,14 +557,41 @@ func (s *Service) ApplyOperatorWrite(ctx context.Context, input OperatorApplyInp
 }
 
 func verifyOperatorRemote(ctx context.Context, client *youtrack.Client, snapshot operatorwrite.Snapshot) error {
-	issue, err := client.GetIssue(ctx, snapshot.Issue.ID)
-	if err != nil {
-		return err
-	}
-	if issue.Project.Archived || issue.Project.ID != snapshot.Issue.ProjectID || issue.Project.ShortName != snapshot.Issue.ProjectKey || issue.Updated != snapshot.Issue.Updated {
-		return errx.Conflict("OPERATOR_ISSUE_STALE", "target issue project or updated timestamp changed").WithHint("inspect a new snapshot and prepare a fresh intent")
-	}
-	if snapshot.Kind == operatorwrite.KindIssueUpdate {
+	switch snapshot.Kind {
+	case operatorwrite.KindIssueCreate:
+		project, err := client.GetProject(ctx, snapshot.Project.ID)
+		if err != nil {
+			return err
+		}
+		if project.Archived || project.ID != snapshot.Project.ID || project.ShortName != snapshot.Project.Key {
+			return errx.Conflict("OPERATOR_PROJECT_STALE", "target project identity or archive state changed").WithHint("inspect a new snapshot and prepare a fresh intent")
+		}
+		for _, frozen := range snapshot.Fields {
+			schema, err := client.GetProjectField(ctx, project.ID, frozen.ProjectFieldID)
+			if err != nil {
+				return err
+			}
+			field, err := freezeCreateField(schema, frozen.TargetValue.ID, "")
+			if err != nil {
+				// The snapshot froze a valid field, so a refusal now is drift.
+				return errx.Conflict("OPERATOR_FIELD_STALE", "touched field schema or target changed").WithHint("inspect a new snapshot and prepare a fresh intent")
+			}
+			if err := requireSameField(frozen, field); err != nil {
+				return err
+			}
+		}
+		return nil
+	case operatorwrite.KindIssueUpdate, operatorwrite.KindCommentAdd:
+		issue, err := client.GetIssue(ctx, snapshot.Issue.ID)
+		if err != nil {
+			return err
+		}
+		if issue.Project.Archived || issue.Project.ID != snapshot.Issue.ProjectID || issue.Project.ShortName != snapshot.Issue.ProjectKey || issue.Updated != snapshot.Issue.Updated {
+			return errx.Conflict("OPERATOR_ISSUE_STALE", "target issue project or updated timestamp changed").WithHint("inspect a new snapshot and prepare a fresh intent")
+		}
+		if snapshot.Kind == operatorwrite.KindCommentAdd {
+			return nil
+		}
 		schema, err := client.GetProjectField(ctx, issue.Project.ID, snapshot.Field.ProjectFieldID)
 		if err != nil {
 			return err
@@ -440,43 +600,71 @@ func verifyOperatorRemote(ctx context.Context, client *youtrack.Client, snapshot
 		if err != nil {
 			return err
 		}
-		frozen, err := json.Marshal(snapshot.Field)
-		if err != nil {
-			return errx.Internal("encode frozen touched field")
-		}
-		fresh, err := json.Marshal(field)
-		if err != nil {
-			return errx.Internal("encode current touched field")
-		}
-		if !bytes.Equal(frozen, fresh) {
-			return errx.Conflict("OPERATOR_FIELD_STALE", "touched field schema, current value, or target changed").WithHint("inspect a new snapshot and prepare a fresh intent")
-		}
+		return requireSameField(*snapshot.Field, field)
+	default:
+		return errx.Usage("unsupported operator-write kind")
+	}
+}
+
+func requireSameField(frozen, current operatorwrite.Field) error {
+	frozenJSON, err := json.Marshal(frozen)
+	if err != nil {
+		return errx.Internal("encode frozen touched field")
+	}
+	currentJSON, err := json.Marshal(current)
+	if err != nil {
+		return errx.Internal("encode current touched field")
+	}
+	if !bytes.Equal(frozenJSON, currentJSON) {
+		return errx.Conflict("OPERATOR_FIELD_STALE", "touched field schema, current value, or target changed").WithHint("inspect a new snapshot and prepare a fresh intent")
 	}
 	return nil
 }
 
-func dispatchOperatorWrite(ctx context.Context, client *youtrack.Client, plan operatorwrite.Plan) (string, error) {
+// dispatchOperatorWrite sends the plan's single POST and returns the remote
+// entity ID and, for a created issue, its readable ID.
+func dispatchOperatorWrite(ctx context.Context, client *youtrack.Client, plan operatorwrite.Plan) (string, string, error) {
 	snapshot := plan.Snapshot
-	if snapshot.Kind == operatorwrite.KindIssueUpdate {
+	switch snapshot.Kind {
+	case operatorwrite.KindIssueCreate:
+		issue, err := client.CreateIssue(ctx, operatorCreateInput(plan))
+		return issue.ID, issue.IDReadable, err
+	case operatorwrite.KindIssueUpdate:
 		value, err := json.Marshal(struct {
 			ID string `json:"id"`
 		}{snapshot.Field.TargetValue.ID})
 		if err != nil {
-			return "", errx.Internal("encode frozen field value")
+			return "", "", errx.Internal("encode frozen field value")
 		}
 		issue, err := client.UpdateIssue(ctx, youtrack.UpdateIssueInput{IssueID: snapshot.Issue.ID, ProjectID: snapshot.Issue.ProjectID, ProjectKey: snapshot.Issue.ProjectKey,
 			CustomFields: []youtrack.CustomFieldUpdate{{ID: snapshot.Field.IssueFieldID, Type: snapshot.Field.Type, Value: value}}})
-		return issue.ID, err
+		return issue.ID, "", err
+	case operatorwrite.KindCommentAdd:
+		comment, err := client.AddComment(ctx, youtrack.AddCommentInput{IssueID: snapshot.Issue.ID, ExpectedAuthorID: snapshot.Binding.AccountID, ExpectedAuthorLogin: snapshot.Binding.AccountLogin, Text: plan.Request.CommentText})
+		if err != nil {
+			return "", "", err
+		}
+		issue, err := client.GetIssue(ctx, snapshot.Issue.ID)
+		if err != nil || issue.Project.ID != snapshot.Issue.ProjectID || issue.Project.ShortName != snapshot.Issue.ProjectKey {
+			return comment.ID, "", operatorUnknownError()
+		}
+		return comment.ID, "", nil
+	default:
+		// Unreachable for a validated plan; it is classified unknown, never rejected.
+		return "", "", operatorUnknownError()
 	}
-	comment, err := client.AddComment(ctx, youtrack.AddCommentInput{IssueID: snapshot.Issue.ID, ExpectedAuthorID: snapshot.Binding.AccountID, ExpectedAuthorLogin: snapshot.Binding.AccountLogin, Text: plan.Request.CommentText})
-	if err != nil {
-		return "", err
+}
+
+// operatorCreateInput is the one create payload, shared by dispatch and the
+// reconciliation evidence check.
+func operatorCreateInput(plan operatorwrite.Plan) youtrack.CreateIssueInput {
+	snapshot, description := plan.Snapshot, plan.Request.Description
+	input := youtrack.CreateIssueInput{ProjectID: snapshot.Project.ID, ProjectKey: snapshot.Project.Key, Summary: plan.Request.Summary, Description: &description,
+		ExpectedReporterID: snapshot.Binding.AccountID, ExpectedReporterLogin: snapshot.Binding.AccountLogin}
+	for _, field := range snapshot.Fields {
+		input.CustomFields = append(input.CustomFields, youtrack.CreateCustomField{ProjectFieldID: field.ProjectFieldID, Name: field.Name, Type: field.Type, ValueID: field.TargetValue.ID})
 	}
-	issue, err := client.GetIssue(ctx, snapshot.Issue.ID)
-	if err != nil || issue.Project.ID != snapshot.Issue.ProjectID || issue.Project.ShortName != snapshot.Issue.ProjectKey {
-		return comment.ID, operatorUnknownError()
-	}
-	return comment.ID, nil
+	return input
 }
 
 func operatorConsumedError() *errx.Error {
@@ -515,6 +703,9 @@ func (s *Service) ReconcileOperatorWrite(ctx context.Context, input OperatorReco
 	default:
 		return OperatorWriteInfo{}, operatorConsumedError()
 	}
+	if record.Plan.Snapshot.Kind == operatorwrite.KindIssueCreate && input.Offset != 0 {
+		return OperatorWriteInfo{}, errx.Usage("issue.create reconcile reads only the first search page; pass --offset 0")
+	}
 	if err := s.checkOperatorBinding(ctx, record.Plan.Snapshot, input.Profile); err != nil {
 		return OperatorWriteInfo{}, err
 	}
@@ -526,76 +717,91 @@ func (s *Service) ReconcileOperatorWrite(ctx context.Context, input OperatorReco
 		return OperatorWriteInfo{}, err
 	}
 	snapshot := record.Plan.Snapshot
-	issue, err := client.GetIssue(ctx, snapshot.Issue.ID)
-	if err != nil {
-		return OperatorWriteInfo{}, err
-	}
-	if issue.Project.ID != snapshot.Issue.ProjectID || issue.Project.ShortName != snapshot.Issue.ProjectKey {
-		return OperatorWriteInfo{}, errx.Conflict("OPERATOR_PROJECT_CHANGED", "target issue moved from the frozen project")
-	}
 	outcome := operatorwrite.Result{State: operatorwrite.StateOperatorRequired, Code: "OPERATOR_RESOLUTION_REQUIRED"}
 	if record.Result != nil {
-		outcome.RemoteID = record.Result.RemoteID
+		outcome.RemoteID, outcome.RemoteReadableID = record.Result.RemoteID, record.Result.RemoteReadableID
 	}
 	evidence := "inconclusive"
-	if snapshot.Kind == operatorwrite.KindIssueUpdate {
-		for _, field := range issue.CustomFields {
-			if field.ID == snapshot.Field.IssueFieldID && field.Type == snapshot.Field.Type {
-				var value struct {
-					ID   string `json:"id"`
-					Type string `json:"$type"`
-				}
-				if json.Unmarshal(field.Value, &value) == nil && value.ID == snapshot.Field.TargetValue.ID && value.Type == snapshot.Field.TargetValue.Type {
-					evidence = "desired_value_observed_without_causal_proof"
-				}
-			}
+	switch snapshot.Kind {
+	case operatorwrite.KindIssueCreate:
+		observed, observedEvidence, err := observeCreatedIssue(ctx, client, record.Plan, *record.Attempt, outcome.RemoteID, input.Limit)
+		if err != nil {
+			return OperatorWriteInfo{}, err
 		}
-	} else {
-		var comments []youtrack.Comment
-		truncated := false
-		exactFetched := false
-		if record.Result != nil && record.Result.RemoteID != "" {
-			comment, getErr := client.GetComment(ctx, snapshot.Issue.ID, record.Result.RemoteID)
-			if getErr != nil {
-				return OperatorWriteInfo{}, getErr
+		if observed.ID != "" {
+			outcome.State, outcome.Code = operatorwrite.StateReconciled, "ISSUE_OBSERVED"
+			outcome.RemoteID, outcome.RemoteReadableID = observed.ID, observed.IDReadable
+			evidence = observedEvidence
+		}
+	case operatorwrite.KindIssueUpdate, operatorwrite.KindCommentAdd:
+		issue, err := client.GetIssue(ctx, snapshot.Issue.ID)
+		if err != nil {
+			return OperatorWriteInfo{}, err
+		}
+		if issue.Project.ID != snapshot.Issue.ProjectID || issue.Project.ShortName != snapshot.Issue.ProjectKey {
+			return OperatorWriteInfo{}, errx.Conflict("OPERATOR_PROJECT_CHANGED", "target issue moved from the frozen project")
+		}
+		if snapshot.Kind == operatorwrite.KindIssueUpdate {
+			for _, field := range issue.CustomFields {
+				if field.ID == snapshot.Field.IssueFieldID && field.Type == snapshot.Field.Type {
+					var value struct {
+						ID   string `json:"id"`
+						Type string `json:"$type"`
+					}
+					if json.Unmarshal(field.Value, &value) == nil && value.ID == snapshot.Field.TargetValue.ID && value.Type == snapshot.Field.TargetValue.Type {
+						evidence = "desired_value_observed_without_causal_proof"
+					}
+				}
 			}
-			comments = []youtrack.Comment{comment}
-			exactFetched = true
 		} else {
-			comments, err = client.ListComments(ctx, snapshot.Issue.ID, youtrack.PageOptions{Top: input.Limit + 1, Skip: input.Offset})
-			if err != nil {
-				return OperatorWriteInfo{}, err
-			}
-			truncated = len(comments) > input.Limit
-			if truncated {
-				comments = comments[:input.Limit]
-			}
-		}
-		matches := 0
-		var matchedComment youtrack.Comment
-		for _, comment := range comments {
-			if operatorCommentMatches(comment, record.Plan) {
-				matches++
-				matchedComment = comment
-			}
-		}
-		if matches == 1 && !truncated {
-			// Collection reads use the legacy shape. An exact GET verifies the
-			// required deleted flag and every evidence field before success.
-			verified := matchedComment
-			if !exactFetched {
-				var getErr error
-				verified, getErr = client.GetComment(ctx, snapshot.Issue.ID, matchedComment.ID)
+			var comments []youtrack.Comment
+			truncated := false
+			exactFetched := false
+			if record.Result != nil && record.Result.RemoteID != "" {
+				comment, getErr := client.GetComment(ctx, snapshot.Issue.ID, record.Result.RemoteID)
 				if getErr != nil {
 					return OperatorWriteInfo{}, getErr
 				}
+				comments = []youtrack.Comment{comment}
+				exactFetched = true
+			} else {
+				comments, err = client.ListComments(ctx, snapshot.Issue.ID, youtrack.PageOptions{Top: input.Limit + 1, Skip: input.Offset})
+				if err != nil {
+					return OperatorWriteInfo{}, err
+				}
+				truncated = len(comments) > input.Limit
+				if truncated {
+					comments = comments[:input.Limit]
+				}
 			}
-			if operatorCommentMatches(verified, record.Plan) {
-				outcome.State, outcome.Code = operatorwrite.StateReconciled, "COMMENT_OBSERVED"
-				outcome.RemoteID = verified.ID
-				evidence = "matching_comment_observed"
+			matches := 0
+			var matchedComment youtrack.Comment
+			for _, comment := range comments {
+				if operatorCommentMatches(comment, record.Plan) {
+					matches++
+					matchedComment = comment
+				}
+			}
+			if matches == 1 && !truncated {
+				// Collection reads use the legacy shape. An exact GET verifies the
+				// required deleted flag and every evidence field before success.
+				verified := matchedComment
+				if !exactFetched {
+					var getErr error
+					verified, getErr = client.GetComment(ctx, snapshot.Issue.ID, matchedComment.ID)
+					if getErr != nil {
+						return OperatorWriteInfo{}, getErr
+					}
+				}
+				if operatorCommentMatches(verified, record.Plan) {
+					outcome.State, outcome.Code = operatorwrite.StateReconciled, "COMMENT_OBSERVED"
+					outcome.RemoteID = verified.ID
+					evidence = "matching_comment_observed"
+				}
 			}
 		}
+	default:
+		return OperatorWriteInfo{}, errx.Usage("unsupported operator-write kind")
 	}
 	outcome.EvidenceSHA256 = sha256Hex([]byte(evidence))
 	record, err = s.OperatorWrites.Finalize(ctx, record.Plan.ID, *record.Attempt, outcome, s.currentTime())
@@ -607,10 +813,79 @@ func (s *Service) ReconcileOperatorWrite(ctx context.Context, input OperatorReco
 	return result, nil
 }
 
+// observeCreatedIssue collects one bounded GET-only observation of the issue
+// a create plan may have made. A zero Issue means absent, duplicate, or
+// truncated evidence, which never proves non-application.
+func observeCreatedIssue(ctx context.Context, client *youtrack.Client, plan operatorwrite.Plan, attempt operatorwrite.Attempt, remoteID string, limit int) (youtrack.Issue, string, error) {
+	snapshot := plan.Snapshot
+	project, err := client.GetProject(ctx, snapshot.Project.ID)
+	if err != nil {
+		return youtrack.Issue{}, "", err
+	}
+	if project.ID != snapshot.Project.ID || project.ShortName != snapshot.Project.Key {
+		return youtrack.Issue{}, "", errx.Conflict("OPERATOR_PROJECT_CHANGED", "target project key changed from the frozen project")
+	}
+	expected := operatorCreateInput(plan)
+	// Workflows and people may change fields after creation, so identity
+	// evidence is the marker-bearing text, project, and reporter only.
+	identity := expected
+	identity.CustomFields = nil
+	// A search hit is only text evidence: an older issue edited to carry the
+	// marker was not created by this attempt. No clock-skew allowance: a
+	// server clock trailing the claim leaves the outcome for the operator.
+	// YouTrack reports milliseconds, so the cutoff rounds the claim up.
+	notBefore := attempt.ClaimedAt.UnixMilli()
+	if attempt.ClaimedAt.After(time.UnixMilli(notBefore)) {
+		notBefore++
+	}
+	var candidates []youtrack.Issue
+	if remoteID != "" {
+		issue, err := client.GetIssue(ctx, remoteID)
+		if err != nil {
+			return youtrack.Issue{}, "", err
+		}
+		candidates = []youtrack.Issue{issue}
+	} else {
+		issues, err := client.SearchIssues(ctx, "project: "+snapshot.Project.Key+` "`+plan.ID+`"`, youtrack.PageOptions{Top: limit + 1})
+		if err != nil {
+			return youtrack.Issue{}, "", err
+		}
+		if len(issues) > limit {
+			return youtrack.Issue{}, "", nil
+		}
+		candidates = issues
+	}
+	matches := 0
+	var match youtrack.Issue
+	for _, issue := range candidates {
+		if youtrack.CreatedIssueMatches(issue, identity) && (remoteID != "" || issue.Created >= notBefore) {
+			matches++
+			match = issue
+		}
+	}
+	if matches != 1 {
+		return youtrack.Issue{}, "", nil
+	}
+	if remoteID == "" {
+		verified, err := client.GetIssue(ctx, match.ID)
+		if err != nil {
+			return youtrack.Issue{}, "", err
+		}
+		if verified.ID != match.ID || verified.Created < notBefore || !youtrack.CreatedIssueMatches(verified, identity) {
+			return youtrack.Issue{}, "", nil
+		}
+		match = verified
+	}
+	if youtrack.CreatedIssueMatches(match, expected) {
+		return match, "matching_issue_observed", nil
+	}
+	return match, "matching_issue_observed_fields_differ", nil
+}
+
 func operatorCommentMatches(comment youtrack.Comment, plan operatorwrite.Plan) bool {
 	binding := plan.Snapshot.Binding
 	return comment.ID != "" && !comment.Deleted && comment.Text != nil && *comment.Text == plan.Request.CommentText &&
-		strings.Contains(*comment.Text, operatorwrite.CommentMarker(plan.ID)) && comment.Author != nil && comment.Author.ID == binding.AccountID &&
+		strings.Contains(*comment.Text, operatorwrite.Marker(plan.ID)) && comment.Author != nil && comment.Author.ID == binding.AccountID &&
 		comment.Author.Login == binding.AccountLogin && comment.Visibility != nil && comment.Visibility.Type == "UnlimitedVisibility" &&
 		len(comment.Visibility.PermittedGroups) == 0 && len(comment.Visibility.PermittedUsers) == 0
 }

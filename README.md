@@ -185,8 +185,9 @@ editions remain Remote-MCP-only.
 
 ## Operator-confirmed writes
 
-This source tree adds `operator-write` for single Stage/State/Enum updates and
-public comment additions on the standard macOS CGO build. The previously
+This source tree adds `operator-write` for single Stage/State/Enum updates,
+public comment additions and issue creation in allowlisted projects on the
+standard macOS CGO build. The previously
 released v0.3.0 is read-only; source changes reach installed Homebrew binaries
 only after a new release and tap update. Check `version` and `capabilities`
 instead of assuming that an installed binary has these commands.
@@ -198,8 +199,8 @@ hostile same-user processes or restored local state. A separate authenticated
 write profile is required; the existing read profile stays unchanged.
 
 See [the operator-write decision, threat model and command flow](docs/operator-writes.md)
-for setup, exact field snapshots, marked comments and non-retryable outcomes.
-Issue creation, editing existing comments and batch changes are not included.
+for setup, exact field snapshots, marked comments and issues, and non-retryable
+outcomes. Editing existing comments and batch changes are not included.
 
 ## Native-presence writes remain closed
 

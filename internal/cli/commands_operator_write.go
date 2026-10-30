@@ -16,15 +16,17 @@ type operatorWriteView struct {
 }
 
 func (view operatorWriteView) Fields() []output.Field {
-	var field output.Field
-	commentText := ""
-	field.Name = "field"
+	field := output.Field{Name: "field"}
+	fields := output.Field{Name: "fields", OnRequest: true}
+	commentText, summary, description := "", "", ""
 	if view.Snapshot != nil {
 		field.Raw = view.Snapshot.Field
+		fields.Raw, fields.OnRequest = view.Snapshot.Fields, len(view.Snapshot.Fields) == 0
 	}
 	if view.Plan != nil {
 		field.Raw = view.Plan.Snapshot.Field
-		commentText = view.Plan.Request.CommentText
+		fields.Raw, fields.OnRequest = view.Plan.Snapshot.Fields, len(view.Plan.Snapshot.Fields) == 0
+		commentText, summary, description = view.Plan.Request.CommentText, view.Plan.Request.Summary, view.Plan.Request.Description
 	}
 	return []output.Field{
 		{Name: "trust", Value: untrustedYouTrackContent, Raw: untrustedYouTrackContent, Always: true},
@@ -42,8 +44,12 @@ func (view operatorWriteView) Fields() []output.Field {
 		{Name: "project_key", Value: view.ProjectKey, Raw: view.ProjectKey},
 		{Name: "non_replayable", Value: strconv.FormatBool(view.NonReplayable), Raw: view.NonReplayable, Always: true},
 		{Name: "remote_id", Value: view.RemoteID, Raw: view.RemoteID},
+		{Name: "remote_readable_id", Value: view.RemoteReadableID, Raw: view.RemoteReadableID},
 		{Name: "output_path", Value: view.OutputPath, Raw: view.OutputPath},
 		field,
+		fields,
+		{Name: "summary", Value: summary, Raw: summary, OnRequest: summary == ""},
+		{Name: "description", Value: description, Raw: description, OnRequest: description == ""},
 		{Name: "comment_text", Value: commentText, Raw: commentText, OnRequest: commentText == ""},
 		{Name: "evidence", Value: view.Evidence, Raw: view.Evidence, OnRequest: view.Evidence == ""},
 		{Name: "snapshot", Raw: view.Snapshot, OnRequest: true},
@@ -64,15 +70,30 @@ func (a *App) newOperatorWriteCommand() *cobra.Command {
 
 func (a *App) newOperatorSnapshotCommand() *cobra.Command {
 	var input application.OperatorSnapshotInput
-	command := &cobra.Command{Use: "snapshot", Short: "Read one exact issue and freeze a supported write target", Args: usageArgs(cobra.NoArgs), RunE: func(cmd *cobra.Command, _ []string) error {
+	var fieldNames, valueNames, fieldIDs, valueIDs []string
+	command := &cobra.Command{Use: "snapshot", Short: "Read one exact issue or project and freeze a supported write target", Args: usageArgs(cobra.NoArgs), RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := a.resolveOperationProfile(cmd, "write"); err != nil {
 			return err
 		}
 		if a.assumeYes || a.dryRun {
 			return errx.Usage("operator-write snapshot does not accept --yes or --dry-run")
 		}
-		if input.Kind == "" || input.IssueID == "" || input.OutputPath == "" {
-			return errx.Usage("operator-write snapshot requires --kind, --id, and --out")
+		if input.Kind == "" || input.IssueID == "" && input.ProjectID == "" || input.OutputPath == "" {
+			return errx.Usage("operator-write snapshot requires --kind, --id or --project, and --out")
+		}
+		if input.Kind != "issue.create" {
+			// Single-field kinds keep the scalar flags' last-value-wins meaning.
+			fieldNames, valueNames, fieldIDs, valueIDs = lastValue(fieldNames), lastValue(valueNames), lastValue(fieldIDs), lastValue(valueIDs)
+		}
+		// Selectors pair by position, so one call uses names or IDs, never both.
+		if len(fieldNames) != len(valueNames) || len(fieldIDs) != len(valueIDs) || len(fieldNames) > 0 && len(fieldIDs) > 0 {
+			return errx.Usage("pair each --field with one --value, or each --field-id with one --value-id, without mixing names and IDs")
+		}
+		for index := range fieldNames {
+			input.Fields = append(input.Fields, application.OperatorFieldSelection{FieldName: fieldNames[index], ValueName: valueNames[index]})
+		}
+		for index := range fieldIDs {
+			input.Fields = append(input.Fields, application.OperatorFieldSelection{FieldID: fieldIDs[index], ValueID: valueIDs[index]})
 		}
 		if err := a.out.Validate(operatorWriteView{}); err != nil {
 			return err
@@ -85,14 +106,24 @@ func (a *App) newOperatorSnapshotCommand() *cobra.Command {
 		return a.renderOperatorWrite(result)
 	}}
 	flags := command.Flags()
-	flags.StringVar(&input.Kind, "kind", "", "supported write kind: issue.update or comment.add")
-	flags.StringVar(&input.IssueID, "id", "", "exact issue entity or readable ID")
-	flags.StringVar(&input.FieldName, "field", "", "exact field name, for example Stage")
-	flags.StringVar(&input.ValueName, "value", "", "exact target bundle value name")
-	flags.StringVar(&input.FieldID, "field-id", "", "immutable project custom-field ID")
-	flags.StringVar(&input.ValueID, "value-id", "", "immutable target bundle value ID")
+	flags.StringVar(&input.Kind, "kind", "", "supported write kind: issue.create, issue.update, or comment.add")
+	flags.StringVar(&input.IssueID, "id", "", "exact issue entity or readable ID for issue.update or comment.add")
+	flags.StringVar(&input.ProjectID, "project", "", "exact project entity ID or key for issue.create")
+	flags.StringArrayVar(&fieldNames, "field", nil, "exact field name, for example Stage; repeatable for issue.create, last wins otherwise")
+	flags.StringArrayVar(&valueNames, "value", nil, "exact target bundle value name, paired with --field")
+	flags.StringArrayVar(&fieldIDs, "field-id", nil, "immutable project custom-field ID; repeatable for issue.create, last wins otherwise")
+	flags.StringArrayVar(&valueIDs, "value-id", nil, "immutable target bundle value ID, paired with --field-id")
 	flags.StringVar(&input.OutputPath, "out", "", "new exclusive 0600 snapshot path in an existing private directory")
 	return command
+}
+
+// lastValue keeps the scalar flag meaning: the last occurrence wins, and an
+// empty last occurrence clears the selector.
+func lastValue(values []string) []string {
+	if len(values) == 0 || values[len(values)-1] == "" {
+		return nil
+	}
+	return values[len(values)-1:]
 }
 
 func (a *App) newOperatorPrepareCommand() *cobra.Command {

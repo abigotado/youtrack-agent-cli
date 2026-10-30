@@ -445,7 +445,7 @@ func TestCreateAndUpdateIssueUseTypedPayloads(t *testing.T) {
 		{
 			name: "create", path: "/youtrack/api/issues", response: validIssueJSON("APP-12", "Created"),
 			invoke: func(ctx context.Context, client *Client) error {
-				_, err := client.CreateIssue(ctx, CreateIssueInput{ProjectID: "0-3", Summary: "Created", Description: stringPointer("body")})
+				_, err := client.CreateIssue(ctx, CreateIssueInput{ProjectID: "0-3", ProjectKey: "APP", Summary: "Created", Description: stringPointer("body"), ExpectedReporterID: "1-2", ExpectedReporterLogin: "alice"})
 				return err
 			},
 			assert: func(t *testing.T, payload map[string]any) {

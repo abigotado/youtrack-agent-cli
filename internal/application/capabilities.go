@@ -42,6 +42,9 @@ func (s *Service) Capabilities(ctx context.Context, name string) (CapabilitiesIn
 	result.AccountID, result.AccountLogin = selected.ExpectedAccountID, selected.ExpectedLogin
 	result.CredentialGenerationConfigured = selected.CredentialGeneration != ""
 	if selected.Executor == profile.ExecutorRESTBestEffort && selected.Assurance == profile.AssuranceBestEffort {
+		if selected.HasCapability(profile.CapabilityIssueCreate) {
+			result.Kinds = append(result.Kinds, "issue.create")
+		}
 		if selected.HasCapability(profile.CapabilityIssueUpdate) {
 			result.Kinds = append(result.Kinds, "issue.update")
 		}

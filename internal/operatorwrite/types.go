@@ -17,13 +17,20 @@ const (
 	MaxRequestBytes  = 256 * 1024
 	MaxPlanBytes     = 256 * 1024
 	MaxRecordBytes   = 512 * 1024
-	// MaxCommentBytes includes the visible operator marker added by Prepare.
-	MaxCommentBytes = 32 * 1024
+	// MaxCommentBytes and MaxDescriptionBytes include the visible operator
+	// marker added by Prepare.
+	MaxCommentBytes     = 32 * 1024
+	MaxDescriptionBytes = 32 * 1024
+	MaxSummaryBytes     = 1024
+	MaxCreateFields     = 8
+	// MaxCreateFieldNameBytes matches the REST client's identifier bound.
+	MaxCreateFieldNameBytes = 128
 )
 
 type Kind string
 
 const (
+	KindIssueCreate Kind = "issue.create"
 	KindIssueUpdate Kind = "issue.update"
 	KindCommentAdd  Kind = "comment.add"
 )
@@ -53,6 +60,12 @@ type Issue struct {
 	Updated    int64  `json:"updated"`
 }
 
+// Project is the exact allowlisted target of an issue.create snapshot.
+type Project struct {
+	ID  string `json:"id"`
+	Key string `json:"key"`
+}
+
 type Value struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -61,6 +74,7 @@ type Value struct {
 }
 
 // Field freezes only the touched field projection and selected target value.
+// A create field has no issue-field identity or current value yet.
 type Field struct {
 	IssueFieldID     string `json:"issue_field_id"`
 	ProjectFieldID   string `json:"project_field_id"`
@@ -81,18 +95,32 @@ type Field struct {
 }
 
 type Snapshot struct {
-	Version    int       `json:"version"`
-	Lane       string    `json:"lane"`
-	Kind       Kind      `json:"kind"`
-	Binding    Binding   `json:"binding"`
-	Issue      Issue     `json:"issue"`
+	Version int     `json:"version"`
+	Lane    string  `json:"lane"`
+	Kind    Kind    `json:"kind"`
+	Binding Binding `json:"binding"`
+	// Issue is zero, and omitted, only for issue.create; existing update and
+	// comment plans therefore keep their exact bytes and digests.
+	Issue      Issue     `json:"issue,omitzero"`
+	Project    *Project  `json:"project,omitempty"`
 	Field      *Field    `json:"field,omitempty"`
+	Fields     []Field   `json:"fields,omitempty"`
 	CapturedAt time.Time `json:"captured_at"`
+}
+
+// ProjectRef is the exact project the snapshot's policy check binds.
+func (s Snapshot) ProjectRef() (id, key string) {
+	if s.Kind == KindIssueCreate && s.Project != nil {
+		return s.Project.ID, s.Project.Key
+	}
+	return s.Issue.ProjectID, s.Issue.ProjectKey
 }
 
 type Request struct {
 	Kind        Kind   `json:"kind"`
 	CommentText string `json:"comment_text,omitempty"`
+	Summary     string `json:"summary,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type Plan struct {
@@ -127,10 +155,12 @@ type Attempt struct {
 }
 
 type Result struct {
-	State          State  `json:"state"`
-	Code           string `json:"code"`
-	RemoteID       string `json:"remote_id,omitempty"`
-	EvidenceSHA256 string `json:"evidence_sha256,omitempty"`
+	State    State  `json:"state"`
+	Code     string `json:"code"`
+	RemoteID string `json:"remote_id,omitempty"`
+	// RemoteReadableID is the created issue's readable ID, for example TAC-12.
+	RemoteReadableID string `json:"remote_readable_id,omitempty"`
+	EvidenceSHA256   string `json:"evidence_sha256,omitempty"`
 }
 
 type Record struct {

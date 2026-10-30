@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/abigotado/youtrack-agent-cli/internal/endpoint"
@@ -43,7 +44,7 @@ func validText(s string, cap int, nonblank bool) bool {
 
 func ValidateSnapshot(s Snapshot) error {
 	b := s.Binding
-	if s.Version != Version || s.Lane != Lane || (s.Kind != KindIssueUpdate && s.Kind != KindCommentAdd) ||
+	if s.Version != Version || s.Lane != Lane ||
 		!protocolvalue.IsIdentifier(b.ProfileName) || !protocolvalue.IsSHA256(b.ProfileIdentitySHA256) ||
 		!validGeneration(b.CredentialGeneration) || !protocolvalue.IsIdentifier(b.AccountID) || !validText(b.AccountLogin, 256, true) || strings.ContainsAny(b.AccountLogin, " \t\r\n") ||
 		!protocolvalue.IsSHA256(b.PolicySHA256) || b.PolicyRevision == 0 ||
@@ -51,34 +52,58 @@ func ValidateSnapshot(s Snapshot) error {
 		endpoint.ValidateMCPURL(b.InstanceURL, b.MCPURL) != nil ||
 		!validText(b.OAuthClientID, 128, true) ||
 		endpoint.ValidateOAuthTopology(b.OAuthIssuerURL, b.OAuthAuthorizationEndpoint, b.OAuthTokenEndpoint) != nil ||
-		!protocolvalue.IsIdentifier(s.Issue.ID) || !protocolvalue.IsIdentifier(s.Issue.ReadableID) ||
-		!protocolvalue.IsIdentifier(s.Issue.ProjectID) || !protocolvalue.IsProjectKey(s.Issue.ProjectKey) ||
-		s.Issue.Updated <= 0 || s.CapturedAt.IsZero() || s.CapturedAt.Location() != time.UTC {
+		s.CapturedAt.IsZero() || s.CapturedAt.Location() != time.UTC {
 		return invalid()
 	}
-	if s.Kind == KindCommentAdd {
-		if s.Field != nil {
+	switch s.Kind {
+	case KindIssueCreate:
+		if s.Issue != (Issue{}) || s.Field != nil || s.Project == nil || !protocolvalue.IsIdentifier(s.Project.ID) ||
+			!protocolvalue.IsProjectKey(s.Project.Key) || len(s.Fields) > MaxCreateFields {
 			return invalid()
 		}
-	} else {
+		// The create payload addresses fields by name, so names are unique and
+		// fit the client's identifier bound.
+		projectFields, globalFields, names := map[string]bool{}, map[string]bool{}, map[string]bool{}
+		for _, f := range s.Fields {
+			if f.IssueFieldID != "" || f.CurrentValue != nil || !validFieldSchema(f) || len(f.Name) > MaxCreateFieldNameBytes ||
+				projectFields[f.ProjectFieldID] || globalFields[f.GlobalFieldID] || names[f.Name] {
+				return invalid()
+			}
+			projectFields[f.ProjectFieldID], globalFields[f.GlobalFieldID], names[f.Name] = true, true, true
+		}
+	case KindIssueUpdate:
 		f := s.Field
-		if f == nil || !protocolvalue.IsIdentifier(f.IssueFieldID) || !protocolvalue.IsIdentifier(f.ProjectFieldID) ||
-			!protocolvalue.IsIdentifier(f.GlobalFieldID) || !validText(f.Name, 256, true) ||
-			(f.Type != "StateIssueCustomField" && f.Type != "SingleEnumIssueCustomField") ||
-			f.IsMultiValue || f.FieldTypeType != "FieldType" || !protocolvalue.IsIdentifier(f.BundleID) ||
-			f.FieldTypeID != f.ValueType+"[1]" ||
-			f.Type == "StateIssueCustomField" && (f.ProjectFieldType != "StateProjectCustomField" || f.ValueType != "state" || f.BundleType != "StateBundle") ||
-			f.Type == "SingleEnumIssueCustomField" && (f.ProjectFieldType != "EnumProjectCustomField" || f.ValueType != "enum" || f.BundleType != "EnumBundle") ||
-			!validValue(f.TargetValue, f.Type) || f.TargetValue.Archived || f.CurrentValue == nil && !f.CanBeEmpty ||
-			f.CurrentValue != nil && !validValue(*f.CurrentValue, f.Type) {
+		if !validIssue(s.Issue) || s.Project != nil || s.Fields != nil || f == nil || !protocolvalue.IsIdentifier(f.IssueFieldID) || !validFieldSchema(*f) ||
+			f.CurrentValue == nil && !f.CanBeEmpty || f.CurrentValue != nil && !validValue(*f.CurrentValue, f.Type) {
 			return invalid()
 		}
+	case KindCommentAdd:
+		if !validIssue(s.Issue) || s.Project != nil || s.Fields != nil || s.Field != nil {
+			return invalid()
+		}
+	default:
+		return invalid()
 	}
 	raw, err := json.Marshal(s)
 	if err != nil || len(raw) > MaxSnapshotBytes {
 		return invalid()
 	}
 	return nil
+}
+
+func validIssue(i Issue) bool {
+	return protocolvalue.IsIdentifier(i.ID) && protocolvalue.IsIdentifier(i.ReadableID) &&
+		protocolvalue.IsIdentifier(i.ProjectID) && protocolvalue.IsProjectKey(i.ProjectKey) && i.Updated > 0
+}
+
+// validFieldSchema checks the touched single State/Enum schema and its
+// nonarchived target, shared by update and create fields.
+func validFieldSchema(f Field) bool {
+	return protocolvalue.IsIdentifier(f.ProjectFieldID) && protocolvalue.IsIdentifier(f.GlobalFieldID) && validText(f.Name, 256, true) &&
+		(f.Type == "StateIssueCustomField" && f.ProjectFieldType == "StateProjectCustomField" && f.ValueType == "state" && f.BundleType == "StateBundle" ||
+			f.Type == "SingleEnumIssueCustomField" && f.ProjectFieldType == "EnumProjectCustomField" && f.ValueType == "enum" && f.BundleType == "EnumBundle") &&
+		!f.IsMultiValue && f.FieldTypeType == "FieldType" && protocolvalue.IsIdentifier(f.BundleID) && f.FieldTypeID == f.ValueType+"[1]" &&
+		validValue(f.TargetValue, f.Type) && !f.TargetValue.Archived
 }
 
 func validValue(v Value, fieldType string) bool {
@@ -97,8 +122,48 @@ func validGeneration(value string) bool {
 	return err == nil && len(raw) == 32 && base64.RawURLEncoding.EncodeToString(raw) == value
 }
 
-// CommentMarker is public evidence for bounded reconciliation, not an approval.
-func CommentMarker(id string) string { return "[youtrack operator-write " + id + "]" }
+// Marker is public evidence for bounded reconciliation, not an approval.
+func Marker(id string) string { return "[youtrack operator-write " + id + "]" }
+
+// validSummary accepts one canonical line, so an exact response comparison
+// cannot fail on server-side trimming.
+func validSummary(s string) bool {
+	if !validText(s, MaxSummaryBytes, true) || strings.TrimSpace(s) != s {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp) {
+			return false
+		}
+	}
+	return true
+}
+
+// validDescriptionBody accepts an empty body or canonical LF-only text without
+// surrounding whitespace, so the marker suffix stays exact after storage.
+func validDescriptionBody(s string) bool {
+	return s == "" || validText(s, MaxDescriptionBytes, true) && strings.TrimSpace(s) == s && !strings.ContainsRune(s, '\r')
+}
+
+func finalDescription(body, id string) string {
+	if body == "" {
+		return Marker(id)
+	}
+	return body + "\n\n" + Marker(id)
+}
+
+func validRequest(q Request) bool {
+	switch q.Kind {
+	case KindIssueCreate:
+		return q.CommentText == "" && validSummary(q.Summary)
+	case KindIssueUpdate:
+		return q.CommentText == "" && q.Summary == "" && q.Description == ""
+	case KindCommentAdd:
+		return q.Summary == "" && q.Description == "" && validText(q.CommentText, MaxCommentBytes, true)
+	default:
+		return false
+	}
+}
 
 // Prepare is network-free. The supplied snapshot fixes the kind and target.
 func Prepare(snapshot Snapshot, request Request, now time.Time) (Plan, error) {
@@ -112,15 +177,26 @@ func Prepare(snapshot Snapshot, request Request, now time.Time) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	if request.Kind == KindCommentAdd {
-		if !validText(request.CommentText, MaxCommentBytes, true) {
+	if !validRequest(request) {
+		return Plan{}, invalid()
+	}
+	switch request.Kind {
+	case KindIssueCreate:
+		if !validDescriptionBody(request.Description) {
 			return Plan{}, invalid()
 		}
-		request.CommentText += "\n\n" + CommentMarker(id)
+		request.Description = finalDescription(request.Description, id)
+		if len(request.Description) > MaxDescriptionBytes {
+			return Plan{}, invalid()
+		}
+	case KindCommentAdd:
+		request.CommentText += "\n\n" + Marker(id)
 		if len(request.CommentText) > MaxCommentBytes {
 			return Plan{}, invalid()
 		}
-	} else if request.CommentText != "" {
+	case KindIssueUpdate:
+		// The frozen snapshot is the complete update payload.
+	default:
 		return Plan{}, invalid()
 	}
 	// Deep-copy the snapshot so subsequent caller edits cannot change the plan.
@@ -158,13 +234,25 @@ func ValidatePlan(p Plan) error {
 		p.CreatedAt.Sub(p.Snapshot.CapturedAt) >= PlanTTL || !protocolvalue.IsSHA256(p.SHA256) {
 		return invalid()
 	}
-	if p.Request.Kind == KindCommentAdd {
-		marker := "\n\n" + CommentMarker(p.ID)
-		if !validText(p.Request.CommentText, MaxCommentBytes, true) || !strings.HasSuffix(p.Request.CommentText, marker) || strings.Count(p.Request.CommentText, CommentMarker(p.ID)) != 1 ||
+	if !validRequest(p.Request) {
+		return invalid()
+	}
+	switch p.Request.Kind {
+	case KindIssueCreate:
+		d := p.Request.Description
+		body := strings.TrimSuffix(strings.TrimSuffix(d, Marker(p.ID)), "\n\n")
+		if len(d) > MaxDescriptionBytes || strings.Count(d, Marker(p.ID)) != 1 || !validDescriptionBody(body) || finalDescription(body, p.ID) != d {
+			return invalid()
+		}
+	case KindCommentAdd:
+		marker := "\n\n" + Marker(p.ID)
+		if !strings.HasSuffix(p.Request.CommentText, marker) || strings.Count(p.Request.CommentText, Marker(p.ID)) != 1 ||
 			!validText(strings.TrimSuffix(p.Request.CommentText, marker), MaxCommentBytes, true) {
 			return invalid()
 		}
-	} else if p.Request.CommentText != "" {
+	case KindIssueUpdate:
+		// validRequest already rejects any text for a frozen field update.
+	default:
 		return invalid()
 	}
 	sha, err := digest(p)
@@ -266,8 +354,7 @@ func DecodeRequest(r io.Reader) (Request, error) {
 	if err := decode(r, MaxRequestBytes, &q); err != nil {
 		return Request{}, err
 	}
-	if (q.Kind != KindIssueUpdate && q.Kind != KindCommentAdd) || q.Kind == KindIssueUpdate && q.CommentText != "" ||
-		q.Kind == KindCommentAdd && !validText(q.CommentText, MaxCommentBytes, true) {
+	if !validRequest(q) || q.Kind == KindIssueCreate && !validDescriptionBody(q.Description) {
 		return Request{}, invalid()
 	}
 	return q, nil
